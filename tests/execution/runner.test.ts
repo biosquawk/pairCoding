@@ -176,3 +176,41 @@ test('Runner rejects symlink/junction cwd and never reads linked reports outside
   assert.equal((await finished(runner, run)).testOutcome, 'UNKNOWN');
   assert.equal(readFileSync(path.join(outside, 'external.xml'), 'utf8'), passedXML);
 });
+
+// AC-019 regression: aggregate counters are assertions about the subtree, not extra cases.
+for (const level of ['root', 'nested'] as const) {
+  for (const [attribute, wrong] of [['tests', '2'], ['failures', '1'], ['errors', '1'], ['skipped', '1']] as const) {
+    test(`JUnit aggregate ${level} rejects contradictory ${attribute}`, async t => {
+      const { runner } = fixture(t);
+      const counters = { tests: '1', failures: '0', errors: '0', skipped: '0', [attribute]: wrong };
+      const attrs = Object.entries(counters).map(([key, value]) => `${key}="${value}"`).join(' ');
+      const leaf = '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="leaf"/></testsuite>';
+      const xml = level === 'root' ? `<testsuites ${attrs}>${leaf}</testsuites>` :
+        `<testsuites tests="1" failures="0" errors="0" skipped="0"><testsuite ${attrs}>${leaf}</testsuite></testsuites>`;
+      assert.equal(parseJUnit(xml), null, 'contradictory aggregate must be unrecognized');
+      const run = start(runner, profile(`require('node:fs').writeFileSync(process.env.PAIRCOACH_RUN_ID+'.xml',${JSON.stringify(xml)})`,
+        { kind: 'RUN_TESTS', testReportFormat: 'JUNIT_XML', testReportGlob: '{runId}.xml' }));
+      const result = await finished(runner, run);
+      assert.notEqual(result.testOutcome, 'PASSED', 'fresh contradictory report must never pass');
+      assert.equal(result.testOutcome, 'UNKNOWN');
+      assert.equal(result.testCount, null);
+    });
+  }
+}
+
+test('JUnit aggregate valid nested control counts leaves once and preserves distinct failure/error/skipped totals', async t => {
+  const leaf = '<testsuite tests="1" failures="0" errors="0" skipped="0"><testcase name="pass"/></testsuite>';
+  const passed = `<testsuites tests="2" failures="0" errors="0" skipped="0"><testsuite tests="2" failures="0" errors="0" skipped="0">${leaf}${leaf}</testsuite></testsuites>`;
+  assert.deepEqual(parseJUnit(passed), { count: 2, failures: 0, skipped: 0 });
+  const { runner } = fixture(t);
+  const run = start(runner, profile(`require('node:fs').writeFileSync(process.env.PAIRCOACH_RUN_ID+'.xml',${JSON.stringify(passed)})`,
+    { kind: 'RUN_TESTS', testReportFormat: 'JUNIT_XML', testReportGlob: '{runId}.xml' }));
+  const result = await finished(runner, run);
+  assert.equal(result.testOutcome, 'PASSED'); assert.equal(result.testCount, 2);
+  const outcomes = '<testsuite tests="3" failures="1" errors="1" skipped="1"><testcase><failure/></testcase><testcase><error/></testcase><testcase><skipped/></testcase></testsuite>';
+  const mixed = `<testsuites tests="4" failures="1" errors="1" skipped="1"><testsuite tests="4" failures="1" errors="1" skipped="1">${leaf}${outcomes}</testsuite></testsuites>`;
+  assert.deepEqual(parseJUnit(mixed), { count: 4, failures: 2, skipped: 1 });
+  // Equal failure+error sum cannot hide a wrong individual declared counter.
+  assert.equal(parseJUnit(mixed.replace('failures="1" errors="1"', 'failures="2" errors="0"')), null);
+  assert.deepEqual(parseJUnit(`<testsuites><testsuite>${leaf}</testsuite></testsuites>`), { count: 1, failures: 0, skipped: 0 });
+});
