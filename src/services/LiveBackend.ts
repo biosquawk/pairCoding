@@ -26,6 +26,9 @@ type FinishAttempt = {
   observedReport: Wire.Report | null; reading: boolean; readAgain: boolean;
 };
 class HttpDeadlineError extends Error {}
+// A received rejection status is authoritative even when its error body is lost.
+// Fetch failures and successful responses with unreadable bodies are NOT rejections.
+class HttpRejectedError extends Error {}
 const id = () => globalThis.crypto.randomUUID();
 
 // UTF-16 positions, exactly as Monaco and the wire contract. Reject clamped/invalid ranges.
@@ -138,10 +141,14 @@ export class LiveBackend {
       const response = await this.fetcher(`${this.baseUrl}${path}`, { method, signal: controller.signal, headers: {
         ...(authenticate ? { Authorization: `Bearer ${this.token ?? ''}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {})
       }, ...(body ? { body: JSON.stringify(body) } : {}) });
-      const data = await response.json();
-      if (!response.ok) throw new Error(`${data.code ?? response.status}: ${data.message ?? 'Żądanie odrzucone'}`);
-      return data as T;
+      if (!response.ok) {
+        let data: { code?: string; message?: string } | null = null;
+        try { data = await response.json(); } catch { /* status still proves rejection */ }
+        throw new HttpRejectedError(`${data?.code ?? response.status}: ${data?.message ?? 'Żądanie odrzucone'}`);
+      }
+      return await response.json() as T;
     } catch (error) {
+      if (error instanceof HttpRejectedError) throw error;
       if (controller.signal.aborted) throw new HttpDeadlineError('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
       throw error;
     } finally { clearTimeout(timer); }
@@ -664,7 +671,7 @@ export class LiveBackend {
   async stopExecution() { if (!this.state.activeRun) return; try { this.state.activeRun = mapRun(await this.http<Wire.Run>(`/api/run/${encodeURIComponent(this.state.activeRun.runId)}/stop`, 'POST', this.commandBody()), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
   async finishSession(reason: EndReason) {
     // A second click is NOT permission to repeat an unresolved HTTP mutation.
-    if (this.finishStarting || this.finishAttempt || this.stopped) return;
+    if (this.finishStarting || this.finishAttempt || this.stopped || this.session?.lifecycle === 'FINISHED') return;
     this.finishStarting = true;
     let attempt: FinishAttempt | null = null;
     try {
@@ -682,15 +689,16 @@ export class LiveBackend {
       this.state.report = mapReport(this.latestFinishReport(attempt, report)); this.finishAttempt = null; this.publish();
     } catch (error) {
       if ((attempt && this.finishAttempt !== attempt) || this.stopped) return;
-      if (attempt && error instanceof HttpDeadlineError) this.unknownFinish(attempt);
+      if (attempt && !(error instanceof HttpRejectedError)) this.unknownFinish(attempt,
+        error instanceof HttpDeadlineError ? 'Brak odpowiedzi serwera (5 s).' : 'Nie odebrano poprawnej odpowiedzi serwera.');
       else { if (attempt) this.finishAttempt = null; this.fail(error); }
     } finally { this.finishStarting = false; }
   }
-  private unknownFinish(attempt: FinishAttempt) {
+  private unknownFinish(attempt: FinishAttempt, cause = 'Nie potwierdzono odpowiedzi serwera.') {
     attempt.unknown = true;
     attempt.notice = attempt.replaced
       ? `SESSION_REPLACED: Wynik zakończenia poprzedniej sesji ${attempt.sessionId} jest nieznany. Nie ponowiono operacji.`
-      : `Brak odpowiedzi serwera (5 s). Wynik zakończenia jest nieznany; trwa sprawdzanie stanu, bez ponawiania operacji (${attempt.requestId}).`;
+      : `${cause} Wynik zakończenia jest nieznany; trwa sprawdzanie stanu, bez ponawiania operacji (${attempt.requestId}).`;
     if (!this.proposalDecision?.notice && !this.decisionResultError && this.state.connectionError === attempt.previousError) this.fail(new Error(attempt.notice));
     else this.publish();
     void this.reconcileFinish();
