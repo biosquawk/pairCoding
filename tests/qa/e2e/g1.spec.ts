@@ -15,6 +15,20 @@ test.beforeEach(async ({ page }) => {
   }).toBe('value = 0\n');
 });
 
+// Precondition regression, not a substitute for any of the four AC scenarios below.
+test('GATE001 precondition: Start sesji reaches real RUNNING session and accessible Monaco input', async ({ page }) => {
+  await openEditor(page);
+  const bootstrap = await page.request.get('/dev/bootstrap');
+  expect(bootstrap.status()).toBe(200);
+  const { token } = await bootstrap.json();
+  const reply = await page.request.get('/api/session', { headers: { Authorization: `Bearer ${token}` } });
+  expect(reply.status()).toBe(200);
+  const session = await reply.json();
+  expect(session.lifecycle).toBe('RUNNING');
+  expect(session.timer.status).toBe('RUNNING');
+  await expect(editorInput(page)).toBeVisible();
+});
+
 test('AC-004 TEST-004: LIVE single-flight, delayed real ACK, newest buffer uses ACK version', async ({ page }) => {
   const relay = new Relay(); let heldId: string | undefined;
   let withholding = false;

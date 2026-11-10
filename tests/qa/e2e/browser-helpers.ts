@@ -5,7 +5,9 @@ import path from 'node:path';
 export const manifest = () => JSON.parse(readFileSync('tests/qa/.runtime/browser-manifest.json', 'utf8'));
 export const disk = () => readFileSync(path.join(manifest().rootPath, 'main.py'), 'utf8').replace(/\r\n/g, '\n');
 export const editorText = async (page: Page) => (await page.locator('.monaco-editor .view-lines').innerText()).replace(/\u00a0/g, ' ');
-export const editorInput = (page: Page) => page.locator('.monaco-editor textarea.inputarea');
+// Monaco can use either native EditContext DIV or legacy textarea; both expose this role/name.
+export const editorInput = (page: Page) => page.locator('.monaco-editor')
+  .getByRole('textbox', { name: 'Edytor pliku main.py', exact: true });
 
 export async function openEditor(page: Page) {
   await page.goto('/');
@@ -13,7 +15,21 @@ export async function openEditor(page: Page) {
   await expect(page.locator('.monaco-editor')).toBeVisible();
   await expect.poll(() => editorText(page)).toContain('value = 0');
   const start = page.getByRole('button', { name: 'Start sesji', exact: true });
-  if (await start.isVisible()) await start.click();
+  if (await start.isVisible()) {
+    // Register before clicking; a timer RESUME frame is not a successful session START.
+    const [response] = await Promise.all([
+      page.waitForResponse(reply => new URL(reply.url()).pathname === '/api/session/start'
+        && reply.request().method() === 'POST'),
+      start.click(),
+    ]);
+    expect(response.status()).toBe(200);
+    const session = await response.json();
+    expect(session.lifecycle).toBe('RUNNING');
+    expect(session.timer.status).toBe('RUNNING');
+  }
+  // Later tests can reconnect to an already-running real fixture session.
+  await expect(page.getByRole('button', { name: 'Pauza czasu', exact: true })).toBeVisible();
+  await expect(start).not.toBeVisible();
 }
 export async function append(page: Page, text: string) {
   await editorInput(page).click(); await page.keyboard.press('ControlOrMeta+End');
