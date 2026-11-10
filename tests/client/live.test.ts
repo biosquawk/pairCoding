@@ -157,4 +157,9 @@ test('reconnect snapshot retains a draft whose disk file was deleted instead of 
   await f.client.selectFile('solution.ts');
   assert.equal(f.client.getState().files.find(file => file.path === 'solution.ts')?.content, 'recover deleted');
   assert.equal(f.client.getState().activePath, 'solution.ts');
+  f.client.saveFileContent('solution.ts', 'recover deleted plus more typing');
+  assert.equal(f.client.getState().files.find(file => file.path === 'solution.ts')?.content, 'recover deleted plus more typing');
+  assert.equal(f.client.getState().fileConflict?.localDraftContent, 'recover deleted plus more typing');
+  assert.ok([...f.stored.values()].some(value => value.includes('recover deleted plus more typing')));
+  assert.equal(f.changes().length, 0, 'deleted draft waits for explicit conflict decision');
 });

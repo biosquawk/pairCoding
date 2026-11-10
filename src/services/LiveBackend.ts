@@ -423,11 +423,12 @@ export class LiveBackend {
     }
   }
   saveFileContent(path: string, content: string) {
-    const doc = this.documents.get(path);
-    if (!doc || doc.readOnly || this.preparing || (this.synced && this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
-    const current = this.saves.get(path);
-    if (!current && doc.content === content) return;
-    this.saves.set(path, current ? { ...current, draft: { ...current.draft, content } } : { draft: { content, baseVersion: doc.version }, conflict: false });
+    const doc = this.documents.get(path), current = this.saves.get(path);
+    // A deleted-on-disk file may still have an editable protected draft. Preserve new typing
+    // without manufacturing a disk version or clearing the explicit conflict barrier.
+    if ((!doc && !current) || doc?.readOnly || this.preparing || (this.synced && this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
+    if (!current && doc?.content === content) return;
+    this.saves.set(path, current ? { ...current, draft: { ...current.draft, content } } : { draft: { content, baseVersion: doc!.version }, conflict: false });
     this.state.activePointer = null; this.state.activeHintBubble = null;
     if (this.state.fileConflict?.path === path) this.state.fileConflict = { ...this.state.fileConflict, localDraftContent: content };
     this.projectState(this.project!); this.persist(); this.schedule(path); this.publish();
