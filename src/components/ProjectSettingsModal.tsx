@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { ProjectSettings, SnapshotItem, TaskMode } from '../types/paircoach';
 import { Bot, Code2, FileCheck, RotateCcw, Settings, X } from 'lucide-react';
 
@@ -11,6 +11,8 @@ interface ProjectSettingsModalProps {
   isOpen: boolean;
   settings: ProjectSettings;
   snapshots?: SnapshotItem[];
+  rootPath?: string;
+  onOpenProject?: (rootPath: string) => Promise<boolean>;
   onClose: () => void;
   onSave: (updated: ProjectSettings) => void;
   onRestoreSnapshot?: (id: string) => void;
@@ -20,10 +22,33 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   isOpen,
   settings,
   snapshots = [],
+  rootPath,
+  onOpenProject,
   onClose,
   onSave,
   onRestoreSnapshot,
 }) => {
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const [folderPath, setFolderPath] = useState(rootPath ?? '');
+  const [opening, setOpening] = useState(false);
+  const [folderError, setFolderError] = useState('');
+  useEffect(() => { if (isOpen) { setFolderPath(rootPath ?? ''); setFolderError(''); } }, [isOpen, rootPath]);
+  useEffect(() => {
+    if (!isOpen) return;
+    const previous = document.activeElement as HTMLElement | null;
+    const dialog = dialogRef.current;
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button, input, textarea, select, [tabindex="0"]') ?? []).filter(el => !el.hasAttribute('disabled') && el.getClientRects().length > 0);
+    focusable()[0]?.focus();
+    const keys = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+      if (event.key !== 'Tab') return;
+      const targets = focusable(), first = targets[0], last = targets[targets.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+    };
+    dialog?.addEventListener('keydown', keys);
+    return () => { dialog?.removeEventListener('keydown', keys); previous?.focus(); };
+  }, [isOpen]);
   const [aiConsent, setAiConsent] = useState(settings.aiConsent);
   const [taskMode, setTaskMode] = useState<TaskMode>(settings.taskMode);
   const [taskFilePath, setTaskFilePath] = useState(settings.taskFilePath);
@@ -57,7 +82,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 select-none">
-      <div role="dialog" aria-modal="true" aria-label="Ustawienia Projektu i Trenera AI" className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full shadow-2xl p-5 text-zinc-200">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Ustawienia Projektu i Trenera AI" className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg max-h-[90vh] overflow-y-auto w-full shadow-2xl p-5 text-zinc-200">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div className="flex items-center gap-2 font-bold text-sm text-zinc-100">
             <Settings className="w-4 h-4 text-blue-400" />
@@ -69,6 +94,18 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="py-4 space-y-4 text-xs">
+          {onOpenProject && <fieldset disabled={opening} className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
+            <label htmlFor="project-folder" className="block font-semibold">Lokalny folder zadania</label>
+            <input id="project-folder" value={folderPath} onChange={event => setFolderPath(event.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1" placeholder="C:/Zadania/kata" />
+            <p className="text-zinc-400">Pełna ścieżka na komputerze serwera. Nowy folder: plik challenge.md, zgoda AI wyłączona, bez odziedziczonych poleceń uruchamiania. Najpierw potwierdzimy autosave; konflikt blokuje otwarcie.</p>
+            <button type="button" className="px-3 py-1.5 bg-blue-700 rounded" onClick={async () => {
+              if (!folderPath.trim()) { setFolderError('Podaj ścieżkę lokalnego folderu.'); return; }
+              setOpening(true); setFolderError('');
+              try { if (await onOpenProject(folderPath.trim())) onClose(); else setFolderError('Nie otwarto folderu. Sprawdź błąd połączenia lub rozstrzygnij draft.'); }
+              finally { setOpening(false); }
+            }}>{opening ? 'Otwieranie…' : 'Otwórz wskazany folder'}</button>
+            {folderError && <p role="alert" className="text-amber-300">{folderError}</p>}
+          </fieldset>}
           {/* AI Consent */}
           <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="flex items-center justify-between">

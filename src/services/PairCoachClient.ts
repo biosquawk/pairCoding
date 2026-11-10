@@ -237,6 +237,7 @@ export class PairCoachClient {
     simulator.restoreSnapshotById(snapshotId);
   }
 
+  public async openProject(rootPath: string) { return this.transportMode === 'LIVE_BACKEND' ? this.live.openProject(rootPath) : false; }
   public connect() { return this.live.connect(); }
   public reconnect() { return this.live.reconnect(); }
   public close() { this.live.close(); }

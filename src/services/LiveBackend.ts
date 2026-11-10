@@ -59,6 +59,7 @@ export class LiveBackend {
   private prepareLoaded = false;
   private readySent = false;
   private vetoPending: string | null = null;
+  private vetoCutoff: { sessionId: string; epoch: number } | null = null;
   private vetoTimer?: ReturnType<typeof setTimeout>;
   private commandPending = new Map<string, { done: () => void; fail: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
   private recoveryKey = '';
@@ -192,7 +193,7 @@ export class LiveBackend {
     const visible = [...project.files];
     this.saves.forEach((save, path) => { if (!visible.some(f => f.path === path)) visible.push({ path, kind: 'FILE', version: save.draft.baseVersion }); });
     this.state.files = visible.map(f => ({ path: f.path, kind: f.kind, version: f.version ?? 0,
-      content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
+      content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path) || this.saves.has(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
   }
   private sessionState(session: Wire.Session) {
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
@@ -238,6 +239,11 @@ export class LiveBackend {
     this.saves.forEach(save => { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; save.timer = undefined; });
     this.documents.clear(); this.projectState(bundle.project); this.restoreDrafts();
     this.sessionState(bundle.session);
+    if (this.vetoPending && this.vetoCutoff && bundle.session.writeOwner === 'STUDENT'
+      && (bundle.session.sessionId !== this.vetoCutoff.sessionId || bundle.session.controlEpoch > this.vetoCutoff.epoch)) {
+      // Lost ACK is not success; this authoritative new epoch is the proof of cutoff.
+      this.vetoPending = null; this.vetoCutoff = null; clearTimeout(this.vetoTimer);
+    }
     this.state.activePath = bundle.activeDocument?.path ?? bundle.session.activeFilePath ?? bundle.project.files.find(f => f.kind === 'FILE')?.path ?? '';
     if (bundle.activeDocument) this.installDocument(bundle.activeDocument, false);
     this.proposals = new Map(bundle.proposals.map(p => [p.proposalId, p]));
@@ -295,7 +301,7 @@ export class LiveBackend {
           this.project.files = this.project.files.filter(f => f.path !== p.path);
           if (p.operation !== 'DELETED') this.project.files.push({ path: p.path, kind: 'FILE', version: p.version });
           if (p.document) this.installDocument(p.document);
-          else if (this.saves.has(p.path)) { const s = this.saves.get(p.path)!; s.conflict = true; this.state.fileConflict = { path: p.path, diskContent: '', localDraftContent: s.draft.content }; }
+          else if (this.saves.has(p.path)) { const s = this.saves.get(p.path)!; s.conflict = true; this.documents.delete(p.path); this.state.fileConflict = { path: p.path, diskContent: '', localDraftContent: s.draft.content, diskDeleted: true }; this.projectState(this.project); }
           else { this.documents.delete(p.path); this.projectState(this.project); }
         }
         this.state.activePointer = null; this.state.activeHintBubble = null; break;
@@ -368,7 +374,7 @@ export class LiveBackend {
     const cmd = this.commandPending.get(p.replyTo);
     if (cmd) { clearTimeout(cmd.timer); this.commandPending.delete(p.replyTo); p.status === 'REJECTED' ? cmd.fail(new Error(`${p.error?.code}: ${p.error?.message}`)) : cmd.done(); }
     if (p.replyTo === this.vetoPending && p.status !== 'REJECTED') {
-      this.vetoPending = null; clearTimeout(this.vetoTimer);
+      this.vetoPending = null; this.vetoCutoff = null; clearTimeout(this.vetoTimer);
       if (this.session) { this.session.controlEpoch = p.controlEpoch; this.session.writeOwner = 'STUDENT'; }
       this.state.controlEpoch = p.controlEpoch;
       this.saves.forEach((_, path) => this.schedule(path));
@@ -376,7 +382,8 @@ export class LiveBackend {
     for (const [path, save] of this.saves) {
       if (save.flight?.messageId !== p.replyTo) continue;
       const flight = save.flight; clearTimeout(flight.timer); save.flight = undefined;
-      const doc = this.documents.get(path)!;
+      const doc = this.documents.get(path);
+      if (!doc) { save.conflict = true; this.persist(); break; }
       if (p.status === 'REJECTED' || p.documentVersion === null) {
         save.conflict = true; this.fail(new Error(`${p.error?.code ?? 'SAVE_REJECTED'}: ${p.error?.message ?? 'Zapis odrzucony. Draft zachowany.'}`));
         void this.loadFile(path, true).catch(e => this.fail(e));
@@ -403,6 +410,7 @@ export class LiveBackend {
     if (!current && doc.content === content) return;
     this.saves.set(path, current ? { ...current, draft: { ...current.draft, content } } : { draft: { content, baseVersion: doc.version }, conflict: false });
     this.state.activePointer = null; this.state.activeHintBubble = null;
+    if (this.state.fileConflict?.path === path) this.state.fileConflict = { ...this.state.fileConflict, localDraftContent: content };
     this.projectState(this.project!); this.persist(); this.schedule(path); this.publish();
   }
   private async coachStep(p: ServerPayloads['COACH_STEP_EDIT']) {
@@ -437,13 +445,14 @@ export class LiveBackend {
     if (this.session.interventionId) this.invalidInterventions.add(this.session.interventionId);
     this.pendingSteps.clear(); this.preparing = null;
     const messageId = id(), payload = { controlEpoch: this.session.controlEpoch, activeInterventionId: this.session.interventionId, lastAppliedSeq: this.lastSeq };
+    this.vetoCutoff = { sessionId: this.session.sessionId, epoch: this.session.controlEpoch };
     this.vetoPending = messageId; this.emit('veto', payload); this.publish();
     const fallback = async () => {
       if (this.vetoPending !== messageId) return;
       try {
         const session = await this.http<Wire.Session>('/api/session/veto', 'POST', this.commandBody(payload, messageId));
         if (this.vetoPending !== messageId) return;
-        this.sessionState(session); this.vetoPending = null; this.saves.forEach((_, path) => this.schedule(path)); this.publish();
+        this.sessionState(session); this.vetoPending = null; this.vetoCutoff = null; this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       } catch (error) { this.fail(error); }
     };
     try { this.send('VETO_ESCAPE', payload, messageId); this.vetoTimer = setTimeout(() => void fallback(), 500); }
@@ -463,6 +472,16 @@ export class LiveBackend {
       if (Date.now() >= end) throw new Error('Brak ACK zapisu. Nie zakończono sesji; draft zachowany.');
       await new Promise(resolve => setTimeout(resolve, 20));
     }
+  }
+  async openProject(rootPath: string) {
+    try {
+      await this.flushAll();
+      // New folder means new consent and no inherited executable approval.
+      const settings: Wire.Settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
+      const project = await this.http<Wire.Project>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
+      this.generation++; this.lastSeq = 0; this.documents.clear(); this.state.fileConflict = null; this.state.activePath = '';
+      this.projectState(project); this.reconnect(); return true;
+    } catch (error) { this.fail(error); return false; }
   }
   async mutateFile(operation: 'CREATE' | 'RENAME' | 'DELETE', path: string, newPath: string | null = null, content: string | null = null) {
     try {
@@ -524,14 +543,23 @@ export class LiveBackend {
     catch (error) { this.fail(error); }
   }
   restoreSnapshotById(snapshotId: string) { this.safeSend('PROPOSAL_REQUEST', { kind: 'RESTORE_SNAPSHOT', snapshotId }); }
-  resolveConflict(choice: 'KEEP_LOCAL' | 'LOAD_DISK') {
+  async resolveConflict(choice: 'KEEP_LOCAL' | 'LOAD_DISK') {
     const conflict = this.state.fileConflict; if (!conflict) return;
-    const save = this.saves.get(conflict.path), doc = this.documents.get(conflict.path); if (!save || !doc) return;
+    const save = this.saves.get(conflict.path), doc = this.documents.get(conflict.path); if (!save || (!doc && !conflict.diskDeleted)) return;
     if (save.flight) { this.fail(new Error('Najpierw poczekaj na ACK lub połącz ponownie.')); return; }
     // Keep a separate recovery copy for either explicit resolution; local and disk versions remain inspectable.
     try { this.storage?.setItem(`${this.key()}:conflict:${conflict.path}:${Date.now()}`, JSON.stringify(conflict)); }
     catch { this.state.storageError = 'Nie można zachować kopii konfliktu. Skopiuj obie wersje przed rozstrzygnięciem.'; this.publish(); return; }
-    if (choice === 'KEEP_LOCAL') { save.conflict = false; save.draft.baseVersion = doc.version; this.schedule(conflict.path); }
+    if (conflict.diskDeleted) {
+      if (choice === 'KEEP_LOCAL') {
+        try {
+          const project = await this.http<Wire.Project>('/api/file', 'POST', this.commandBody({ operation: 'CREATE', path: conflict.path, newPath: null, content: save.draft.content, baseVersion: null, controlEpoch: this.session?.controlEpoch }));
+          clearTimeout(save.timer); this.saves.delete(conflict.path); this.projectState(project); await this.loadFile(conflict.path);
+        } catch (error) { this.fail(error); return; }
+      } else { clearTimeout(save.timer); this.saves.delete(conflict.path); this.state.activePath = ''; }
+      this.state.fileConflict = null; this.projectState(this.project!); this.persist(); this.publish(); return;
+    }
+    if (choice === 'KEEP_LOCAL') { save.conflict = false; save.draft.baseVersion = doc!.version; this.schedule(conflict.path); }
     else { clearTimeout(save.timer); this.saves.delete(conflict.path); }
     this.state.fileConflict = null; this.projectState(this.project!); this.persist();
     const file = this.state.files.find(f => f.path === conflict.path); if (file) this.emit('file', { ...file, isExternalOrSnapshot: choice === 'LOAD_DISK' });

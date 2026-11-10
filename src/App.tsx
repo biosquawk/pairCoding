@@ -224,6 +224,7 @@ export default function App() {
         <strong>{state.transportMode === 'LIVE_BACKEND' ? 'LIVE — lokalny backend' : 'MOCK — jawna symulacja, bez zapisu na dysk'}</strong>
         {state.transportMode === 'LIVE_BACKEND' && <>
           <span>{state.isOffline ? 'Synchronizacja / Offline — niepotwierdzone zmiany pozostają lokalne.' : state.pendingPaths.length ? 'Zapis oczekuje na ACK.' : 'Połączono z backendem.'}</span>
+          <button className="underline" disabled={state.isOffline} onClick={() => setIsSettingsModalOpen(true)}>Otwórz folder</button>
           <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
         </>}
         {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
@@ -350,6 +351,8 @@ export default function App() {
       <ProjectSettingsModal
         isOpen={isSettingsModalOpen}
         settings={projectSettings}
+        rootPath={state.transportMode === 'LIVE_BACKEND' ? state.scenario.title : undefined}
+        onOpenProject={state.transportMode === 'LIVE_BACKEND' ? (root) => client.openProject(root) : undefined}
         snapshots={state.snapshots}
         onClose={() => setIsSettingsModalOpen(false)}
         onSave={(updated) => { client.updateProjectSettings(updated); }}

@@ -1,9 +1,10 @@
 import type * as Wire from '../shared/protocol';
-import type { CoachEditStep, ProjectFile } from '../types/paircoach';
+import type { CoachEditStep, ProjectFile, FileConflict } from '../types/paircoach';
 import type { simulator } from './simulator';
 
 export type TransportMode = 'LIVE_BACKEND' | 'MOCK_SIMULATOR';
-export type ClientState = ReturnType<typeof simulator.getFullState> & {
+export type ClientState = Omit<ReturnType<typeof simulator.getFullState>, 'fileConflict'> & {
+  fileConflict: FileConflict | null;
   transportMode: TransportMode;
   connectionError: string | null;
   pendingPaths: string[];
