@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { acknowledged, Wire } from './helpers';
 import { programs, profile, denySnapshotWrites, type Fixture } from './fixture';
-import { languageCases, invalidInputs, limitBytes, taskMarkdown } from './g3-basics';
+import { languageCases, invalidInputs, limitBytes, taskMarkdown, nonEmptyAlert } from './g3-basics';
 import { require as tsRequire } from 'tsx/cjs/api';
 const { validateMessage, validateRequest } = tsRequire('../../../src/server/transport.ts', import.meta.url) as typeof import('../../../src/server/transport');
 
@@ -73,11 +73,18 @@ test('G3 OS-denial fixture really blocks new backup directory while retaining ol
 test('Final GUI fixture has four distinct language inputs, multiline workspace and no answer/build tool dependency', () => {
   assert.deepEqual(languageCases.map(c => c.file.split('.').at(-1)), ['java', 'py', 'js', 'ts']);
   assert.match(taskMarkdown, /^# QA markdown-only task\n/);
+  assert.deepEqual(languageCases.map(c => c.marker), ['qa_java', 'qa_python', 'qa_js', 'qa_ts']);
+  for (const empty of ['', ' ', '\n\t']) assert.equal(nonEmptyAlert.test(empty), false);
+  for (const error of ['FILE_NOT_FOUND: task missing', 'Błąd zapisu', 'x']) assert.equal(nonEmptyAlert.test(error), true);
   for (const c of languageCases) {
     assert.ok(c.first.startsWith(c.keyword + ' ')); assert.ok(c.first.includes(c.name));
     assert.equal(c.text.split('\n').length, 121); assert.ok(c.text.split('\n')[69].length > 6);
     assert.ok(c.comment.startsWith(c.file.endsWith('.py') ? '#' : '//'));
-    assert.equal(c.text.includes(c.marker), false); // original is independent of later edits/Undo
+    assert.match(c.marker, /^[A-Za-z_][A-Za-z0-9_]*$/); // one lexical token: native Monaco word-group Undo, HUMAN d0af9e73
+    // K b000f41a pins the proven literal markers. Seed already has `def qa_python()`;
+    // retain an exact input control instead of claiming all selected words are absent.
+    assert.equal(c.text.split(c.marker).length - 1, c.language === 'python' ? 1 : 0);
+    assert.equal(c.text.endsWith(c.marker), false); // EOF stimulus is still a new edit of literal original bytes
   }
 });
 

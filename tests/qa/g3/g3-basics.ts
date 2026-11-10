@@ -5,12 +5,13 @@ import path from 'node:path';
 import { fixture, filesBelow, type Fixture } from './fixture';
 import { Wire, editor, editorHost, acknowledged, settings, session } from './helpers';
 
+export const nonEmptyAlert = /\S/u; // HUMAN debece2b: empty Monaco live regions are not error messages
 export const taskMarkdown = '# QA markdown-only task\n\nImplement your own solution in a new file.\n';
 export const languageCases = [
-  { file: 'QaJava.java', language: 'java', first: 'public class QaJava {', keyword: 'public', name: 'QaJava', comment: '// QA java comment', marker: '// qa_java' },
-  { file: 'qa_python.py', language: 'python', first: 'def qa_python():', keyword: 'def', name: 'qa_python', comment: '# QA python comment', marker: '# qa_python' },
-  { file: 'qa_javascript.js', language: 'javascript', first: 'function qaJavaScript() {', keyword: 'function', name: 'qaJavaScript', comment: '// QA js comment', marker: '// qa_js' },
-  { file: 'qa_typescript.ts', language: 'typescript', first: 'interface QaTypeScript {', keyword: 'interface', name: 'QaTypeScript', comment: '// QA ts comment', marker: '// qa_ts' },
+  { file: 'QaJava.java', language: 'java', first: 'public class QaJava {', keyword: 'public', name: 'QaJava', comment: '// QA java comment', marker: 'qa_java' },
+  { file: 'qa_python.py', language: 'python', first: 'def qa_python():', keyword: 'def', name: 'qa_python', comment: '# QA python comment', marker: 'qa_python' },
+  { file: 'qa_javascript.js', language: 'javascript', first: 'function qaJavaScript() {', keyword: 'function', name: 'qaJavaScript', comment: '// QA js comment', marker: 'qa_js' },
+  { file: 'qa_typescript.ts', language: 'typescript', first: 'interface QaTypeScript {', keyword: 'interface', name: 'QaTypeScript', comment: '// QA ts comment', marker: 'qa_ts' },
 ].map(c => ({ ...c, text: c.first + '\n' + c.comment + '\n' +
   Array.from({ length: 118 }, (_, i) => `${c.comment.startsWith('#') ? '#' : '//'} visible line ${i + 3}\n`).join('') }));
 export const limitBytes = 1024 * 1024;
@@ -91,7 +92,7 @@ export function registerBasics(test: TestType<Args, {}>) {
     expect(project.capabilities.autocomplete).toBe('NOT_INSTALLED'); // public state, not proof of registry-module architecture
     await expect(dialog).toHaveCount(0);
     await expect(page.getByRole('heading', { name: 'QA markdown-only task', exact: true })).toBeVisible();
-    await expect(page.getByText('Implement your own solution in a new file.', { exact: true })).toBeVisible();
+    await expect(page.locator('p').filter({ hasText: /^Implement your own solution in a new file\.$/ })).toBeVisible();
     expect((await session(page, f)).lifecycle).toBe('READY');
     await expect(page.getByRole('button', { name: 'Run Tests', exact: true })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Run Main', exact: true })).toBeDisabled();
@@ -105,7 +106,7 @@ export function registerBasics(test: TestType<Args, {}>) {
     await savedSince(f, wire, since, 'answer = 42', 'solution.py');
     expect(f.read('challenge.md')).toBe(taskMarkdown);
     expect(Object.keys(filesBelow(f.rootPath))).toEqual(['challenge.md', 'solution.py']);
-    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('alert').filter({ hasText: nonEmptyAlert })).toHaveCount(0);
   });
 
   test('TEST-002: four real language tabs retain coloring, cursor, scroll and independent local Undo', async ({ page, make, wire }, info) => {

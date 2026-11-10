@@ -23,15 +23,18 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
     throw new Error('Set PAIRCOACH_QA_BROWSER to the native msedge.exe used in the receipt');
   }
   fs.mkdirSync(info.outputDir, { recursive: true });
-  const profile = fs.mkdtempSync(path.join(info.outputDir, 'owned-edge-'));
+  // Do not nest Chromium's long profile paths below the already-long per-test title directory.
+  const profiles = path.resolve('artifacts/g3/edge-profiles'); fs.mkdirSync(profiles, { recursive: true });
+  const profile = fs.mkdtempSync(path.join(profiles, 'owned-'));
   let child: ReturnType<typeof spawn> | undefined, browser: Browser | undefined, context: BrowserContext | undefined, page: Page | undefined;
   let setupFailed = false;
-  let tracing = false, launchError: Error | undefined, endpoint: string | undefined;
+  let tracing = false, requestTracing = false, launchError: Error | undefined, endpoint: string | undefined;
   let exited: Promise<unknown> = Promise.resolve();
   const cleanupErrors: unknown[] = [];
   const provenance: Record<string, unknown> = { platform: process.platform, node: process.version, executable, profile,
     arguments: edgeArguments(profile), transport: 'ordinary Edge + connectOverCDP(noDefaults:true), default context; only TEST016/017',
-    recordedViewport: 'ordinary window-size=1600,1000; no emulated viewport/focus', revision: process.env.PAIRCOACH_QA_REVISION ?? 'UNSPECIFIED' };
+    recordedViewport: 'ordinary normal bounds 0/0/1600/1000; no emulated viewport/focus',
+    recording: { owner: 'externalEdgePage', trace: 'on (browser + API requests)', screenshot: 'only-on-failure', runnerRecorder: 'off only for016/017 to prevent double-start' }, revision: process.env.PAIRCOACH_QA_REVISION ?? 'UNSPECIFIED' };
   try {
     child = spawn(executable, edgeArguments(profile), { shell: false, windowsHide: false, stdio: 'ignore' });
     exited = new Promise(resolve => { child!.once('exit', resolve); child!.once('error', error => { launchError = error; resolve(error); }); });
@@ -46,11 +49,22 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
     browser = await chromium.connectOverCDP(endpoint, { noDefaults: true, timeout: 5000 });
     context = browser.contexts()[0]; if (!context) throw new Error('No ordinary Edge default context');
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true }); tracing = true;
+    await context.request.tracing.start({ sources: true }); requestTracing = true;
     page = context.pages()[0] ?? await context.newPage();
     // G3 has no action/navigation override; preserve that (runner test guard is still 25s).
     context.setDefaultTimeout(0); context.setDefaultNavigationTimeout(0);
     provenance.version = browser.version(); provenance.endpoint = endpoint;
-    await page.bringToFront();
+    // ROOT b5377f09: force the REAL ordinary window onscreen before app navigation/initial WINDOW_STATE.
+    const window = await context.newCDPSession(page);
+    try {
+      const { windowId } = await window.send('Browser.getWindowForTarget');
+      await window.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+      await window.send('Browser.setWindowBounds', { windowId, bounds: { left: 0, top: 0, width: 1600, height: 1000 } });
+      await page.bringToFront();
+      provenance.initialWindow = (await window.send('Browser.getWindowBounds', { windowId })).bounds;
+      await expect.poll(() => page!.evaluate(() => document.visibilityState)).toBe('visible');
+      await expect.poll(() => page!.evaluate(() => document.hasFocus())).toBe(true);
+    } finally { await window.detach(); }
     await use(page);
   } catch (error) { setupFailed = true; throw error; } finally {
     // All paths, including partial setup failure, pass through owned-process cleanup.
@@ -65,6 +79,12 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
       try {
         const trace = info.outputPath('trace.zip'); await context.tracing.stop({ path: trace });
         await info.attach('trace', { path: trace, contentType: 'application/zip' });
+      } catch (error) { cleanupErrors.push(error); }
+    }
+    if (context && requestTracing) {
+      try {
+        const trace = info.outputPath('request-trace.zip'); await context.request.tracing.stop({ path: trace });
+        await info.attach('request-trace', { path: trace, contentType: 'application/zip' });
       } catch (error) { cleanupErrors.push(error); }
     }
     if (browser?.isConnected()) {

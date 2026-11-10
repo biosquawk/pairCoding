@@ -38,6 +38,9 @@ const test = base.extend<{ make: (options?: Parameters<typeof fixture>[0]) => Pr
 });
 // Ordinary native Edge only for visibility cases; other17 retain the runner-managed browser.
 const visibilityTest = test.extend({ page: async ({}, use, info) => externalEdgePage(use, info) });
+// Only recorder ownership is changed: externalEdgePage MUST attach trace on all outcomes and
+// screenshots on failure. Pinned 1.65 auto-traces connectOverCDP default contexts too; never start twice.
+visibilityTest.use({ trace: 'off', screenshot: 'off' });
 // Final GUI gaps from HUMAN a3b804e0, same execution. Existing 16 cases below unchanged.
 registerBasics(test);
 
