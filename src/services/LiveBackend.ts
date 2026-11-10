@@ -530,13 +530,13 @@ export class LiveBackend {
   async finishSession(reason: EndReason) { try { await this.flushAll(); this.state.report = mapReport(await this.http<Wire.Report>('/api/session/finish', 'POST', this.commandBody({ reason, expectedWorkspaceVersion: this.state.workspaceVersion }))); this.publish(); } catch (error) { this.fail(error); } }
   async retryReport() { try { this.state.report = mapReport(await this.http<Wire.Report>('/api/session/report/retry', 'POST', this.commandBody())); this.publish(); } catch (error) { this.fail(error); } }
   async updateProjectSettings(settings: ProjectSettings) {
-    if (!this.project) return;
+    if (!this.project) return false;
     try {
-      // Preserve structured approved profiles/contextPatterns. Never parse a display command into shell execution.
-      const wireSettings: Wire.Settings = { ...this.project.settings, aiConsent: settings.aiConsent, taskMode: settings.taskMode, taskFilePath: settings.taskFilePath || null, reviewNotesPath: settings.reviewNotesPath };
+      // Only human-confirmed structured profiles. Never parse the display command into shell execution.
+      const wireSettings: Wire.Settings = { ...this.project.settings, aiConsent: settings.aiConsent, taskMode: settings.taskMode, taskFilePath: settings.taskFilePath || null, reviewNotesPath: settings.reviewNotesPath, runProfiles: settings.wireRunProfiles ?? this.project.settings.runProfiles, contextPatterns: settings.contextPatterns ?? this.project.settings.contextPatterns };
       const project = await this.http<Wire.Project>('/api/project/settings', 'PUT', this.commandBody({ expectedWorkspaceVersion: this.state.workspaceVersion, settings: wireSettings }));
-      this.projectState(project); if (wireSettings.taskFilePath) await this.loadFile(wireSettings.taskFilePath); this.publish();
-    } catch (error) { this.fail(error); }
+      this.projectState(project); if (wireSettings.taskFilePath) await this.loadFile(wireSettings.taskFilePath); this.publish(); return true;
+    } catch (error) { this.fail(error); return false; }
   }
   async refreshSnapshots() {
     try { const snapshots = await this.http<Wire.Snapshot[]>('/api/snapshots'); this.state.snapshots = snapshots.map(s => ({ id: s.snapshotId, label: s.label, timestamp: Date.parse(s.createdAt), files: s.paths.map(path => ({ path, content: '' })) })); this.publish(); }

@@ -29,6 +29,10 @@ test('REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, exte
   await until(() => client.getState().pendingPaths.length === 0, 'CODE_CHANGED ACK');
   assert.equal(fs.readFileSync(path.join(root, 'solution.ts'), 'utf8'), 'const value = 2;\n');
   assert.equal(client.getState().files.find(f => f.path === 'solution.ts')?.version, app.workspace.getDocument('solution.ts').version);
+  const approved = { kind: 'RUN_MAIN' as const, executable: 'node', args: ['main.js'], cwd: '.', timeoutMs: 1000, testReportFormat: 'NONE' as const, testReportGlob: null };
+  assert.equal(await client.updateProjectSettings({ ...client.getState().projectSettings, wireRunProfiles: [approved], contextPatterns: ['**/*.ts', '**/*.md'] }), true);
+  assert.deepEqual(app.workspace.settings.runProfiles, [approved]);
+  assert.deepEqual(app.workspace.settings.contextPatterns, ['**/*.ts', '**/*.md']);
   const epoch = client.getState().controlEpoch;
   client.triggerVeto(); client.saveFileContent('solution.ts', 'const value = 3;\n');
   await until(() => client.getState().controlEpoch > epoch && client.getState().pendingPaths.length === 0, 'veto cutoff ACK and draft save');

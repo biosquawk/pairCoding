@@ -355,7 +355,7 @@ export default function App() {
         onOpenProject={state.transportMode === 'LIVE_BACKEND' ? (root) => client.openProject(root) : undefined}
         snapshots={state.snapshots}
         onClose={() => setIsSettingsModalOpen(false)}
-        onSave={(updated) => { client.updateProjectSettings(updated); }}
+        onSave={(updated) => client.updateProjectSettings(updated)}
         onRestoreSnapshot={(snapshotId) => {
           client.restoreSnapshotById(snapshotId);
         }}
