@@ -102,6 +102,7 @@ test('AC-011 TEST-011: committed pre-cutoff step arriving after local veto canno
 });
 
 test('AC-006 TEST-006: actual Monaco Undo/Redo groups two committed fixture coach steps', async ({ page }) => {
+  const relay = new Relay(); await relay.install(page); // observe real writes/ACKs without delays
   await openEditor(page); const before = disk();
   await chat(page, 'QA:DEMO');
   await expect.poll(() => disk()).toBe(before + '# coach_fixture_step_1\n# coach_fixture_step_2\n');
@@ -111,8 +112,28 @@ test('AC-006 TEST-006: actual Monaco Undo/Redo groups two committed fixture coac
   await expect.poll(() => disk()).toBe(before);
   await page.keyboard.press(process.platform === 'win32' ? 'Control+y' : 'ControlOrMeta+Shift+z');
   await expect.poll(() => disk()).toBe(before + '# coach_fixture_step_1\n# coach_fixture_step_2\n');
-  await append(page, '# separate_student_group\n');
-  await expect.poll(() => disk()).toContain('separate_student_group');
+  // AC006 requires separate student history, not atomic Undo of a multiword paragraph.
+  const coached = before + '# coach_fixture_step_1\n# coach_fixture_step_2\n';
+  // Compare every rendered line, including the terminal empty line; do not trim source text.
+  const visibleLines = async () => (await page.locator('.monaco-editor .view-lines .view-line').allTextContents())
+    .map(text => text.replace(/\u00a0/g, ' '));
+  const expectSaved = async (expected: string, since: number) => {
+    await expect.poll(() => relay.sent.slice(since).some(write => write.type === 'CODE_CHANGED'
+      && write.payload.path === 'main.py' && write.payload.content === expected
+      && relay.received.some(ack => ack.type === 'ACK' && ack.payload.replyTo === write.messageId
+        && ack.payload.status === 'OK' && ack.payload.error === null
+        && ack.payload.documentVersion > write.payload.baseVersion))).toBe(true);
+    await expect.poll(() => disk()).toBe(expected);
+    await expect.poll(visibleLines).toEqual(expected.split('\n'));
+  };
+  await focusEditor(page); await page.keyboard.press('ControlOrMeta+End');
+  const typingSince = relay.sent.length;
+  await page.keyboard.press('x'); // one real key, no model API or synthesized editor edit
+  await expectSaved(coached + 'x', typingSince);
+  const undoSince = relay.sent.length;
   await page.keyboard.press('ControlOrMeta+z');
-  await expect.poll(() => disk()).toBe(before + '# coach_fixture_step_1\n# coach_fixture_step_2\n');
+  await expectSaved(coached, undoSince); // the coach demonstration must remain intact
+  const redoSince = relay.sent.length;
+  await page.keyboard.press(process.platform === 'win32' ? 'Control+y' : 'ControlOrMeta+Shift+z');
+  await expectSaved(coached + 'x', redoSince);
 });
