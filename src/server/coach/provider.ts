@@ -1,10 +1,11 @@
 import type { CoachContext } from './context';
+import { CodexCoachProvider } from './CodexProvider';
 import { COACH_DECISION_SCHEMA } from './schema';
 import { COACH_SYSTEM_PROMPT } from './prompt';
 
 export interface CoachProvider {
   readonly name: string;
-  readonly mode?: 'GEMINI' | 'LOCAL_FALLBACK' | 'INJECTED';
+  readonly mode?: 'GEMINI' | 'CODEX' | 'LOCAL_FALLBACK' | 'INJECTED';
   decide(context: Readonly<CoachContext>, signal: AbortSignal): Promise<unknown>;
 }
 
@@ -44,5 +45,8 @@ export class GeminiCoachProvider implements CoachProvider {
 }
 
 export function defaultCoachProvider(): CoachProvider {
+  const selected=process.env.PAIRCOACH_COACH_PROVIDER?.trim().toLowerCase();
+  if(selected==='codex')return new CodexCoachProvider();
+  if(selected&&selected!=='gemini')throw new Error('COACH_PROVIDER_UNSUPPORTED');
   return process.env.GEMINI_API_KEY ? new GeminiCoachProvider(process.env.GEMINI_API_KEY) : new LocalFallbackProvider();
 }
