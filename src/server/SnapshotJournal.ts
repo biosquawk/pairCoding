@@ -62,7 +62,7 @@ export class SnapshotJournal {
   }
 
   private terminal(directory: string, intent: Intent): boolean {
-    this.assertNoActiveMove(directory, intent, false);
+    this.assertNoActiveMove(directory, false);
     let terminal = false;
     for (const state of ['COMMITTED', 'ROLLED_BACK']) if (this.exists(path.join(directory, state))) {
       const marker = this.store.readSigned<{ id: string; state: string; binding: unknown }>(path.join(directory, state), 8192);
@@ -159,7 +159,7 @@ export class SnapshotJournal {
     return { directory, intent };
   }
 
-  private assertNoActiveMove(directory: string, intent: Intent, reconcile: boolean): void {
+  private assertNoActiveMove(directory: string, reconcile: boolean): void {
     privateDirectory(directory);
     // New in-process calls cannot outlive their backend. Legacy child-helper records
     // without JOINED remain genuinely ambiguous and must never be guessed/replayed.
@@ -169,10 +169,11 @@ export class SnapshotJournal {
       this.store.assertBinding(pending.binding);
       let joined: unknown;
       try { joined = this.store.readSigned(file + '.joined', 8192); }
-      catch {
-        if (pending.backend !== 'inprocess-v1' || pending.ownerPid !== intent.ownerPid) throw snapshotFailure('Legacy/unknown native worker may be in flight; preserve all material.');
+      catch (error) {
+        if (!missing(error)) throw error;
+        if (pending.backend !== 'inprocess-v1' || !Number.isSafeInteger(pending.ownerPid) || pending.ownerPid! <= 0) throw snapshotFailure('Legacy/unknown native worker may be in flight; preserve all material.');
         let live = false;
-        try { process.kill(intent.ownerPid, 0); live = true; }
+        try { process.kill(pending.ownerPid!, 0); live = true; }
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') live = true; }
         if (live) throw snapshotFailure('Another process may still own this in-process move; never race a live writer.');
         if (reconcile) this.store.writeSigned(file + '.joined', pending, 8192);
@@ -319,7 +320,7 @@ export class SnapshotJournal {
   }
 
   private rollback(directory: string, intent: Intent): void {
-    this.assertNoActiveMove(directory, intent, true);
+    this.assertNoActiveMove(directory, true);
     this.checkpoint('ROLLBACK_BEGIN', -1);
     for (let i = intent.entries.length - 1; i >= 0; i--) {
       // Treat the journal as untrusted before each effect, including resumed recovery.
