@@ -20,6 +20,12 @@ type ProposalDecision = {
   raw: string; wait: Promise<void>; done: () => void; timer?: ReturnType<typeof setTimeout>;
   notice: string | null; disconnected: boolean; replayed: boolean;
 };
+type FinishAttempt = {
+  requestId: string; clientId: string; sessionId: string; expectedWorkspaceVersion: number; reason: EndReason;
+  unknown: boolean; replaced: boolean; notice: string | null; previousError: string | null;
+  observedReport: Wire.Report | null; reading: boolean; readAgain: boolean;
+};
+class HttpDeadlineError extends Error {}
 const id = () => globalThis.crypto.randomUUID();
 
 // UTF-16 positions, exactly as Monaco and the wire contract. Reject clamped/invalid ranges.
@@ -73,6 +79,8 @@ export class LiveBackend {
   private proposalDecision: ProposalDecision | null = null;
   private decisionResultError: string | null = null;
   private helloSnapshot: { ws: Socket; sessionId: string; clientId: string } | null = null;
+  private finishAttempt: FinishAttempt | null = null;
+  private finishStarting = false;
   private recoveryKey = '';
   private generation = 0;
 
@@ -98,7 +106,9 @@ export class LiveBackend {
     this.emit('state', this.state);
   }
   private fail(error: unknown) {
-    this.state.connectionError = error instanceof Error ? error.message : String(error); this.publish();
+    const message = error instanceof Error ? error.message : String(error);
+    if (this.finishAttempt && message !== this.finishAttempt.notice && message !== this.proposalDecision?.notice) this.finishAttempt.previousError = message;
+    this.state.connectionError = message; this.publish();
   }
   private key() { return `paircoach:draft:v3:${this.baseUrl}:${this.project?.rootPath}`; }
   private persist() {
@@ -132,7 +142,7 @@ export class LiveBackend {
       if (!response.ok) throw new Error(`${data.code ?? response.status}: ${data.message ?? 'Żądanie odrzucone'}`);
       return data as T;
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
+      if (controller.signal.aborted) throw new HttpDeadlineError('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
       throw error;
     } finally { clearTimeout(timer); }
   }
@@ -162,6 +172,7 @@ export class LiveBackend {
           this.fail(new Error(this.decisionResultError));
         }
       }
+      this.replaceFinishSession(session.sessionId);
       this.project = project; this.session = session;
       const ws = this.socketFactory(`${this.baseUrl.replace(/^http/, 'ws')}/ws/session`);
       this.ws = ws;
@@ -206,6 +217,7 @@ export class LiveBackend {
     this.saves.forEach(s => { clearTimeout(s.timer); clearTimeout(s.flight?.timer); });
     if (this.proposalDecision) { clearTimeout(this.proposalDecision.timer); this.proposalDecision.done(); }
     this.proposalDecision = null; this.helloSnapshot = null; this.decisionResultError = null;
+    this.finishAttempt = null;
     this.persist(); this.ws?.close(); this.ws = null;
   }
   private projectState(project: Wire.Project) {
@@ -222,6 +234,7 @@ export class LiveBackend {
       content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path) || this.saves.has(f.path), loadError: this.loadErrors.get(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
   }
   private sessionState(session: Wire.Session) {
+    this.replaceFinishSession(session.sessionId);
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
     this.session = session;
     this.state.controlEpoch = session.controlEpoch; this.state.workspaceVersion = session.workspaceVersion;
@@ -309,8 +322,12 @@ export class LiveBackend {
       // failed; retain that independent failure for after the decision resolves.
       if (this.proposalDecision && readErrors[0]) this.decisionResultError ??= readErrors[0];
       this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer);
-      this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError ?? readErrors[0] ?? null;
+      if (this.finishAttempt && readErrors[0]) this.finishAttempt.previousError = readErrors[0];
+      this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError
+        ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readErrors[0] ?? null;
       if (hello && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) this.reconcileDecision(bundle);
+      if (bundle.report) this.observeFinishReport(bundle.report);
+      else void this.reconcileFinish();
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -344,7 +361,7 @@ export class LiveBackend {
         break;
       }
       case 'COACH_STEP_EDIT': void this.coachStep(message.payload); break;
-      case 'SESSION_STATE': this.sessionState(message.payload); break;
+      case 'SESSION_STATE': this.sessionState(message.payload); void this.reconcileFinish(); break;
       case 'EXTERNAL_FILE_SYNC': {
         const p = message.payload; this.state.workspaceVersion = p.workspaceVersion;
         if (this.project) {
@@ -382,7 +399,9 @@ export class LiveBackend {
           logs: this.appendLogs(p) };
         break;
       }
-      case 'SESSION_REPORT': this.state.report = mapReport(message.payload); break;
+      case 'SESSION_REPORT':
+        if (message.payload.sessionId !== this.session?.sessionId) break;
+        this.state.report = mapReport(message.payload); this.observeFinishReport(message.payload); break;
       case 'ERROR': this.fail(new Error(`${message.payload.code}: ${message.payload.message}`)); break;
     }
     this.publish();
@@ -636,7 +655,90 @@ export class LiveBackend {
   clearCoachPointer() { this.state.activePointer = null; this.publish(); }
   async run(isTest: boolean) { try { await this.flushAll(); this.state.activeRun = mapRun(await this.http<Wire.Run>('/api/run', 'POST', this.commandBody({ mode: isTest ? 'RUN_TESTS' : 'RUN_MAIN', expectedWorkspaceVersion: this.state.workspaceVersion })), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
   async stopExecution() { if (!this.state.activeRun) return; try { this.state.activeRun = mapRun(await this.http<Wire.Run>(`/api/run/${encodeURIComponent(this.state.activeRun.runId)}/stop`, 'POST', this.commandBody()), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
-  async finishSession(reason: EndReason) { try { await this.flushAll(); this.state.report = mapReport(await this.http<Wire.Report>('/api/session/finish', 'POST', this.commandBody({ reason, expectedWorkspaceVersion: this.state.workspaceVersion }))); this.publish(); } catch (error) { this.fail(error); } }
+  async finishSession(reason: EndReason) {
+    // A second click is NOT permission to repeat an unresolved HTTP mutation.
+    if (this.finishStarting || this.finishAttempt || this.stopped) return;
+    this.finishStarting = true;
+    let attempt: FinishAttempt | null = null;
+    try {
+      await this.flushAll();
+      if (this.stopped) return;
+      const body = this.commandBody({ reason, expectedWorkspaceVersion: this.state.workspaceVersion });
+      attempt = { ...body, reason, expectedWorkspaceVersion: this.state.workspaceVersion,
+        unknown: false, replaced: false, notice: null,
+        previousError: this.state.connectionError === this.proposalDecision?.notice ? null : this.state.connectionError,
+        observedReport: null, reading: false, readAgain: false };
+      this.finishAttempt = attempt;
+      const report = await this.http<Wire.Report>('/api/session/finish', 'POST', body);
+      if (this.finishAttempt !== attempt || this.stopped) return;
+      if (attempt.replaced || !this.finishReportMatches(attempt, report)) { this.unknownFinish(attempt); return; }
+      this.state.report = mapReport(this.latestFinishReport(attempt, report)); this.finishAttempt = null; this.publish();
+    } catch (error) {
+      if ((attempt && this.finishAttempt !== attempt) || this.stopped) return;
+      if (attempt && error instanceof HttpDeadlineError) this.unknownFinish(attempt);
+      else { if (attempt) this.finishAttempt = null; this.fail(error); }
+    } finally { this.finishStarting = false; }
+  }
+  private unknownFinish(attempt: FinishAttempt) {
+    attempt.unknown = true;
+    attempt.notice = attempt.replaced
+      ? `SESSION_REPLACED: Wynik zakończenia poprzedniej sesji ${attempt.sessionId} jest nieznany. Nie ponowiono operacji.`
+      : `Brak odpowiedzi serwera (5 s). Wynik zakończenia jest nieznany; trwa sprawdzanie stanu, bez ponawiania operacji (${attempt.requestId}).`;
+    if (!this.proposalDecision?.notice && !this.decisionResultError && this.state.connectionError === attempt.previousError) this.fail(new Error(attempt.notice));
+    else this.publish();
+    void this.reconcileFinish();
+  }
+  private replaceFinishSession(sessionId: string) {
+    const attempt = this.finishAttempt;
+    if (!attempt || attempt.sessionId === sessionId || attempt.replaced) return;
+    attempt.replaced = true;
+    if (attempt.unknown) {
+      const ownNotice = this.state.connectionError === attempt.notice;
+      attempt.notice = `SESSION_REPLACED: Wynik zakończenia poprzedniej sesji ${attempt.sessionId} jest nieznany. Nie ponowiono operacji.`;
+      if (ownNotice) this.fail(new Error(attempt.notice));
+    }
+  }
+  private finishReportMatches(attempt: FinishAttempt, report: Wire.Report) {
+    return report.sessionId === attempt.sessionId && report.sourceWorkspaceVersion === attempt.expectedWorkspaceVersion
+      && report.reason === attempt.reason && !!report.reportId && !!report.snapshotId;
+  }
+  private latestFinishReport(attempt: FinishAttempt, report: Wire.Report) {
+    const observed = attempt.observedReport;
+    // Generation can complete while an older PENDING HTTP response is in flight.
+    return report.status === 'PENDING' && observed?.reportId === report.reportId
+      && observed.snapshotId === report.snapshotId && observed.status !== 'PENDING' ? observed : report;
+  }
+  private observeFinishReport(report: Wire.Report) {
+    const attempt = this.finishAttempt;
+    if (!attempt || attempt.replaced || !this.finishReportMatches(attempt, report)) return;
+    attempt.observedReport = report; void this.reconcileFinish();
+  }
+  private async reconcileFinish() {
+    const attempt = this.finishAttempt;
+    if (!attempt?.unknown || attempt.replaced || this.stopped || !this.synced || attempt.sessionId !== this.session?.sessionId) return;
+    if (attempt.reading) { attempt.readAgain = true; return; }
+    attempt.reading = true;
+    try {
+      // Read-only, authenticated reconciliation. 404 before durable capture is
+      // absence of evidence, NOT proof of failure and never permission to POST.
+      const report = await this.http<Wire.Report>(`/api/session/report?sessionId=${encodeURIComponent(attempt.sessionId)}`);
+      const session = await this.http<Wire.Session>('/api/session');
+      const observed = attempt.observedReport;
+      if (this.finishAttempt !== attempt || this.stopped || !this.synced || attempt.replaced
+        || this.session?.sessionId !== attempt.sessionId || session.sessionId !== attempt.sessionId
+        || session.lifecycle !== 'FINISHED' || session.workspaceVersion !== report.sourceWorkspaceVersion
+        || !observed || !this.finishReportMatches(attempt, report)
+        || report.reportId !== observed.reportId || report.snapshotId !== observed.snapshotId) return;
+      this.state.report = mapReport(this.latestFinishReport(attempt, report)); this.sessionState(session); this.finishAttempt = null;
+      if (this.decisionResultError === attempt.notice) this.decisionResultError = null;
+      if (this.state.connectionError === attempt.notice) this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError ?? attempt.previousError;
+      this.publish();
+    } catch { /* Keep UNKNOWN; a later report/state/authorized snapshot may retry GET only. */ }
+    finally {
+      attempt.reading = false;
+      if (attempt.readAgain) { attempt.readAgain = false; void this.reconcileFinish(); }
+    }
+  }
   async retryReport() { try { this.state.report = mapReport(await this.http<Wire.Report>('/api/session/report/retry', 'POST', this.commandBody())); this.publish(); } catch (error) { this.fail(error); } }
   async updateProjectSettings(settings: ProjectSettings) {
     if (!this.project) return false;
