@@ -6,6 +6,9 @@ import { AppError } from './errors';
 
 export const SNAPSHOT_MAX_BYTES = 1048576;
 export const SNAPSHOT_MAX_FILES = 1000;
+// Covers 1000 x 1024 UTF-16 path units even with double JSON escaping (including lone
+// surrogates), duplicated snapshot paths and entry metadata. Always bound on BOTH sides.
+export const SIGNED_MAX_BYTES = 16 * 1024 * 1024;
 export const sha256 = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const missing = (e: unknown) => (e as NodeJS.ErrnoException).code === 'ENOENT';
@@ -131,15 +134,20 @@ export class SnapshotStorage {
     }
   }
 
-  writeSigned(file: string, value: unknown): void {
+  writeSigned(file: string, value: unknown, limit = SIGNED_MAX_BYTES): void {
     this.assertBinding(this.binding);
     const payload = JSON.stringify(value);
-    privateWrite(file, Buffer.from(JSON.stringify({ payload, mac: createHmac('sha256', this.key).update(payload).digest('hex') })));
+    const bytes = Buffer.from(JSON.stringify({ payload, mac: createHmac('sha256', this.key).update(payload).digest('hex') }));
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > SIGNED_MAX_BYTES || bytes.length > limit) {
+      throw new AppError(413, 'SNAPSHOT_MANIFEST_TOO_LARGE', 'Signed snapshot/journal exceeds its readable byte budget; no material was published.');
+    }
+    privateWrite(file, bytes);
     syncDirectory(path.dirname(file));
   }
 
-  readSigned<T>(file: string, limit = 2 * 1024 * 1024): T {
+  readSigned<T>(file: string, limit = SIGNED_MAX_BYTES): T {
     this.assertBinding(this.binding);
+    if (!Number.isSafeInteger(limit) || limit < 0 || limit > SIGNED_MAX_BYTES) throw snapshotFailure('Invalid signed read budget.');
     const raw = privateRead(file, limit);
     try {
       const envelope = JSON.parse(raw.toString('utf8'));
@@ -178,7 +186,7 @@ export class SnapshotStorage {
     const storeBinding = path.join(base, 'store-v1.json');
     if (!fs.existsSync(storeBinding)) {
       const temp = path.join(base, '.binding-' + randomUUID());
-      this.writeSigned(temp, { format: 1, binding: this.binding });
+      this.writeSigned(temp, { format: 1, binding: this.binding }, 8192);
       try { fs.linkSync(temp, storeBinding); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
       finally { fs.unlinkSync(temp); }
       syncDirectory(base);

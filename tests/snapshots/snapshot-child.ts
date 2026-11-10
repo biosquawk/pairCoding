@@ -1,5 +1,6 @@
 // A real process with real I/O. Checkpoints ONLY coordinate the parent's hard kill.
 import fs from 'node:fs';
+import childProcess from 'node:child_process';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { WorkspaceService } from '../../src/server/WorkspaceService';
@@ -20,6 +21,25 @@ if (phase === 'FORWARD_LINKED' || phase === 'ROLLBACK_LINKED') {
     const source = String(from);
     if (String(to) === path.join(root, 'a.ts') && source.endsWith(phase === 'FORWARD_LINKED' ? '.forward' : '.rollback')) pause(phase, 0);
   }) as typeof fs.linkSync;
+  syncBuiltinESMExports();
+}
+if (phase === 'HELPER_LIVE' && process.platform === 'linux') {
+  const real = childProcess.spawnSync;
+  let injected = false;
+  childProcess.spawnSync = ((exe: any, args: any, options: any) => {
+    const move = JSON.parse(options.input);
+    if (!injected && move.from === path.join(root, 'a.ts') && move.to.endsWith('.captured')) {
+      injected = true;
+      const marker = JSON.stringify(path.join(root, '.paircoach', 'helper-live'));
+      const changed = [...args];
+      // Only scheduling around the REAL renameat2 is added. The orphan performs the
+      // actual syscall after its Node parent dies; it never receives new authorization.
+      changed[3] = `import os,time;open(${marker},'w').write(str(os.getpid()));time.sleep(1.5)\n` + changed[3] + `\nopen(${marker},'w').write('DONE')\n`;
+      process.send?.({phase, index: 0, pid: process.pid});
+      return real(exe, changed, options);
+    }
+    return real(exe, args, options);
+  }) as typeof childProcess.spawnSync;
   syncBuiltinESMExports();
 }
 let workspace: WorkspaceService | undefined, session: SessionController | undefined;

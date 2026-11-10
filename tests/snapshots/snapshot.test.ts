@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import childProcess from 'node:child_process';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { WorkspaceService } from '../../src/server/WorkspaceService';
@@ -246,10 +247,11 @@ for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${opera
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A'); f.write('b.ts', 'WORK B');
   let count = 0;
   if (operation === 'capture') {
-    const real = fs.renameSync;
-    t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
-      real(from, to);
-      if (String(from) === f.file('a.ts')) { count++; throw Object.assign(Error('unknown capture result'), { code: 'EIO' }); }
+    const real = childProcess.spawnSync;
+    t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => {
+      const result = real(exe, args, options); // actual no-replace, child joined
+      if (JSON.parse(options.input).from === f.file('a.ts')) { count++; return { ...result, stdout: 'unknown result' }; }
+      return result;
     });
   } else if (operation === 'publish') {
     const real = fs.linkSync;
@@ -272,10 +274,10 @@ for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${opera
 test('late foreign source replacement at actual capture syscall survives publicly and in retained material; no success', t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A');
   let injected = false;
-  const real = fs.renameSync;
-  t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
-    if (String(from) === f.file('a.ts') && !injected) { injected = true; fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'FOREIGN LATEST'); }
-    real(from, to);
+  const real = childProcess.spawnSync;
+  t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => {
+    if (JSON.parse(options.input).from === f.file('a.ts') && !injected) { injected = true; fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'FOREIGN LATEST'); }
+    return real(exe, args, options);
   }); syncBuiltinESMExports();
   assert.throws(() => f.restore(source.snapshotId, ['a.ts']), code('RECOVERY_REQUIRED'));
   assert.equal(injected, true); assert.equal(f.bytes('a.ts').toString(), 'FOREIGN LATEST');

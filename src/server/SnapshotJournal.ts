@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppError } from './errors';
+import { atomicNoReplace, prepareAtomicNoReplace } from './AtomicNoReplace';
 import { SnapshotStorage, type FrozenFile, type Identity, identity, sameIdentity, validIdentity, privateDirectory,
   privateRead, privateWrite, syncDirectory, sha256, missing, snapshotFailure, SNAPSHOT_MAX_BYTES } from './SnapshotStorage';
 
@@ -61,6 +62,7 @@ export class SnapshotJournal {
   }
 
   private terminal(directory: string, intent: Intent): boolean {
+    this.assertNoActiveMove(directory);
     let terminal = false;
     for (const state of ['COMMITTED', 'ROLLED_BACK']) if (this.exists(path.join(directory, state))) {
       const marker = this.store.readSigned<{ id: string; state: string; binding: unknown }>(path.join(directory, state), 8192);
@@ -73,7 +75,7 @@ export class SnapshotJournal {
 
   private marker(directory: string, intent: Intent, state: string): void {
     const temp = path.join(directory, '.marker-' + randomUUID());
-    this.store.writeSigned(temp, { id: intent.id, state, binding: this.store.binding });
+    this.store.writeSigned(temp, { id: intent.id, state, binding: this.store.binding }, 8192);
     privateDirectory(directory);
     fs.linkSync(temp, path.join(directory, state));
     fs.unlinkSync(temp);
@@ -157,6 +159,38 @@ export class SnapshotJournal {
     return { directory, intent };
   }
 
+  private assertNoActiveMove(directory: string): void {
+    privateDirectory(directory);
+    // Parent SIGKILL can orphan a helper. Only a durable authenticated JOINED record
+    // proves that spawnSync reaped it. Neither public vacancy nor dead parent PID does.
+    for (const name of fs.readdirSync(directory).filter(name => name.endsWith('.move-pending'))) {
+      const file = path.join(directory, name);
+      const pending = this.store.readSigned<{ binding: unknown }>(file, 8192);
+      this.store.assertBinding(pending.binding);
+      let joined: unknown;
+      try { joined = this.store.readSigned(file + '.joined', 8192); }
+      catch { throw snapshotFailure('A native move may have been in flight. Preserve the entire journal/public files and confirm the helper has stopped before manual reconciliation.'); }
+      if (JSON.stringify(joined) !== JSON.stringify(pending)) throw snapshotFailure('Native move completion does not match its durable intent.');
+    }
+  }
+
+  private captureNoReplace(directory: string, i: number, from: string, to: string, undo: boolean): void {
+    const id = randomUUID();
+    const pending = path.join(directory, `${i}.${undo ? 'undo' : 'capture'}.${id}.move-pending`);
+    const record = { id, binding: this.store.binding, index: i, undo, ownerPid: process.pid };
+    this.store.writeSigned(pending, record, 8192);
+    try {
+      this.checkpoint(undo ? 'UNDO_MOVE_ARMED' : 'CAPTURE_MOVE_ARMED', i);
+      atomicNoReplace(from, to);
+    } finally {
+      // spawnSync joins (also after a SIGKILL timeout) before returning/throwing. A hard
+      // parent termination skips this append: recovery then refuses uncertain effects.
+      // Keep BOTH records; no unlink of a slot that could have been replaced meanwhile.
+      this.store.writeSigned(pending + '.joined', record, 8192);
+    }
+    this.checkpoint(undo ? 'UNDO_MOVE_JOINED' : 'CAPTURE_MOVE_JOINED', i);
+  }
+
   /** A private alias is removed only after BOTH aliases have been validated. */
   private publish(directory: string, i: number, e: Entry, rollback: boolean): void {
     const id = rollback ? e.rollback : e.forward, image = rollback ? e.before : e.after;
@@ -206,6 +240,9 @@ export class SnapshotJournal {
   }
 
   run(before: RestoreBefore[], after: FrozenFile[], backupId: string, authorize: () => void, preflight: () => void): void {
+    authorize();
+    prepareAtomicNoReplace(); // before any journal/public effect; compiler failure is fail-closed
+    authorize();
     const { directory, intent } = this.prepare(before, after, backupId);
     let started = false;
     let captureAttempt = -1;
@@ -221,7 +258,7 @@ export class SnapshotJournal {
           if (this.exists(capture)) throw snapshotFailure('Capture slot already exists.');
           privateDirectory(directory); this.file(e.path); authorize();
           started = true; captureAttempt = i;
-          fs.renameSync(absolute, capture); // capture the actual inode, never unlink public source
+          this.captureNoReplace(directory, i, absolute, capture, false); // one OS no-replace move
           syncDirectory(directory); syncDirectory(path.dirname(absolute));
           this.assertFile(capture, e.original, e.before, 1, e.originalMtime!);
           captureAttempt = -1;
@@ -272,6 +309,7 @@ export class SnapshotJournal {
   }
 
   private rollback(directory: string, intent: Intent): void {
+    this.assertNoActiveMove(directory);
     this.checkpoint('ROLLBACK_BEGIN', -1);
     for (let i = intent.entries.length - 1; i >= 0; i--) {
       // Treat the journal as untrusted before each effect, including resumed recovery.
@@ -300,7 +338,7 @@ export class SnapshotJournal {
         if (undone) throw snapshotFailure('Both forward public and undo capture exist.');
         absolute = this.file(e.path); this.assertFile(absolute, e.forward, e.after);
         privateDirectory(directory);
-        fs.renameSync(absolute, undo);
+        this.captureNoReplace(directory, i, absolute, undo, true);
         syncDirectory(directory); syncDirectory(path.dirname(absolute));
         this.assertFile(undo, e.forward, e.after);
         this.checkpoint('ROLLBACK_CAPTURED', i);

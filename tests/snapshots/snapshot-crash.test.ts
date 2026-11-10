@@ -114,3 +114,46 @@ test('startup never rolls back a journal owned by another still-live process', {
   await killAt(t, f, 'restore', 'PREPARED', '*', () => { restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), expectedWork); });
   restart(f); assert.deepEqual(files(f), expectedWork); restart(f);
 });
+
+for (const action of ['restore', 'recover']) for (const boundary of ['ARMED', 'JOINED']) {
+  test(`native helper ${action} ${boundary}: hard kill preserves material and never races uncertain worker`, {timeout: 60000}, async t => {
+    const f = seed(t);
+    if (action === 'recover') await killAt(t, f, 'restore', 'PUBLISHED', '0');
+    const phase = `${action === 'restore' ? 'CAPTURE' : 'UNDO'}_MOVE_${boundary}`;
+    await killAt(t, f, action, phase, '0');
+    if (boundary === 'ARMED') {
+      const before = files(f);
+      restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), before);
+      restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), before);
+      assert.ok(journalFiles(f).some(name => name.includes('.move-pending')));
+    } else {
+      restart(f); assert.deepEqual(files(f), expectedWork);
+      restart(f); assert.deepEqual(files(f), expectedWork);
+    }
+  });
+}
+
+test('live native helper survives parent hard kill: restart refuses concurrent rollback, all bytes retained', {timeout: 60000, skip: process.platform !== 'linux' && 'Linux real renameat2 orphan coordination; Windows separate native cases'}, async t => {
+  const f = seed(t), marker = f.file('.paircoach/helper-live'); let helperPid = 0;
+  await killAt(t, f, 'restore', 'HELPER_LIVE', '0', () => {
+    const until = Date.now() + 10000;
+    while (!fs.existsSync(marker) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+    assert.ok(fs.existsSync(marker)); helperPid = Number(fs.readFileSync(marker, 'utf8'));
+    assert.ok(helperPid > 0); assert.doesNotThrow(() => process.kill(helperPid, 0));
+  });
+  assert.doesNotThrow(() => process.kill(helperPid, 0), 'actual helper is still alive after parent SIGKILL');
+  restart(f, 'RECOVERY_REQUIRED'); // must not roll back against a still-live helper
+  const until = Date.now() + 10000;
+  while (fs.readFileSync(marker, 'utf8') !== 'DONE' && Date.now() < until) await new Promise(r => setTimeout(r, 10));
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'DONE', 'orphan really executed original atomic syscall');
+  assert.deepEqual(files(f), {'a.ts': null, 'b.ts': expectedWork['b.ts']});
+  const base = f.file('.paircoach/snapshot-journal-v1');
+  const directory = path.join(base, fs.readdirSync(base).find(n => n.startsWith('transaction-'))!);
+  assert.equal(fs.readFileSync(path.join(directory, '0.captured'), 'utf8'), expectedWork['a.ts']);
+  restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), {'a.ts': null, 'b.ts': expectedWork['b.ts']});
+  const readOnly = new WorkspaceService(f.root, f.data);
+  try {
+    const backup = readOnly.listSnapshots().find(s => s.snapshotId !== f.snapshot.snapshotId)!;
+    assert.equal(Buffer.from(readOnly.readSnapshot(backup.snapshotId).files[0].rawBase64!, 'base64').toString(), expectedWork['a.ts']);
+  } finally { readOnly.close(); }
+});
