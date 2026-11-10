@@ -3,7 +3,7 @@ import { expect, type Page, type TestType } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fixture, filesBelow, type Fixture } from './fixture';
-import { Wire, editor, acknowledged, settings, session } from './helpers';
+import { Wire, editor, editorHost, acknowledged, settings, session } from './helpers';
 
 export const taskMarkdown = '# QA markdown-only task\n\nImplement your own solution in a new file.\n';
 export const languageCases = [
@@ -116,7 +116,7 @@ export function registerBasics(test: TestType<Args, {}>) {
     const views: Record<string, Awaited<ReturnType<typeof view>>> = {}, evidence: any[] = [];
     for (const c of languageCases) {
       await select(page, c.file); await editor(page, c.file).focus(); await page.keyboard.press('ControlOrMeta+Home');
-      await expect(page.locator('.monaco-editor')).toHaveAttribute('data-mode-id', c.language); // actual GUI model, not core DTO alone
+      await expect(editorHost(page, c.file)).toHaveAttribute('data-mode-id', c.language); // actual GUI host, not core DTO/model API
       await expect.poll(async () => {
         const s = await colors(page, c.first, c.name); return s.keyword !== s.identifier && s.keyword !== s.comment && s.identifier !== s.comment;
       }, { message: `${c.file}: visible keyword, identifier and comment must have distinct syntax colors` }).toBe(true);
@@ -139,12 +139,12 @@ export function registerBasics(test: TestType<Args, {}>) {
     }
     // Negative/control: identical bytes opened as plaintext must NOT masquerade as colored code.
     await select(page, 'plain.txt'); await editor(page, 'plain.txt').focus(); await page.keyboard.press('ControlOrMeta+Home');
-    await expect(page.locator('.monaco-editor')).toHaveAttribute('data-mode-id', 'plaintext');
+    await expect(editorHost(page, 'plain.txt')).toHaveAttribute('data-mode-id', 'plaintext');
     const plain = await colors(page, languageCases[0].first, languageCases[0].name);
     expect(plain.keyword).toBe(plain.identifier); expect(plain.comment).toBe(plain.identifier); evidence.push({ file: 'plain.txt', colors: plain });
     for (const c of languageCases) {
       await select(page, c.file); await editor(page, c.file).focus();
-      await expect(page.locator('.monaco-editor')).toHaveAttribute('data-mode-id', c.language);
+      await expect(editorHost(page, c.file)).toHaveAttribute('data-mode-id', c.language);
       await expect.poll(() => view(page), { message: `${c.file}: real cursor and viewport restored after tab return` }).toEqual(views[c.file]);
       const lines = expected[c.file].split('\n'), marker = `QA_CURSOR_${c.name}`;
       lines[69] = lines[69].slice(0, 6) + marker + lines[69].slice(6);
