@@ -163,7 +163,7 @@ export default function App() {
   };
 
   const taskFile = state.files.find((f) => f.path === state.scenario.taskFilePath);
-  const taskMarkdownContent = taskFile?.content || '# Treść zadania nie została znaleziona.';
+  const taskMarkdownContent = taskFile?.loaded === false && !state.taskReadError ? '# Wczytywanie zadania…' : taskFile?.content ?? '# Treść zadania nie została znaleziona.';
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100">
@@ -262,6 +262,7 @@ export default function App() {
           {/* Middle: Shared Monaco Editor */}
           <div className="flex-1 overflow-hidden relative">
             <EditorPanel
+              projectId={state.scenario.id}
               files={state.files}
               openTabs={openTabs}
               activePath={state.activePath}
@@ -299,6 +300,11 @@ export default function App() {
           )}
 
           {/* Bottom Panel: Zadanie, Czat, Konsola, Raport */}
+          {activeBottomTab === 'task' && !isBottomCollapsed && state.taskReadError && (
+            <div role="alert" aria-label="Błąd pliku zadania" className="px-3 py-2 text-xs text-amber-200 bg-amber-950 border-t border-amber-700 break-words">
+              Nie można odczytać zadania „{state.taskReadError.path}”: {state.taskReadError.message} Popraw ścieżkę pliku zadania w ustawieniach lub przywróć plik.
+            </div>
+          )}
           <BottomPanel
             activeTab={activeBottomTab}
             taskContent={taskMarkdownContent}

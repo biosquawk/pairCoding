@@ -7,6 +7,7 @@ export type ClientState = Omit<ReturnType<typeof simulator.getFullState>, 'fileC
   fileConflict: FileConflict | null;
   transportMode: TransportMode;
   connectionError: string | null;
+  taskReadError: { path: string; message: string } | null;
   pendingPaths: string[];
   storageError: string | null;
   snapshotsError: string | null;

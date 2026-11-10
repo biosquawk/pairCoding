@@ -94,7 +94,7 @@ export class PairCoachClient {
   // Getters
   public getState() {
     if (this.transportMode === 'LIVE_BACKEND') return this.live.getState();
-    return { ...simulator.getFullState(), transportMode: this.transportMode, connectionError: null, storageError: null, snapshotsError: null, pendingPaths: [] } satisfies ClientState;
+    return { ...simulator.getFullState(), transportMode: this.transportMode, connectionError: null, taskReadError: null, storageError: null, snapshotsError: null, pendingPaths: [] } satisfies ClientState;
   }
 
   // Scenario loading

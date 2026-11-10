@@ -4,7 +4,7 @@ import '../shared/monacoSetup';
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monacoType from 'monaco-editor';
 import { client } from '../services/PairCoachClient';
@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 
 interface EditorPanelProps {
+  projectId: string;
   files: ProjectFile[];
   openTabs: string[];
   activePath: string;
@@ -52,6 +53,7 @@ interface EditorPanelProps {
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
+  projectId,
   files,
   openTabs,
   activePath,
@@ -76,7 +78,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const isApplyingCoachStepRef = useRef(false);
-  const [editorReady, setEditorReady] = useState(false);
+  const [editorGeneration, setEditorGeneration] = useState(0);
   const interventionModelsRef = useRef(new Map<string, monacoType.editor.ITextModel>());
   const decorationsRef = useRef<string[]>([]);
   const viewStatesRef = useRef<Map<string, monacoType.editor.ICodeEditorViewState | null>>(new Map());
@@ -114,6 +116,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
+    // The new instance starts locked until the pre-paint model/ownership effects run.
+    editor.updateOptions({ readOnly: true });
+    // Monaco owns disposal. Never leave callbacks pointing at its disposed instance.
+    editor.onDidDispose(() => {
+      if (editorRef.current !== editor) return;
+      editorRef.current = null; monacoRef.current = null;
+      decorationsRef.current = [];
+      setEditorGeneration(generation => generation + 1);
+    });
 
     // Define custom themes or subtle decorations
     monaco.editor.defineTheme('paircoach-dark', {
@@ -136,14 +147,24 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     monaco.editor.setTheme('paircoach-dark');
-    setEditorReady(true);
+    setEditorGeneration(generation => generation + 1);
   };
 
+  // Switch before paint: never reveal an old project's model in a new workspace.
   // Switch models cleanly between tabs, preserving viewState & undo stack
-  useEffect(() => {
+  useLayoutEffect(() => {
     const editor = editorRef.current;
     const monaco = monacoRef.current;
-    if (!editor || !monaco || !activeFile || activeFile.loaded === false) return;
+    if (!editor || !monaco) return;
+    if (!activeFile || activeFile.loaded === false) {
+      const currentModel = editor.getModel();
+      if (currentModel) {
+        viewStatesRef.current.set(currentModel.uri.toString(), editor.saveViewState());
+        editor.setModel(null);
+      }
+      editor.updateOptions({ readOnly: true });
+      return;
+    }
 
     const uri = modelUri(monaco, activeFile.path);
     let model = monaco.editor.getModel(uri);
@@ -159,7 +180,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       // Save view state of current model
       const currentModel = editor.getModel();
       if (currentModel) {
-        const currentPath = currentModel.uri.path.replace(/^\//, '');
+        const currentPath = currentModel.uri.toString();
         viewStatesRef.current.set(currentPath, editor.saveViewState());
       }
 
@@ -167,12 +188,12 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       try { editor.setModel(model); } finally { isApplyingCoachStepRef.current = false; }
 
       // Restore view state if previously saved
-      const savedState = viewStatesRef.current.get(activeFile.path);
+      const savedState = viewStatesRef.current.get(uri.toString());
       if (savedState) {
         editor.restoreViewState(savedState);
       }
     }
-  }, [activePath, editorReady, activeFile?.loaded]);
+  }, [projectId, activePath, editorGeneration, activeFile?.loaded]);
 
   // External/snapshot synchronization updates inactive models too. Ordinary ACK never calls setValue.
   useEffect(() => client.onFileUpdated((file) => {
@@ -216,10 +237,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       }
       if (editor.getModel() !== model) {
         const old = editor.getModel();
-        if (old) viewStatesRef.current.set(old.uri.path.replace(/^\//, ''), editor.saveViewState());
+        if (old) viewStatesRef.current.set(old.uri.toString(), editor.saveViewState());
         isApplyingCoachStepRef.current = true;
         try { editor.setModel(model); } finally { isApplyingCoachStepRef.current = false; }
-        const view = viewStatesRef.current.get(step.path); if (view) editor.restoreViewState(view);
+        const view = viewStatesRef.current.get(uri.toString()); if (view) editor.restoreViewState(view);
       }
 
       // Check if step intersects with user's current selection
@@ -268,23 +289,25 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     return unsubStep;
-  }, [editorReady]);
+  }, [editorGeneration]);
 
   // Transport events lock Monaco synchronously; React rerender is not the write barrier.
   useEffect(() => client.onStateChanged(state => {
-    const path = editorRef.current?.getModel()?.uri.path.replace(/^\//, '');
-    const file = state.files.find(f => f.path === path);
-    editorRef.current?.updateOptions({ readOnly: state.writeOwner === 'COACH' || (state.writeOwner === 'SYNCING' && !state.isOffline) || !!file?.readOnly });
+    const model = editorRef.current?.getModel();
+    const path = model?.uri.path.replace(/^\//, '');
+    const file = model?.uri.authority === state.scenario.id ? state.files.find(f => f.path === path) : undefined;
+    editorRef.current?.updateOptions({ readOnly: state.writeOwner === 'COACH' || (state.writeOwner === 'SYNCING' && !state.isOffline) || !file || file.loaded === false || !!file.readOnly });
     if (state.writeOwner !== 'COACH') closeInterventions();
   }), []);
 
+  // Apply the current ownership lock before the editor can become visible.
   // Handle readOnly property based on writeOwner
-  useEffect(() => {
+  useLayoutEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
 
-    editor.updateOptions({ readOnly: writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !!activeFile?.readOnly, domReadOnly: false });
-  }, [writeOwner, isOffline, activeFile?.readOnly, editorReady]);
+    editor.updateOptions({ readOnly: writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !activeFile || activeFile.loaded === false || !!activeFile.readOnly, domReadOnly: false });
+  }, [writeOwner, isOffline, activeFile?.readOnly, activeFile?.loaded, activePath, editorGeneration]);
 
   // Handle Coach Pointer highlighting
   useEffect(() => {
@@ -313,7 +336,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     } else {
       decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
     }
-  }, [activePointer, activePath]);
+  }, [activePointer, activePath, editorGeneration]);
 
   // Bubble dragging handlers
   const handleMouseDown = (e: React.MouseEvent) => {
@@ -467,22 +490,24 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       {/* Editor Body */}
       <div className="flex-1 relative overflow-hidden">
-        {activeFile && activeFile.loaded !== false ? (
+        {/* Keep one editor instance across loading/resnapshot/project-open transitions. */}
+        <div className="h-full" hidden={!editorRef.current || !activeFile || activeFile.loaded === false}>
           <Editor
             height="100%"
-            defaultLanguage={getLanguageForPath(activeFile.path)}
-            defaultValue={activeFile.content}
+            defaultLanguage={activeFile ? getLanguageForPath(activeFile.path) : 'plaintext'}
+            defaultValue={activeFile?.content ?? ''}
             theme="paircoach-dark"
             onMount={handleEditorMount}
             onChange={(newVal) => {
               if (!isApplyingCoachStepRef.current && newVal !== undefined) {
-                const modelPath = editorRef.current?.getModel()?.uri.path.replace(/^\//, '') ?? activePath;
-                onContentChange(modelPath, newVal);
+                const model = editorRef.current?.getModel();
+                if (!model || model.uri.authority !== client.getState().scenario.id) return;
+                onContentChange(model.uri.path.replace(/^\//, ''), newVal);
               }
             }}
             options={{
-              readOnly: writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !!activeFile.readOnly,
-              ariaLabel: `Edytor pliku ${activeFile.path}`,
+              readOnly: !editorRef.current || writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !activeFile || activeFile.loaded === false || !!activeFile.readOnly,
+              ariaLabel: activeFile && activeFile.loaded !== false ? `Edytor pliku ${activeFile.path}` : 'Edytor bez otwartego pliku',
               quickSuggestions: false,
               suggestOnTriggerCharacters: false,
               wordBasedSuggestions: 'off',
@@ -502,9 +527,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               hideCursorInOverviewRuler: true,
             }}
           />
-        ) : (
+        </div>
+        {(!editorRef.current || !activeFile || activeFile.loaded === false) && (
           <div className="h-full flex items-center justify-center text-zinc-500 text-sm">
-            {activeFile?.loadError ? `Nie można otworzyć pliku: ${activeFile.loadError}. Wybierz inny plik.` : activeFile?.loaded === false ? 'Wczytywanie pliku…' : 'Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.'}
+            {activeFile?.loadError ? `Nie można otworzyć pliku: ${activeFile.loadError}. Wybierz inny plik.` : activeFile?.loaded === false ? 'Wczytywanie pliku…' : activeFile ? 'Uruchamianie edytora…' : 'Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.'}
           </div>
         )}
 

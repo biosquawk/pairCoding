@@ -238,6 +238,9 @@ export class LiveBackend {
     this.state.capabilities = { ...c, docsPlugin: c.docs, autocompletePlugin: c.autocomplete, runMainReason: c.canRunMain ? undefined : 'Brak zatwierdzonego profilu Run Main.', runTestsReason: c.canRunTests ? undefined : 'Brak zatwierdzonego profilu Run Tests.' };
     this.state.scenario = { ...this.state.scenario, id: project.projectId, title: project.rootPath, taskMode: project.settings.taskMode,
       taskFilePath: project.settings.taskFilePath ?? '', reviewNotesPath: project.settings.reviewNotesPath, capabilities: this.state.capabilities };
+    const taskPath = project.settings.taskFilePath;
+    const taskError = taskPath ? this.loadErrors.get(taskPath) : undefined;
+    this.state.taskReadError = taskPath && taskError ? { path: taskPath, message: taskError } : null;
     const visible = [...project.files];
     this.saves.forEach((save, path) => { if (!visible.some(f => f.path === path)) visible.push({ path, kind: 'FILE', version: save.draft.baseVersion }); });
     this.state.files = visible.map(f => ({ path: f.path, kind: f.kind, version: f.version ?? 0,
@@ -260,6 +263,7 @@ export class LiveBackend {
     }, 250);
   }
   private installDocument(doc: Wire.Document, external = true) {
+    this.loadErrors.delete(doc.path);
     const save = this.saves.get(doc.path);
     this.documents.set(doc.path, doc);
     if (save) {
@@ -277,12 +281,14 @@ export class LiveBackend {
   private async loadFile(path: string, external = false) {
     const generation = this.generation;
     let doc: Wire.Document;
-    try { doc = await this.http<Wire.Document>(`/api/file?path=${encodeURIComponent(path)}`); this.loadErrors.delete(path); }
+    try { doc = await this.http<Wire.Document>(`/api/file?path=${encodeURIComponent(path)}`); }
     catch (error) {
+      if (generation !== this.generation || this.stopped) return;
       this.loadErrors.set(path, error instanceof Error ? error.message : String(error));
       if (this.project) this.projectState(this.project); this.publish(); throw error;
     }
     if (generation !== this.generation || this.stopped) return;
+    this.loadErrors.delete(path);
     const existing = this.documents.get(path);
     if (existing && existing.version > doc.version) return;
     this.installDocument(doc, external); this.publish();
@@ -328,13 +334,14 @@ export class LiveBackend {
         }
       }
       if (generation !== this.generation || this.stopped) return;
+      const readError = readErrors.length ? readErrors.join('\n') : null;
       // Keep UNKNOWN/terminal outcome visible even if a background task-file read
       // failed; retain that independent failure for after the decision resolves.
-      if (this.proposalDecision && readErrors[0]) this.decisionResultError ??= readErrors[0];
+      if (this.proposalDecision && readError) this.decisionResultError ??= readError;
       this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer);
-      if (this.finishAttempt && readErrors[0]) this.finishAttempt.previousError = readErrors[0];
+      if (this.finishAttempt && readError) this.finishAttempt.previousError = readError;
       this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError
-        ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readErrors[0] ?? null;
+        ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readError ?? null;
       // Only the latest successfully installed generation consumes HELLO. An
       // overlapping broadcast can supersede an earlier async task-file read.
       if (hello && hello === this.helloSnapshot && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) {
@@ -561,11 +568,13 @@ export class LiveBackend {
     catch { void fallback(); }
   }
   async selectFile(path: string) {
+    const generation = this.generation;
     if (this.session?.writeOwner === 'COACH' && path !== this.state.activePath) this.triggerVeto();
     try {
       const save = this.saves.get(path);
       const deletedDraft = !!save?.conflict && !this.documents.has(path);
       if (!this.documents.has(path) && !deletedDraft) await this.loadFile(path);
+      if (generation !== this.generation || this.stopped) return;
       this.state.activePath = path;
       if (save?.conflict) this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: this.documents.get(path)?.content ?? '', diskDeleted: deletedDraft };
       if (this.synced && !deletedDraft) this.send('VIEW_CHANGED', { path, documentVersion: this.documents.get(path)?.version ?? null, cursor: null, selection: null }); this.publish();
@@ -757,14 +766,16 @@ export class LiveBackend {
   async retryReport() { try { this.state.report = mapReport(await this.http<Wire.Report>('/api/session/report/retry', 'POST', this.commandBody())); this.publish(); } catch (error) { this.fail(error); } }
   async updateProjectSettings(settings: ProjectSettings) {
     if (!this.project) return false;
+    const projectId = this.project.projectId;
     try {
       // Only human-confirmed structured profiles. Never parse the display command into shell execution.
       const wireSettings: Wire.Settings = { ...this.project.settings, aiConsent: settings.aiConsent, taskMode: settings.taskMode, taskFilePath: settings.taskFilePath || null, reviewNotesPath: settings.reviewNotesPath, runProfiles: settings.wireRunProfiles ?? this.project.settings.runProfiles, contextPatterns: settings.contextPatterns ?? this.project.settings.contextPatterns };
       const project = await this.http<Wire.Project>('/api/project/settings', 'PUT', this.commandBody({ expectedWorkspaceVersion: this.state.workspaceVersion, settings: wireSettings }));
+      if (this.project?.projectId !== projectId || project.projectId !== projectId) return false;
       this.projectState(project);
       if (wireSettings.taskFilePath) { try { await this.loadFile(wireSettings.taskFilePath); } catch (error) { this.fail(new Error(`Ustawienia zapisano, ale plik zadania jest niedostępny: ${error instanceof Error ? error.message : String(error)}`)); } }
       this.publish(); return true;
-    } catch (error) { this.fail(error); return false; }
+    } catch (error) { if (this.project?.projectId === projectId) this.fail(error); return false; }
   }
   async refreshSnapshots() {
     try { const snapshots = await this.http<Wire.Snapshot[]>('/api/snapshots'); this.state.snapshots = snapshots.map(s => ({ id: s.snapshotId, label: s.label, timestamp: Date.parse(s.createdAt), files: s.paths.map(path => ({ path, content: '' })) })); this.state.snapshotsError = null; this.publish(); }
