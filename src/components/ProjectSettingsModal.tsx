@@ -28,7 +28,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   const [taskMode, setTaskMode] = useState<TaskMode>(settings.taskMode);
   const [taskFilePath, setTaskFilePath] = useState(settings.taskFilePath);
   const [reviewNotesPath, setReviewNotesPath] = useState(settings.reviewNotesPath);
-  const [restoredId, setRestoredId] = useState<string | null>(null);
+
 
   // Sync internal state whenever modal opens or external settings change
   useEffect(() => {
@@ -37,7 +37,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
       setTaskMode(settings.taskMode);
       setTaskFilePath(settings.taskFilePath);
       setReviewNotesPath(settings.reviewNotesPath);
-      setRestoredId(null);
+
     }
   }, [isOpen, settings]);
 
@@ -57,13 +57,13 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 select-none">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full shadow-2xl p-5 text-zinc-200">
+      <div role="dialog" aria-modal="true" aria-label="Ustawienia Projektu i Trenera AI" className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg w-full shadow-2xl p-5 text-zinc-200">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div className="flex items-center gap-2 font-bold text-sm text-zinc-100">
             <Settings className="w-4 h-4 text-blue-400" />
             <span>Ustawienia Projektu i Trenera AI</span>
           </div>
-          <button onClick={onClose} className="p-1 rounded hover:bg-zinc-800 text-zinc-400">
+          <button aria-label="Zamknij ustawienia" onClick={onClose} className="p-1 rounded hover:bg-zinc-800 text-zinc-400">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -72,11 +72,12 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
           {/* AI Consent */}
           <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="flex items-center justify-between">
-              <label className="font-semibold text-zinc-200 flex items-center gap-1.5 cursor-pointer">
+              <label htmlFor="ai-consent" className="font-semibold text-zinc-200 flex items-center gap-1.5 cursor-pointer">
                 <Bot className="w-4 h-4 text-purple-400" />
                 <span>Zgoda na asystę Trenera AI (aiConsent)</span>
               </label>
               <input
+                id="ai-consent"
                 type="checkbox"
                 checked={aiConsent}
                 onChange={(e) => setAiConsent(e.target.checked)}
@@ -129,8 +130,9 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
           {/* Paths */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="block text-zinc-400 mb-1">Ścieżka pliku zadania:</label>
+              <label htmlFor="task-file" className="block text-zinc-400 mb-1">Ścieżka pliku zadania:</label>
               <input
+                id="task-file"
                 type="text"
                 value={taskFilePath}
                 onChange={(e) => setTaskFilePath(e.target.value)}
@@ -138,8 +140,9 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
               />
             </div>
             <div>
-              <label className="block text-zinc-400 mb-1">Ścieżka notatek z review:</label>
+              <label htmlFor="review-file" className="block text-zinc-400 mb-1">Ścieżka notatek z review:</label>
               <input
+                id="review-file"
                 type="text"
                 value={reviewNotesPath}
                 onChange={(e) => setReviewNotesPath(e.target.value)}
@@ -150,7 +153,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 
           {/* Run Profiles Info */}
           <div className="p-2.5 rounded bg-zinc-950/60 border border-zinc-800/80 text-[11px] text-zinc-400">
-            <span className="font-semibold text-zinc-300">Profile wykonawcze: </span>
+            <p>Uruchamiane programy działają z uprawnieniami lokalnego użytkownika, nie w sandboxie.</p><span className="font-semibold text-zinc-300">Profile wykonawcze: </span>
             {settings.runProfiles.map((p) => p.name).join(', ')}
           </div>
 
@@ -185,17 +188,12 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                       type="button"
                       onClick={() => {
                         onRestoreSnapshot?.(snap.id);
-                        setRestoredId(snap.id);
-                        setTimeout(() => setRestoredId(null), 2500);
+                        onClose(); // Actual restore requires a server proposal and explicit confirmation.
                       }}
-                      className={`px-2.5 py-1 rounded text-xs font-semibold shrink-0 transition-all flex items-center gap-1 ${
-                        restoredId === snap.id
-                          ? 'bg-emerald-600 text-white'
-                          : 'bg-zinc-800 hover:bg-blue-600 text-zinc-200 hover:text-white border border-zinc-700 hover:border-blue-500'
-                      }`}
+                      className="px-2.5 py-1 rounded text-xs font-semibold shrink-0 bg-zinc-800 hover:bg-blue-600 text-zinc-200 border border-zinc-700"
                     >
                       <RotateCcw className="w-3 h-3" />
-                      {restoredId === snap.id ? 'Przywrócono!' : 'Przywróć'}
+                      Poproś o przywrócenie
                     </button>
                   </div>
                 ))}

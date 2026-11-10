@@ -28,6 +28,8 @@ export interface ProjectFile {
   kind: FileKind;
   version: number;
   content: string;
+  readOnly?: boolean;
+  loaded?: boolean;
 }
 
 export interface RunProfile {
@@ -180,8 +182,11 @@ export interface CoachEditStep {
   path: string;
   interventionId: string;
   controlEpoch?: number;
-  stepIndex: number;
-  totalSteps: number;
+  stepIndex?: number; // simulator-only; absent in LIVE protocol
+  totalSteps?: number;
+  stepId?: string;
+  baseVersion?: number;
+  version?: number;
   range: {
     startLine: number;
     startColumn: number;
