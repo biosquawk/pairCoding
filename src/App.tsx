@@ -29,7 +29,7 @@ import { MOCK_SCENARIOS } from './data/mockScenarios';
 export default function App() {
   const [state, setState] = useState(client.getState());
   const [openTabs, setOpenTabs] = useState<string[]>([state.activePath]);
-  const [isDevSimulatorOpen, setIsDevSimulatorOpen] = useState(true);
+  const [isDevSimulatorOpen, setIsDevSimulatorOpen] = useState(client.transportMode === 'MOCK_SIMULATOR');
 
   // Resizable panel dimensions
   const [fileTreeWidth, setFileTreeWidth] = useState(240);

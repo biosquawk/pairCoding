@@ -21,7 +21,6 @@ export function parseRunProfiles(source: string): RunProfile[] {
     if (!Number.isInteger(p.timeoutMs) || (p.timeoutMs as number) < 1000 || (p.timeoutMs as number) > 300000) fail(prefix + 'timeoutMs: liczba całkowita 1000–300000.');
     if (p.testReportFormat !== 'NONE' && p.testReportFormat !== 'JUNIT_XML') fail(prefix + 'testReportFormat: NONE lub JUNIT_XML.');
     if (p.testReportGlob !== null && !text(p.testReportGlob, 1024)) fail(prefix + 'testReportGlob: null lub niepusty tekst do 1024 znaków.');
-    if (p.testReportFormat === 'JUNIT_XML' && p.testReportGlob === null) fail(prefix + 'JUNIT_XML wymaga ścieżki/globu świeżego raportu.');
   }
   return values as RunProfile[];
 }

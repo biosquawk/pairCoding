@@ -111,10 +111,13 @@ test('STEP_RENDERED only after renderer callback; coach content never echoes COD
 });
 test('seq gap halts steps, disconnects and retains draft; duplicate seq does not apply', async t => {
   const f = await fixture(); t.after(() => f.client.close());
+  f.receive('CHAT_REPLY', { replyTo: null, text: 'first' });
+  f.client.receive({ protocolVersion: '3.0', sessionId: 'session-1', messageId: 'duplicate', seq: 2, type: 'CHAT_REPLY', payload: { replyTo: null, text: 'must not apply twice' } });
+  assert.equal(f.client.getState().chatEntries.length, 2);
   f.client.saveFileContent('solution.ts', 'offline draft');
   f.client.receive({ protocolVersion: '3.0', sessionId: 'session-1', messageId: 'gap', seq: 99, type: 'CHAT_REPLY', payload: { replyTo: null, text: 'should not show' } });
   assert.equal(f.client.getState().writeOwner, 'SYNCING'); assert.equal(f.client.getState().isOffline, true); assert.equal(f.ws.readyState, 3);
-  assert.equal(f.client.getState().chatEntries.length, 1); assert.ok([...f.stored.values()].some(v => v.includes('offline draft')));
+  assert.equal(f.client.getState().chatEntries.length, 2); assert.ok([...f.stored.values()].some(v => v.includes('offline draft')));
 });
 test('storage failure is visible and does not discard the in-memory draft', async t => {
   const f = await fixture({ storage: { getItem: () => null, setItem: () => { throw new Error('quota'); }, removeItem: () => {} } }); t.after(() => f.client.close());
@@ -129,4 +132,29 @@ test('wire mappers preserve NO_TESTS/UNKNOWN and report failure/proposal identif
 test('UTF16 wire ranges match Monaco; invalid range is rejected instead of clamping', () => {
   assert.equal(applyWireEdit('A😀B\nsecond', { startLine: 1, startColumn: 2, endLine: 1, endColumn: 4 }, 'x'), 'AxB\nsecond');
   assert.throws(() => applyWireEdit('a', { startLine: 2, startColumn: 1, endLine: 2, endColumn: 1 }, 'x'));
+});
+
+test('REGRESSION: disconnect during COACH preserves local typing as offline draft, never a red saved state', async t => {
+  const f = await fixture(); t.after(() => f.client.close());
+  f.receive('CONTROL_STATE', { writeOwner: 'COACH', controlEpoch: 2, coachMode: 'INTERVENING', cooldownAfterVeto: false, interventionId: 'coach-offline', purpose: 'demo' });
+  f.ws.close();
+  assert.equal(f.client.getState().writeOwner, 'SYNCING');
+  f.client.saveFileContent('solution.ts', 'offline human text');
+  assert.equal(f.client.getState().files.find(file => file.path === 'solution.ts')?.content, 'offline human text');
+  assert.ok([...f.stored.values()].some(value => value.includes('offline human text')));
+  assert.equal(f.changes().length, 0);
+});
+
+test('reconnect snapshot retains a draft whose disk file was deleted instead of looping on GET404', async t => {
+  const f = await fixture(); t.after(() => f.client.close());
+  f.client.saveFileContent('solution.ts', 'recover deleted'); f.ws.close();
+  f.b.project.files = f.b.project.files.filter(file => file.path !== 'solution.ts');
+  f.b.activeDocument = { ...document('# Task'), path: 'challenge.md', languageId: 'markdown' };
+  f.b.session.activeFilePath = 'challenge.md';
+  f.receive('SESSION_SNAPSHOT', f.b); await pause(15);
+  assert.equal(f.client.getState().isOffline, false);
+  assert.equal(f.client.getState().fileConflict?.diskDeleted, true);
+  await f.client.selectFile('solution.ts');
+  assert.equal(f.client.getState().files.find(file => file.path === 'solution.ts')?.content, 'recover deleted');
+  assert.equal(f.client.getState().activePath, 'solution.ts');
 });
