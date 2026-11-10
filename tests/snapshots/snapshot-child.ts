@@ -1,6 +1,5 @@
 // A real process with real I/O. Checkpoints ONLY coordinate the parent's hard kill.
 import fs from 'node:fs';
-import childProcess from 'node:child_process';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { WorkspaceService } from '../../src/server/WorkspaceService';
@@ -21,21 +20,6 @@ if (phase === 'FORWARD_LINKED' || phase === 'ROLLBACK_LINKED') {
     const source = String(from);
     if (String(to) === path.join(root, 'a.ts') && source.endsWith(phase === 'FORWARD_LINKED' ? '.forward' : '.rollback')) pause(phase, 0);
   }) as typeof fs.linkSync;
-  syncBuiltinESMExports();
-}
-if (phase === 'HELPER_LIVE' && process.platform === 'linux') {
-  const real = childProcess.spawn;
-  childProcess.spawn = ((exe: any, args: any, options: any) => {
-    const changed = [...args];
-    if (args[4] === 'serve') {
-      const marker = JSON.stringify(path.join(root, '.paircoach', 'helper-live'));
-      const source = JSON.stringify(path.join(root, 'a.ts'));
-      changed[3] = changed[3].replace('    result = move(', `    if source == ${source} and target.endswith('.captured'):\n        with open(${marker},'w') as marker: marker.write(str(os.getpid()))\n        time.sleep(1.5)\n    result = move(`);
-      changed[3] = changed[3].replace("    code = 'OK'", `    if source == ${source} and target.endswith('.captured'):\n        with open(${marker},'w') as marker: marker.write('DONE')\n    code = 'OK'`);
-      process.send?.({phase, index: 0, pid: process.pid});
-    }
-    return real(exe, changed, options);
-  }) as typeof childProcess.spawn;
   syncBuiltinESMExports();
 }
 let workspace: WorkspaceService | undefined, session: SessionController | undefined;

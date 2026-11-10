@@ -1,4 +1,3 @@
-import {moveRequest} from './helpers';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -22,17 +21,16 @@ function fixture(t:any){
 }
 
 for (const phase of ['capture','rollback']) test(`K independent ${phase}: syscall destination retains late foreign bytes`, t=>{
- const f=fixture(t),real=fs.renameSync; let slot='',error:any=null;
+ const f=fixture(t); let slot='',error:any=null;
  if(phase==='rollback') f.w.on('snapshotCheckpoint',e=>{if(e.phase==='PUBLISHED'&&e.index===1)throw Error('force rollback');});
- t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
- t.mock.method(fs,'renameSync',(from:fs.PathLike,to:fs.PathLike)=>{
-   const request=moveRequest(from,to);
-   const source=request?.from??String(from),destination=request?.to??String(to);
-   if(!slot&&source===path.join(f.root,'a.ts')&&destination.endsWith(phase==='capture'?'.captured':'.undone')){
-     slot=destination;fs.writeFileSync(slot,'K UNIQUE FOREIGN '+phase,{flag:'wx'});
+ f.w.on('snapshotCheckpoint',e=>{
+   if(!slot&&e.phase===(phase==='capture'?'CAPTURE_MOVE_ARMED':'UNDO_MOVE_ARMED')&&e.index===0){
+     const base=path.join(f.root,'.paircoach','snapshot-journal-v1');
+     const directory=path.join(base,fs.readdirSync(base).find(n=>n.startsWith('transaction-'))!);
+     slot=path.join(directory,phase==='capture'?'0.captured':'0.undone');
+     fs.writeFileSync(slot,'K UNIQUE FOREIGN '+phase,{flag:'wx'});
    }
-   return real(from,to);
- });syncBuiltinESMExports();
+ });
  try{f.restore();}catch(e){error=e;}
  const found=slot&&fs.existsSync(slot)?fs.readFileSync(slot,'utf8'):null;
  console.log(JSON.stringify({phase,slot,found,publicA:f.read('a.ts'),error:error?.code??null}));

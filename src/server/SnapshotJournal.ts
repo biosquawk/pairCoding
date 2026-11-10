@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { AppError } from './errors';
-import { AtomicMoveSession, prepareAtomicSession, prepareAtomicNoReplace, type AtomicSessionIdentity } from './AtomicNoReplace';
+import { atomicNoReplace, prepareAtomicNoReplace } from './AtomicNoReplace';
 import { SnapshotStorage, type FrozenFile, type Identity, identity, sameIdentity, validIdentity, privateDirectory,
   privateRead, privateWrite, syncDirectory, sha256, missing, snapshotFailure, SNAPSHOT_MAX_BYTES } from './SnapshotStorage';
 
@@ -12,13 +12,11 @@ type Entry = { path: string; before: Image | null; after: Image | null; original
   originalMtime: string | null; forward: Identity | null; rollback: Identity | null };
 type Intent = { format: number; id: string; binding: unknown; backupId: string; ownerPid: number; entries: Entry[] };
 const operationName = /^transaction-([0-9a-f-]{36})$/;
-const activeWorkers = new Set<string>();
 
 /** No forward replay. All captured entries are retained, even after a clean rollback/commit. */
 export class SnapshotJournal {
   readonly base: string;
   private settled = new Map<string, string>();
-  private worker?: { name: string; move: AtomicMoveSession };
   constructor(private readonly store: SnapshotStorage, private readonly safePath: (p: string, missing?: boolean) => string,
     private readonly checkpoint: (phase: string, index: number) => void) {
     this.base = path.join(store.privateRoot, 'snapshot-journal-v1');
@@ -64,7 +62,7 @@ export class SnapshotJournal {
   }
 
   private terminal(directory: string, intent: Intent): boolean {
-    this.assertNoActiveMove(directory, intent.ownerPid);
+    this.assertNoActiveMove(directory, intent, false);
     let terminal = false;
     for (const state of ['COMMITTED', 'ROLLED_BACK']) if (this.exists(path.join(directory, state))) {
       const marker = this.store.readSigned<{ id: string; state: string; binding: unknown }>(path.join(directory, state), 8192);
@@ -161,86 +159,44 @@ export class SnapshotJournal {
     return { directory, intent };
   }
 
-  private startWorker(directory: string): { name: string; move: AtomicMoveSession } {
-    if (this.worker) return this.worker;
-    const name = '.atomic-' + randomUUID(), sessionDir = path.join(directory, name);
-    const descriptor = prepareAtomicSession(sessionDir, randomUUID());
-    // Bind the lock/dir identities BEFORE launch. A crash before spawn is also recoverable.
-    this.store.writeSigned(sessionDir + '.json', {binding: this.store.binding, descriptor}, 8192);
-    const move = new AtomicMoveSession(sessionDir, descriptor);
-    this.worker = {name, move}; activeWorkers.add(sessionDir); move.start();
-    return this.worker;
-  }
-
-  private endWorker(): void {
-    if (!this.worker) return;
-    const worker = this.worker;
-    worker.move.close(); // STOP + real OS exclusive lock barrier, never PID guessing
-    const receipt = worker.move.directory + '.quiesced';
-    if (!this.exists(receipt)) this.store.writeSigned(receipt, {binding: this.store.binding, descriptor: worker.move.descriptor}, 8192);
-    activeWorkers.delete(worker.move.directory);
-    this.worker = undefined;
-  }
-
-  private assertNoActiveMove(directory: string, ownerPid: number): void {
+  private assertNoActiveMove(directory: string, intent: Intent, reconcile: boolean): void {
     privateDirectory(directory);
-    const quiesced = new Set<string>();
-    for (const file of fs.readdirSync(directory).filter(n => /^\.atomic-[a-f0-9-]{36}\.json$/.test(n))) {
-      const name = file.slice(0, -5), sessionDir = path.join(directory, name);
-      const record = this.store.readSigned<{binding: unknown; descriptor: AtomicSessionIdentity}>(path.join(directory, file), 8192);
-      this.store.assertBinding(record.binding);
-      if (this.worker?.move.directory === sessionDir) continue;
-      if (activeWorkers.has(sessionDir)) throw snapshotFailure('Another journal in this process owns the worker; never stop a live writer.');
-      const receipt = sessionDir + '.quiesced';
-      if (this.exists(receipt)) {
-        if (JSON.stringify(this.store.readSigned(receipt, 8192)) !== JSON.stringify(record)) throw snapshotFailure('Atomic session receipt mismatch.');
-        new AtomicMoveSession(sessionDir, record.descriptor).assertStopped();
-      } else {
-        if (ownerPid !== process.pid) {
-          let live = false;
-          try { process.kill(ownerPid, 0); live = true; }
-          catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') live = true; }
-          if (live) throw snapshotFailure('Another process may still own this worker; never signal a live writer.');
-        }
-        // Permanent STOP handles a delayed spawn, lock barrier handles an in-flight
-        // syscall. Only after BOTH can recovery inspect bytes and perform rollback.
-        new AtomicMoveSession(sessionDir, record.descriptor).close();
-        this.store.writeSigned(receipt, record, 8192);
-      }
-      quiesced.add(name);
-    }
+    // New in-process calls cannot outlive their backend. Legacy child-helper records
+    // without JOINED remain genuinely ambiguous and must never be guessed/replayed.
     for (const name of fs.readdirSync(directory).filter(name => name.endsWith('.move-pending'))) {
       const file = path.join(directory, name);
-      const pending = this.store.readSigned<{binding: unknown; session?: string}>(file, 8192);
+      const pending = this.store.readSigned<{binding: unknown; backend?: string; ownerPid?: number}>(file, 8192);
       this.store.assertBinding(pending.binding);
-      if (!this.exists(file + '.joined')) {
-        if (!pending.session || !quiesced.has(pending.session)) throw snapshotFailure('Native move has no proven stopped worker; preserve material for reconciliation.');
-        // A stopped worker cannot execute a late effect. Existing capture/public
-        // identities below distinguish not-started, completed, and foreign outcomes.
-        this.store.writeSigned(file + '.joined', pending, 8192);
+      let joined: unknown;
+      try { joined = this.store.readSigned(file + '.joined', 8192); }
+      catch {
+        if (pending.backend !== 'inprocess-v1' || pending.ownerPid !== intent.ownerPid) throw snapshotFailure('Legacy/unknown native worker may be in flight; preserve all material.');
+        let live = false;
+        try { process.kill(intent.ownerPid, 0); live = true; }
+        catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') live = true; }
+        if (live) throw snapshotFailure('Another process may still own this in-process move; never race a live writer.');
+        if (reconcile) this.store.writeSigned(file + '.joined', pending, 8192);
+        joined = pending;
       }
-      if (JSON.stringify(this.store.readSigned(file + '.joined', 8192)) !== JSON.stringify(pending)) throw snapshotFailure('Native move completion does not match its durable intent.');
+      if (JSON.stringify(joined) !== JSON.stringify(pending)) throw snapshotFailure('Native move completion does not match its durable intent.');
     }
   }
 
   private captureNoReplace(directory: string, i: number, from: string, to: string, undo: boolean, authorize: () => void): void {
-    const worker = this.startWorker(directory);
     const id = randomUUID();
     const pending = path.join(directory, `${i}.${undo ? 'undo' : 'capture'}.${id}.move-pending`);
-    const record = { id, binding: this.store.binding, index: i, undo, ownerPid: process.pid, session: worker.name };
+    const record = { id, binding: this.store.binding, index: i, undo, ownerPid: process.pid, backend: 'inprocess-v1' };
     this.store.writeSigned(pending, record, 8192);
-    let stoppedOrCompleted = false;
     try {
       this.checkpoint(undo ? 'UNDO_MOVE_ARMED' : 'CAPTURE_MOVE_ARMED', i);
-      authorize(); // after worker startup/pending/checkpoint, immediately before request
-      worker.move.move(from, to);
-      stoppedOrCompleted = true;
-    } catch (error) {
-      this.endWorker(); // unknown response is NOT permission to race an orphan
-      stoppedOrCompleted = true;
-      throw error;
+      authorize();
+      atomicNoReplace(from, to);
+      this.checkpoint(undo ? 'UNDO_MOVE_RETURNED' : 'CAPTURE_MOVE_RETURNED', i);
     } finally {
-      if (stoppedOrCompleted) this.store.writeSigned(pending + '.joined', record, 8192);
+      // Control returned from the synchronous native call (or no call was made).
+      // SIGKILL skips this append: once that backend is dead, startup can reconcile
+      // actual inodes automatically, because there is no external helper to orphan.
+      this.store.writeSigned(pending + '.joined', record, 8192);
     }
     this.checkpoint(undo ? 'UNDO_MOVE_JOINED' : 'CAPTURE_MOVE_JOINED', i);
   }
@@ -295,7 +251,7 @@ export class SnapshotJournal {
 
   run(before: RestoreBefore[], after: FrozenFile[], backupId: string, authorize: () => void, preflight: () => void): void {
     authorize();
-    prepareAtomicNoReplace(); // before any journal/public effect; compiler failure is fail-closed
+    prepareAtomicNoReplace(); // before any journal/public effect; addon/library/symbol failure is fail-closed
     authorize();
     const { directory, intent } = this.prepare(before, after, backupId);
     let started = false;
@@ -359,11 +315,11 @@ export class SnapshotJournal {
         failure.cause = error; throw failure;
       }
       throw error;
-    } finally { this.endWorker(); }
+    }
   }
 
   private rollback(directory: string, intent: Intent): void {
-    this.assertNoActiveMove(directory, intent.ownerPid);
+    this.assertNoActiveMove(directory, intent, true);
     this.checkpoint('ROLLBACK_BEGIN', -1);
     for (let i = intent.entries.length - 1; i >= 0; i--) {
       // Treat the journal as untrusted before each effect, including resumed recovery.
@@ -428,8 +384,7 @@ export class SnapshotJournal {
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') live = true; }
         if (live) throw snapshotFailure('Another process may still own this restore; never roll back a live writer.');
       }
-      try { this.rollback(directory, this.load(directory)); }
-      finally { this.endWorker(); }
+      this.rollback(directory, this.load(directory));
     }
   }
 }

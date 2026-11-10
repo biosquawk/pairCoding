@@ -16,15 +16,6 @@ test('native atomic move: absent/occupied slots, spaces/Unicode, no shell path i
   assert.equal(fs.readFileSync(from, 'utf8'), 'TWO'); assert.equal(fs.readFileSync(to, 'utf8'), 'ONE');
 });
 
-test('missing native runtime fails closed without a rename/copy fallback', t => {
-  const f = fixture(t), to = path.join(f.parent, 'destination');
-  const real = childProcess.spawnSync;
-  t.mock.method(childProcess, 'spawnSync', (_exe: any, args: any, options: any) => real(path.join(f.parent, 'MISSING_EXECUTABLE'), args, options));
-  syncBuiltinESMExports();
-  assert.throws(() => atomicNoReplace(f.file('a.ts'), to), (e: any) => e.code === 'ATOMIC_MOVE_UNAVAILABLE');
-  assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n'); assert.equal(fs.existsSync(to), false);
-});
-
 test('already occupied capture slot before effect remains unchanged and blocks restore', t => {
   const f = fixture(t), snap = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK'); let slot = '';
   f.workspace.on('snapshotCheckpoint', e => {
@@ -38,13 +29,14 @@ test('already occupied capture slot before effect remains unchanged and blocks r
   assert.equal(fs.readFileSync(slot, 'utf8'), 'FOREIGN PREEXISTING'); assert.equal(f.bytes('a.ts').toString(), 'WORK');
 });
 
-test('real restore helper overhead is measured, not assumed Windows-equivalent', t => {
+test('in-process restore spawns no helper or shell', t => {
   const f = fixture(t), snap = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK');
-  let moves = 0; const real = childProcess.spawn;
+  let moves = 0; const real = childProcess.spawn, realSync = childProcess.spawnSync;
   t.mock.method(childProcess, 'spawn', (exe: any, args: any, options: any) => { moves++; return real(exe, args, options); }); syncBuiltinESMExports();
+  t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => { moves++; return realSync(exe, args, options); }); syncBuiltinESMExports();
   const start = performance.now(); f.restore(snap.snapshotId, ['a.ts']);
   console.log('NATIVE_RESTORE_OVERHEAD ' + JSON.stringify({platform: process.platform, files: 1, moves, elapsedMs: performance.now() - start}));
-  assert.equal(moves, 1); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
+  assert.equal(moves, 0); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });
 
 test('native no-replace supports long absolute paths without losing occupied destination', t => {
