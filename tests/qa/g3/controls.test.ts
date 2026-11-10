@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { acknowledged, Wire } from './helpers';
 import { programs, profile, denySnapshotWrites, type Fixture } from './fixture';
+import { languageCases, invalidInputs, limitBytes, taskMarkdown } from './g3-basics';
 import { require as tsRequire } from 'tsx/cjs/api';
 const { validateMessage, validateRequest } = tsRequire('../../../src/server/transport.ts', import.meta.url) as typeof import('../../../src/server/transport');
 
@@ -66,4 +67,27 @@ test('G3 OS-denial fixture really blocks new backup directory while retaining ol
     assert.throws(() => fs.mkdirSync(path.join(store, 'blocked')), (e: any) => ['EACCES', 'EPERM'].includes(e.code));
   } finally { restore(); }
   fs.mkdirSync(path.join(store, 'restored')); assert.equal(fs.readFileSync(path.join(store, 'old'), 'utf8'), 'RETAINED');
+});
+
+// Input controls only: these do not launch a browser or claim AC001..003 PASS.
+test('Final GUI fixture has four distinct language inputs, multiline workspace and no answer/build tool dependency', () => {
+  assert.deepEqual(languageCases.map(c => c.file.split('.').at(-1)), ['java', 'py', 'js', 'ts']);
+  assert.match(taskMarkdown, /^# QA markdown-only task\n/);
+  for (const c of languageCases) {
+    assert.ok(c.first.startsWith(c.keyword + ' ')); assert.ok(c.first.includes(c.name));
+    assert.equal(c.text.split('\n').length, 121); assert.ok(c.text.split('\n')[69].length > 6);
+    assert.ok(c.comment.startsWith(c.file.endsWith('.py') ? '#' : '//'));
+    assert.equal(c.text.includes(c.marker), false); // original is independent of later edits/Undo
+  }
+});
+
+test('Final GUI invalid inputs straddle the literal inclusive 1MiB UTF-8 limit and retain invalid binary octets', () => {
+  assert.equal(limitBytes, 1048576);
+  assert.equal(invalidInputs['boundary.txt'].length, 1048576);
+  assert.equal(invalidInputs['oversized.txt'].length, 1048577);
+  assert.equal(new TextDecoder('utf-8', { fatal: true }).decode(invalidInputs['boundary.txt']).length, 1048576);
+  assert.throws(() => new TextDecoder('utf-8', { fatal: true }).decode(invalidInputs['binary.dat']));
+  assert.ok(invalidInputs['binary.dat'].includes(0));
+  assert.equal(invalidInputs['boundary.txt'].subarray(-1).toString(), 'Z');
+  assert.equal(invalidInputs['oversized.txt'].subarray(-1).toString(), 'Z'); // tail must never be silently clipped
 });

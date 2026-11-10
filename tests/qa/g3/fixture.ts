@@ -32,12 +32,12 @@ export const programs: Record<string, string> = {
   'qa-unknown.cjs': `console.log('PASSED is just stdout, not a test report');`,
   'qa-tree.cjs': `const fs=require('node:fs');const {spawn}=require('node:child_process');fs.writeFileSync('parent.pid',String(process.pid));const child=spawn(process.execPath,['-e',"const fs=require('node:fs');fs.writeFileSync('child.pid',String(process.pid));setTimeout(()=>fs.writeFileSync('orphan-marker','SURVIVED'),4500);setInterval(()=>{},100);"],{stdio:'ignore',windowsHide:true});console.log('TREE_STARTED');setInterval(()=>console.log('alive'),100);`,
 };
-export async function fixture(options: { snapshot?: boolean; taskMode?: Settings['taskMode']; generate?: Generate } = {}) {
+export async function fixture(options: { snapshot?: boolean; taskMode?: Settings['taskMode']; generate?: Generate; files?: Record<string, string | Buffer> } = {}) {
   const runtime = path.resolve('artifacts/g3'); fs.mkdirSync(runtime, { recursive: true });
   const base = fs.mkdtempSync(path.join(runtime, 'case-'));
   const rootPath = path.join(base, 'project'), dataDir = path.join(base, 'data');
   fs.mkdirSync(rootPath); fs.mkdirSync(dataDir);
-  for (const [p, value] of Object.entries(programs)) fs.writeFileSync(path.join(rootPath, p), value);
+  for (const [p, value] of Object.entries(options.files ?? programs)) fs.writeFileSync(path.join(rootPath, p), value);
   const provider = new Provider(), token = `g3-qa-${randomUUID()}`;
   // Contract agreed by K. On base867 these options are not wired: that is NOT_READY,
   // never a fallback to fake executionFactory/Runner/Report or a skipped acceptance.

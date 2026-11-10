@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fixture, seed, reviewSeed, brokenSource, profile, silent, filesBelow, factsFiles, alive, sentinel, denySnapshotWrites, type Fixture } from './fixture';
 import { Wire, open, editor, append, saved, settings, configureProfiles, requestRestore, snapshots, session, get, chat, pause, veto, run, terminal, finish, report, hide, snapshotText, treePids } from './helpers';
 import type { CoachContext } from '../../../src/server/coach/context';
+import { registerBasics } from './g3-basics';
 import type { Run } from '../../../src/shared/protocol';
 
 const test = base.extend<{ make: (options?: Parameters<typeof fixture>[0]) => Promise<Fixture>; wire: Wire }>({
@@ -34,6 +35,9 @@ const test = base.extend<{ make: (options?: Parameters<typeof fixture>[0]) => Pr
     }
   },
 });
+// Final GUI gaps from HUMAN a3b804e0, same execution. Existing 16 cases below unchanged.
+registerBasics(test);
+
 const responseFor = (w: Wire, id: string) => w.sent.find(m => m.type === 'PROPOSAL_RESPONSE' && m.payload.proposalId === id);
 const editDecision = (c: Readonly<CoachContext>, p: string, text: string) => ({ kind: 'EDIT', purpose: 'G3 controlled AI boundary',
   path: p, documentVersion: c.documents.find(d => d.path === p)!.version, workspaceVersion: c.workspaceVersion,
