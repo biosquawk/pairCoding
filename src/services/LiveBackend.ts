@@ -205,7 +205,10 @@ export class LiveBackend {
     if (this.retries < 3) {
       const delay = [500, 1000, 2000][this.retries++];
       clearTimeout(this.reconnectTimer); this.reconnectTimer = setTimeout(() => void this.connect(), delay);
-    } else { this.state.connectionError = 'Offline. Draft jest lokalny, nie na dysku. Wybierz „Połącz ponownie”.'; this.publish(); }
+    } else {
+      this.state.connectionError = this.proposalDecision?.notice ?? this.finishAttempt?.notice ?? this.decisionResultError
+        ?? 'Offline. Draft jest lokalny, nie na dysku. Wybierz „Połącz ponownie”.'; this.publish();
+    }
   }
   private resync() {
     this.synced = false; this.pendingSteps.clear(); this.publish();
@@ -279,7 +282,7 @@ export class LiveBackend {
   }
   private async snapshot(bundle: Wire.SessionBundle, seq: number) {
     const generation = ++this.generation;
-    const hello = this.helloSnapshot; this.helloSnapshot = null;
+    const hello = this.helloSnapshot;
     this.synced = false; this.lastSeq = seq;
     this.saves.forEach(save => { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; save.timer = undefined; });
     this.documents.clear(); this.loadErrors.clear(); this.projectState(bundle.project); this.restoreDrafts();
@@ -325,7 +328,11 @@ export class LiveBackend {
       if (this.finishAttempt && readErrors[0]) this.finishAttempt.previousError = readErrors[0];
       this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError
         ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readErrors[0] ?? null;
-      if (hello && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) this.reconcileDecision(bundle);
+      // Only the latest successfully installed generation consumes HELLO. An
+      // overlapping broadcast can supersede an earlier async task-file read.
+      if (hello && hello === this.helloSnapshot && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) {
+        this.helloSnapshot = null; this.reconcileDecision(bundle);
+      }
       if (bundle.report) this.observeFinishReport(bundle.report);
       else void this.reconcileFinish();
       this.replayWindowPresence();
