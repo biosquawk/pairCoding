@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import os from 'node:os';
 import { writeFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { append, chat, disk, editorInput, manifest, openEditor } from '../e2e/browser-helpers';
+import { append, chat, disk, focusEditor, manifest, openEditor } from '../e2e/browser-helpers';
 
 /** Measurements observe actual native WebSocket and rendered DOM; no reply fabrication. */
 test('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 p95/max', async ({ page, browser }, info) => {
@@ -72,7 +72,7 @@ test('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 
     await expect(page.getByText('Pisze Trener AI', { exact: true })).toBeVisible();
     const marker = `qa_probe_${i}`;
     await page.evaluate(value => { (window as any).__qaTimings.marker = value; }, marker);
-    await editorInput(page).click(); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+    await focusEditor(page); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
     await append(page, `# ${marker}\n`);
     await expect.poll(() => page.evaluate(() => {
       const v = (window as any).__qaTimings.vetoes.at(-1);
