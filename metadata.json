@@ -1,0 +1,6 @@
+{
+  "name": "PairCoach — Trener Programowania AI",
+  "description": "Środowisko treningowe Code Kata i Code Review z autonomicznie piszącym Trenerem AI i prawem weta (2× Esc).",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
