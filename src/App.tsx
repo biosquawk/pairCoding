@@ -5,6 +5,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { client } from './services/PairCoachClient';
+import { observeWindowPresence } from './services/windowPresence';
 import {
   ActionProposal,
   CoachHintBubble,
@@ -15,7 +16,6 @@ import {
   ProjectSettings,
   ProposalType,
   TrainingScenario,
-  WindowPresence,
 } from './types/paircoach';
 import { HeaderBar } from './components/HeaderBar';
 import { DevSimulatorBar } from './components/DevSimulatorBar';
@@ -97,27 +97,7 @@ export default function App() {
   }, []);
 
   // Presence detection: Page Visibility API & Window focus/blur
-  useEffect(() => {
-    const updatePresence = () => {
-      if (document.hidden) {
-        client.sendWindowState('HIDDEN');
-      } else if (document.hasFocus()) {
-        client.sendWindowState('FOCUSED');
-      } else {
-        client.sendWindowState('BLURRED');
-      }
-    };
-
-    document.addEventListener('visibilitychange', updatePresence);
-    window.addEventListener('focus', updatePresence);
-    window.addEventListener('blur', updatePresence);
-
-    return () => {
-      document.removeEventListener('visibilitychange', updatePresence);
-      window.removeEventListener('focus', updatePresence);
-      window.removeEventListener('blur', updatePresence);
-    };
-  }, []);
+  useEffect(() => observeWindowPresence(document, window, presence => client.sendWindowState(presence)), []);
 
   // Resizable Splitter mouse handlers
   useEffect(() => {

@@ -49,6 +49,7 @@ export class LiveBackend {
   private clientId: string;
   private lastSeq = 0;
   private synced = false;
+  private latestPresence: WindowPresence | null = null;
   private connecting = false;
   private stopped = false;
   private retries = 0;
@@ -261,6 +262,7 @@ export class LiveBackend {
       }
       if (generation !== this.generation || this.stopped) return;
       this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer); this.state.connectionError = null;
+      this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
     } catch (error) { this.fail(error); this.resync(); }
@@ -498,7 +500,15 @@ export class LiveBackend {
   pauseTimer() { this.safeSend('TIMER_ACTION', { action: 'PAUSE', pauseOnHidden: null }); }
   resumeTimer() { this.safeSend('TIMER_ACTION', { action: 'RESUME', pauseOnHidden: null }); }
   setPauseOnHidden(enabled: boolean) { this.safeSend('TIMER_ACTION', { action: 'SET_HIDDEN_POLICY', pauseOnHidden: enabled }); }
-  sendWindowState(presence: WindowPresence) { if (this.synced) this.safeSend('WINDOW_STATE', { presence }); }
+  sendWindowState(presence: WindowPresence) {
+    // Presence belongs to this page, not the old session snapshot. Retain updates
+    // before connect and while resyncing, but send only after an authorized sync.
+    this.latestPresence = presence;
+    this.replayWindowPresence();
+  }
+  private replayWindowPresence() {
+    if (this.synced && !this.stopped && this.latestPresence !== null) this.safeSend('WINDOW_STATE', { presence: this.latestPresence });
+  }
   sendChatMessage(text: string) {
     const path = this.state.activePath || null;
     try { const messageId = this.send('CHAT_MESSAGE', { text, path, documentVersion: path ? this.documents.get(path)?.version ?? null : null, selection: null });
