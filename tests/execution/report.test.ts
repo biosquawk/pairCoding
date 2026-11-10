@@ -149,7 +149,7 @@ test('TEST-024 real process crash leaves durable facts and interrupted PENDING r
   const { spawn } = await import('node:child_process');
   const { fileURLToPath } = await import('node:url');
   const { service, root, materialPath } = fixture(t);
-  const source = fileURLToPath(new URL('../../src/server/ReportService.ts', import.meta.url));
+  const source = new URL('../../src/server/ReportService.ts', import.meta.url).href;
   const f = facts();
   const childSource = `import {ReportService} from ${JSON.stringify(source)}; const s=new ReportService({dataDir:${JSON.stringify(root)},emit:()=>{},generate:()=>new Promise(()=>{})}); s.finish('COMPLETED',${JSON.stringify(f)}); console.log('PERSISTED'); setInterval(()=>{},1000);`;
   const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', childSource],
