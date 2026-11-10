@@ -31,7 +31,7 @@ test('G3 separate-process finish capture exceeds real client deadline: UNKNOWN t
   const started=performance.now();await client.finishSession('COMPLETED');const elapsed=performance.now()-started;
   assert(errors.some(e=>e.includes('Wynik operacji jest nieznany')),'existing client must say UNKNOWN, not false FAIL/success');
   assert.equal(client.getState().report,null);assert.equal(frames.some(m=>m.type==='SESSION_REPORT'),false);
-  const checkpoint=messages.find(m=>m.phase==='CAPTURE_PENDING');assert(checkpoint);assert.equal(checkpoint.lifecycle,'READY');assert.equal(checkpoint.snapshots,0);
+  const checkpoint=messages.find(m=>m.phase==='CAPTURE_PENDING');assert(checkpoint);assert.equal(checkpoint.lifecycle,'READY');assert.equal(checkpoint.captureReadCode,'WORKSPACE_BUSY');
   await until(()=>client!.getState().report,r=>r?.status==='READY');
   const headers={Authorization:`Bearer ${token}`};
   const report=await fetch(baseUrl+`/api/session/report?sessionId=${ready.sessionId}`,{headers}).then(r=>r.json());

@@ -259,7 +259,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     try {
       coach?.abort(); session.releaseCoach();
       await execution.runner.stopAll();
-      const finalSnapshot=await workspace.createSnapshot('Stan końcowy próby');
+      const finalSnapshot=await workspace.createSnapshotAsync('Stan końcowy próby');
       const finalMaterial=workspace.readSnapshot(finalSnapshot.snapshotId);
       const finalSession=session.getSession();
       // Persist the prospective closed state first; a storage error must not announce FINISHED.

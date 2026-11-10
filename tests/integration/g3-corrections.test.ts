@@ -152,10 +152,10 @@ for(const revoked of [false,true])test(`G3 async seam awaits one gate promise be
 });
 
 test('G3 finish awaits yieldable capture before persistence and FINISHED; identical HTTP request shares result',async t=>{
-  const f=await fixture(t),capture=f.app.workspace.createSnapshot.bind(f.app.workspace);
+  const f=await fixture(t),capture=f.app.workspace.createSnapshotAsync.bind(f.app.workspace);
   let release!:()=>void,captures=0;
   // Promise seam simulation, not a scaled capture/performance proof.
-  t.mock.method(f.app.workspace,'createSnapshot',async(...args:Parameters<typeof capture>)=>{
+  t.mock.method(f.app.workspace,'createSnapshotAsync',async(...args:Parameters<typeof capture>)=>{
     captures++;await new Promise<void>(r=>{release=r;});return capture(...args);
   });
   const body={...f.command(),reason:'COMPLETED',expectedWorkspaceVersion:f.app.workspace.workspaceVersion};
