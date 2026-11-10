@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { once } from 'node:events';
+import http from 'node:http';
 import { WebSocket } from 'ws';
 import { createPairCoachServer } from '../../src/server/http';
 const TOKEN='test-token-0123456789abcdef-0123456789abcdef';
@@ -14,6 +15,12 @@ async function fixture(t:any) {
   const port=await app.listen(),base=`http://127.0.0.1:${port}`;
   t.after(async()=>{await app.close();fs.rmSync(parent,{recursive:true,force:true});});
   const request=async(p:string,body?:unknown,method=body?'POST':'GET',headers:Record<string,string>={})=>{
+    // Node fetch silently rewrites Host. Raw node:http is required to actually test a hostile Host.
+    if(headers.Host) return new Promise<{status:number;body:any}>((resolve,reject)=>{
+      const req=http.request(base+p,{method,headers:{Authorization:`Bearer ${TOKEN}`,...headers}},res=>{
+        let data='';res.on('data',chunk=>data+=chunk);res.on('end',()=>resolve({status:res.statusCode!,body:JSON.parse(data)}));
+      });req.on('error',reject);req.end();
+    });
     const res=await fetch(base+p,{method,headers:{Authorization:`Bearer ${TOKEN}`,...(body?{'Content-Type':'application/json'}:{}),...headers},body:body?JSON.stringify(body):undefined});
     return {status:res.status,body:await res.json()};
   };
