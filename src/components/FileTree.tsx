@@ -82,7 +82,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           found = {
             name: part,
             fullPath: currentPath,
-            isDir: !isLast,
+            isDir: !isLast || f.kind === 'DIRECTORY',
             file: isLast ? f : undefined,
             children: [],
           };

@@ -17,9 +17,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { HintBubbleSeverity, ProposalType, TrainingScenario } from '../types/paircoach';
+import type { TransportMode } from '../services/liveTypes';
 import { MOCK_SCENARIOS } from '../data/mockScenarios';
 
 interface DevSimulatorBarProps {
+  transportMode: TransportMode;
+  onTransportMode: (mode: TransportMode) => void;
   currentScenarioId: string;
   isOffline: boolean;
   onSelectScenario: (scenario: TrainingScenario) => void;
@@ -33,6 +36,8 @@ interface DevSimulatorBarProps {
 }
 
 export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
+  transportMode,
+  onTransportMode,
   currentScenarioId,
   isOffline,
   onSelectScenario,
@@ -53,7 +58,14 @@ export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
             Dev Simulator (Faza 1):
           </span>
 
+          <label>Transport (zmiana przeładuje stronę):
+            <select aria-label="Tryb transportu" value={transportMode} onChange={event => onTransportMode(event.target.value as TransportMode)} className="bg-zinc-900 border border-amber-700 rounded ml-2">
+              <option value="LIVE_BACKEND">LIVE — rzeczywisty backend</option>
+              <option value="MOCK_SIMULATOR">MOCK — jawny symulator</option>
+            </select>
+          </label>
           {/* Scenario Selector */}
+          {transportMode === 'MOCK_SIMULATOR' && (
           <select
             value={currentScenarioId}
             onChange={(e) => {
@@ -67,11 +79,11 @@ export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
                 {sc.title} [{sc.taskMode}]
               </option>
             ))}
-          </select>
+          </select>)}
         </div>
 
         {/* Action Triggers */}
-        <div className="flex flex-wrap items-center gap-1.5">
+        {transportMode === 'MOCK_SIMULATOR' && <div className="flex flex-wrap items-center gap-1.5">
           {/* Coach takeover */}
           <button
             onClick={onStartCoachDemo}
@@ -155,7 +167,7 @@ export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
           >
             Błąd Raportu
           </button>
-        </div>
+        </div>}
       </div>
     </div>
   );

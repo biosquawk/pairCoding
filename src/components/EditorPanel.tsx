@@ -1,3 +1,4 @@
+import '../shared/monacoSetup';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -33,6 +34,7 @@ interface EditorPanelProps {
   activePath: string;
   writeOwner: WriteOwner;
   isOffline?: boolean;
+  pendingPaths?: string[];
   controlEpoch: number;
   fileConflict: FileConflict | null;
   activePointer: CoachPointer | null;
@@ -55,6 +57,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   activePath,
   writeOwner,
   isOffline,
+  pendingPaths = [],
   controlEpoch,
   fileConflict,
   activePointer,
@@ -73,6 +76,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const isApplyingCoachStepRef = useRef(false);
+  const [editorReady, setEditorReady] = useState(false);
+  const interventionModelsRef = useRef(new Map<string, monacoType.editor.ITextModel>());
   const decorationsRef = useRef<string[]>([]);
   const viewStatesRef = useRef<Map<string, monacoType.editor.ICodeEditorViewState | null>>(new Map());
 
@@ -129,13 +134,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     monaco.editor.setTheme('paircoach-dark');
+    setEditorReady(true);
   };
 
   // Switch models cleanly between tabs, preserving viewState & undo stack
   useEffect(() => {
     const editor = editorRef.current;
     const monaco = monacoRef.current;
-    if (!editor || !monaco || !activeFile) return;
+    if (!editor || !monaco || !activeFile || activeFile.loaded === false) return;
 
     const uri = monaco.Uri.parse(`file:///${activeFile.path}`);
     let model = monaco.editor.getModel(uri);
@@ -155,7 +161,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         viewStatesRef.current.set(currentPath, editor.saveViewState());
       }
 
-      editor.setModel(model);
+      isApplyingCoachStepRef.current = true;
+      try { editor.setModel(model); } finally { isApplyingCoachStepRef.current = false; }
 
       // Restore view state if previously saved
       const savedState = viewStatesRef.current.get(activeFile.path);
@@ -163,39 +170,31 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         editor.restoreViewState(savedState);
       }
     }
-  }, [activePath]);
+  }, [activePath, editorReady, activeFile?.loaded]);
 
-  // Synchronize model only when change originates from external sync or snapshot restore
-  useEffect(() => {
-    const unsubFile = client.onFileUpdated((file: any) => {
-      if (file.path === activePath && file.isExternalOrSnapshot) {
-        const editor = editorRef.current;
-        if (!editor) return;
-        const model = editor.getModel();
-        if (model && model.getValue() !== file.content) {
-          isApplyingCoachStepRef.current = true;
-          try {
-            model.setValue(file.content);
-          } finally {
-            isApplyingCoachStepRef.current = false;
-          }
-        }
-      }
-    });
-    return unsubFile;
-  }, [activePath]);
+  // External/snapshot synchronization updates inactive models too. Ordinary ACK never calls setValue.
+  useEffect(() => client.onFileUpdated((file) => {
+    if (!file.isExternalOrSnapshot || !monacoRef.current) return;
+    const model = monacoRef.current.editor.getModel(monacoRef.current.Uri.parse(`file:///${file.path}`));
+    if (model && model.getValue() !== file.content) {
+      isApplyingCoachStepRef.current = true;
+      try { model.setValue(file.content); } finally { isApplyingCoachStepRef.current = false; }
+    }
+  }), []);
 
-  // Item 2: Close Undo stack boundary immediately upon Veto
+  // Protocol 3.0 has no stepIndex/totalSteps. Close the whole intervention at STUDENT/veto.
+  const closeInterventions = () => {
+    interventionModelsRef.current.forEach(model => { if (!model.isDisposed()) model.pushStackElement(); });
+    interventionModelsRef.current.clear();
+  };
   useEffect(() => {
-    const unsubVeto = client.onVetoExecuted(() => {
-      const editor = editorRef.current;
-      if (editor) {
-        const model = editor.getModel();
-        model?.pushStackElement();
-      }
-    });
-    return unsubVeto;
-  }, []);
+    if (writeOwner !== 'COACH') closeInterventions();
+  }, [writeOwner]);
+
+  useEffect(() => client.onVetoExecuted(() => {
+    closeInterventions();
+    editorRef.current?.updateOptions({ readOnly: false });
+  }), []);
 
   // Subscribe to Coach Step Edits directly on Monaco model
   useEffect(() => {
@@ -204,19 +203,22 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       const monaco = monacoRef.current;
       if (!editor || !monaco) return;
 
-      // Item 4: Reject late coach steps where controlEpoch does not match currentControlEpoch (TEST-010)
-      if (step.controlEpoch !== undefined && step.controlEpoch !== controlEpoch) {
-        console.warn(
-          `[PairCoach] Odrzucono spóźniony krok trenera (step.controlEpoch=${step.controlEpoch} !== currentControlEpoch=${controlEpoch})`
-        );
-        return;
+      // Read synchronous client state, not the potentially stale React render's epoch.
+      if (!client.canApplyStep(step)) return;
+      const uri = monaco.Uri.parse(`file:///${step.path}`);
+      let model = monaco.editor.getModel(uri);
+      if (!model) {
+        const file = client.getState().files.find(f => f.path === step.path);
+        if (!file || file.loaded === false) return;
+        model = monaco.editor.createModel(file.content, getLanguageForPath(step.path), uri);
       }
-
-      const model = editor.getModel();
-      if (!model) return;
-
-      const modelPath = model.uri.path.replace(/^\//, '');
-      if (modelPath !== step.path) return;
+      if (editor.getModel() !== model) {
+        const old = editor.getModel();
+        if (old) viewStatesRef.current.set(old.uri.path.replace(/^\//, ''), editor.saveViewState());
+        isApplyingCoachStepRef.current = true;
+        try { editor.setModel(model); } finally { isApplyingCoachStepRef.current = false; }
+        const view = viewStatesRef.current.get(step.path); if (view) editor.restoreViewState(view);
+      }
 
       // Check if step intersects with user's current selection
       const currentSelection = editor.getSelection();
@@ -237,8 +239,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       }
 
       // Grouping undo stack: before step 1
-      if (step.stepIndex === 1) {
+      if (!interventionModelsRef.current.has(step.interventionId)) {
         model.pushStackElement();
+        interventionModelsRef.current.set(step.interventionId, model);
       }
 
       isApplyingCoachStepRef.current = true;
@@ -255,39 +258,31 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           () => null
         );
 
-        // Grouping undo stack: after last step
-        if (step.stepIndex === step.totalSteps) {
-          model.pushStackElement();
-        }
-
-        // Keep file content synchronized in state without dispatching CODE_CHANGED
-        onContentChange(step.path, model.getValue());
+        // Only the actual Monaco mutation may acknowledge STEP_RENDERED. Never echo CODE_CHANGED.
+        client.stepRendered(step, model.getValue());
       } finally {
         isApplyingCoachStepRef.current = false;
       }
     });
 
     return unsubStep;
-  }, [activePath, controlEpoch, onContentChange]);
+  }, [editorReady]);
+
+  // Transport events lock Monaco synchronously; React rerender is not the write barrier.
+  useEffect(() => client.onStateChanged(state => {
+    const path = editorRef.current?.getModel()?.uri.path.replace(/^\//, '');
+    const file = state.files.find(f => f.path === path);
+    editorRef.current?.updateOptions({ readOnly: state.writeOwner === 'COACH' || (state.writeOwner === 'SYNCING' && !state.isOffline) || !!file?.readOnly });
+    if (state.writeOwner !== 'COACH') closeInterventions();
+  }), []);
 
   // Handle readOnly property based on writeOwner
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor) return;
 
-    if (writeOwner === 'COACH') {
-      // Block all mutations, but allow mouse selection, scroll, and copy Ctrl+C!
-      editor.updateOptions({
-        readOnly: true,
-        domReadOnly: false,
-      });
-    } else {
-      editor.updateOptions({
-        readOnly: false,
-        domReadOnly: false,
-      });
-    }
-  }, [writeOwner]);
+    editor.updateOptions({ readOnly: writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !!activeFile?.readOnly, domReadOnly: false });
+  }, [writeOwner, isOffline, activeFile?.readOnly, editorReady]);
 
   // Handle Coach Pointer highlighting
   useEffect(() => {
@@ -371,13 +366,17 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     <div className={`h-full flex flex-col bg-zinc-950 border-[4px] ${getBorderColor()} transition-colors duration-200 relative`}>
       {/* Tabs Header */}
       <div className="flex items-center justify-between bg-zinc-950 border-b border-zinc-800 px-2 py-1 select-none overflow-x-auto">
-        <div className="flex items-center gap-1 min-w-0">
+        <div role="tablist" aria-label="Otwarte pliki" className="flex items-center gap-1 min-w-0">
           {openTabs.map((tabPath) => {
             const isActive = tabPath === activePath;
             const fileName = tabPath.split('/').pop() || tabPath;
             return (
               <div
                 key={tabPath}
+                role="tab"
+                tabIndex={0}
+                aria-selected={isActive}
+                onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelectTab(tabPath); } }}
                 onClick={() => onSelectTab(tabPath)}
                 className={`flex items-center gap-2 px-3 py-1 text-xs rounded-t cursor-pointer border-t-2 transition-all ${
                   isActive
@@ -417,14 +416,16 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             <div className="flex items-center gap-1.5">
               <span className="text-red-400 font-medium">Tryb ucznia (Piszesz Ty)</span>
               <span className="text-zinc-600">·</span>
-              {isOffline ? (
+              {pendingPaths.includes(activePath) ? (
+                <span className="text-amber-400 font-normal">Zapis oczekuje na ACK</span>
+              ) : isOffline ? (
                 <span className="text-amber-400 font-normal">Niezapisany draft (Offline)</span>
               ) : (
                 <span className="text-emerald-400 font-normal">Zapisano</span>
               )}
             </div>
           ) : (
-            <span className="text-zinc-400">Synchronizacja / Zapis niepotwierdzony</span>
+            <span className="text-zinc-400">{isOffline ? 'Offline — lokalny draft' : 'Synchronizacja / Zapis niepotwierdzony'}</span>
           )}
         </div>
       </div>
@@ -438,6 +439,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               <strong>Konflikt synchronizacji:</strong> Plik na dysku uległ zmianie, ale posiadasz lokalny niepotwierdzony draft.
             </span>
           </div>
+          <details className="w-full">
+            <summary className="cursor-pointer">Porównaj zachowane wersje</summary>
+            <div className="grid sm:grid-cols-2 gap-2 mt-2">
+              <label>Draft lokalny<textarea aria-label="Draft lokalny konfliktu" readOnly value={fileConflict.localDraftContent} className="w-full h-28 bg-zinc-900 text-zinc-100" /></label>
+              <label>Wersja z dysku<textarea aria-label="Wersja z dysku konfliktu" readOnly value={fileConflict.diskContent} className="w-full h-28 bg-zinc-900 text-zinc-100" /></label>
+            </div>
+          </details>
           <div className="flex items-center gap-2">
             <button
               onClick={() => onResolveConflict('KEEP_LOCAL')}
@@ -457,7 +465,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       {/* Editor Body */}
       <div className="flex-1 relative overflow-hidden">
-        {activeFile ? (
+        {activeFile && activeFile.loaded !== false ? (
           <Editor
             height="100%"
             defaultLanguage={getLanguageForPath(activeFile.path)}
@@ -466,10 +474,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             onMount={handleEditorMount}
             onChange={(newVal) => {
               if (!isApplyingCoachStepRef.current && newVal !== undefined) {
-                onContentChange(activePath, newVal);
+                const modelPath = editorRef.current?.getModel()?.uri.path.replace(/^\//, '') ?? activePath;
+                onContentChange(modelPath, newVal);
               }
             }}
             options={{
+              readOnly: writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !!activeFile.readOnly,
+              ariaLabel: `Edytor pliku ${activeFile.path}`,
               minimap: { enabled: false },
               fontSize: 13,
               fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
@@ -488,7 +499,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           />
         ) : (
           <div className="h-full flex items-center justify-center text-zinc-500 text-sm">
-            Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.
+            {activeFile?.loaded === false ? 'Wczytywanie pliku…' : 'Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.'}
           </div>
         )}
 

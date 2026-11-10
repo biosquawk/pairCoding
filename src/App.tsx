@@ -42,16 +42,7 @@ export default function App() {
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
   const [finishReason, setFinishReason] = useState<EndReason>('COMPLETED');
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [projectSettings, setProjectSettings] = useState<ProjectSettings>({
-    aiConsent: true,
-    taskMode: state.scenario.taskMode,
-    taskFilePath: state.scenario.taskFilePath,
-    reviewNotesPath: state.scenario.reviewNotesPath,
-    runProfiles: [
-      { id: 'main', name: 'Run Main', command: 'node dist/index.js', isTest: false },
-      { id: 'test', name: 'Run Tests', command: 'vitest run', isTest: true },
-    ],
-  });
+  const projectSettings = state.projectSettings;
 
   // Splitter dragging refs
   const isDraggingHorizontalRef = useRef(false);
@@ -66,7 +57,7 @@ export default function App() {
       setState(newState);
       // Clean up deleted/renamed tabs and ensure active path is valid
       setOpenTabs((prev) => {
-        const existingPaths = new Set(newState.files.map((f) => f.path));
+        const existingPaths = new Set(newState.files.filter(f => f.kind === 'FILE').map((f) => f.path));
         let validTabs = prev.filter((p) => existingPaths.has(p));
         if (newState.activePath && existingPaths.has(newState.activePath) && !validTabs.includes(newState.activePath)) {
           validTabs = [...validTabs, newState.activePath];
@@ -77,6 +68,7 @@ export default function App() {
         return validTabs;
       });
     });
+    setState(client.getState());
     return unsub;
   }, []);
 
@@ -175,12 +167,7 @@ export default function App() {
   const handleScenarioChange = (scenario: TrainingScenario) => {
     client.loadScenario(scenario);
     setOpenTabs([scenario.files[0].path]);
-    setProjectSettings((prev) => ({
-      ...prev,
-      taskMode: scenario.taskMode,
-      taskFilePath: scenario.taskFilePath,
-      reviewNotesPath: scenario.reviewNotesPath,
-    }));
+
   };
 
   const handleOpenFinish = (reason: 'COMPLETED' | 'ABANDONED') => {
@@ -233,9 +220,20 @@ export default function App() {
         onToggleDevSimulator={() => setIsDevSimulatorOpen(!isDevSimulatorOpen)}
       />
 
+      <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs border-b border-zinc-800 bg-zinc-900" role="status">
+        <strong>{state.transportMode === 'LIVE_BACKEND' ? 'LIVE — lokalny backend' : 'MOCK — jawna symulacja, bez zapisu na dysk'}</strong>
+        {state.transportMode === 'LIVE_BACKEND' && <>
+          <span>{state.isOffline ? 'Synchronizacja / Offline — niepotwierdzone zmiany pozostają lokalne.' : state.pendingPaths.length ? 'Zapis oczekuje na ACK.' : 'Połączono z backendem.'}</span>
+          <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
+        </>}
+        {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
+        {state.storageError && <span role="alert" className="text-rose-300">{state.storageError}</span>}
+      </div>
       {/* Dev Simulator Bar (Togglable) */}
       {isDevSimulatorOpen && (
         <DevSimulatorBar
+          transportMode={state.transportMode}
+          onTransportMode={(mode) => client.setTransportMode(mode)}
           currentScenarioId={state.scenario.id}
           isOffline={state.isOffline}
           onSelectScenario={handleScenarioChange}
@@ -252,7 +250,7 @@ export default function App() {
       {/* Main Workspace Area */}
       <div className="flex-1 flex overflow-hidden relative">
         {/* Left Panel: File Tree */}
-        <div style={{ width: `${fileTreeWidth}px` }} className="shrink-0 h-full overflow-hidden">
+        <div style={{ width: `min(${fileTreeWidth}px, 36vw)` }} className="shrink-0 h-full overflow-hidden">
           <FileTree
             files={state.files}
             activePath={state.activePath}
@@ -279,7 +277,7 @@ export default function App() {
         />
 
         {/* Center & Bottom: Editor and Bottom Panels */}
-        <div className="flex-1 flex flex-col h-full overflow-hidden">
+        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
           {/* Middle: Shared Monaco Editor */}
           <div className="flex-1 overflow-hidden relative">
             <EditorPanel
@@ -288,6 +286,7 @@ export default function App() {
               activePath={state.activePath}
               writeOwner={state.writeOwner}
               isOffline={state.isOffline}
+              pendingPaths={state.pendingPaths}
               controlEpoch={state.controlEpoch}
               fileConflict={state.fileConflict}
               activePointer={state.activePointer}
@@ -353,10 +352,7 @@ export default function App() {
         settings={projectSettings}
         snapshots={state.snapshots}
         onClose={() => setIsSettingsModalOpen(false)}
-        onSave={(updated) => {
-          setProjectSettings(updated);
-          client.updateProjectSettings(updated);
-        }}
+        onSave={(updated) => { client.updateProjectSettings(updated); }}
         onRestoreSnapshot={(snapshotId) => {
           client.restoreSnapshotById(snapshotId);
         }}
