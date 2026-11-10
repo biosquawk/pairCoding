@@ -86,6 +86,10 @@ export class LiveBackend {
   private finishStarting = false;
   private recoveryKey = '';
   private generation = 0;
+  // A document-cache generation is not a navigation intent. Same-session
+  // snapshots may describe the server view BEFORE an already requested tab.
+  private selectedView: { path: string; projectId: string; sessionId: string } | null = null;
+  private selectionRequest = 0;
 
   constructor(options: LiveOptions = {}) {
     this.baseUrl = (options.baseUrl ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
@@ -305,7 +309,13 @@ export class LiveBackend {
       // Lost ACK is not success; this authoritative new epoch is the proof of cutoff.
       this.vetoPending = null; this.vetoCutoff = null; clearTimeout(this.vetoTimer);
     }
-    this.state.activePath = bundle.activeDocument?.path ?? bundle.session.activeFilePath ?? bundle.project.files.find(f => f.kind === 'FILE')?.path ?? '';
+    const selectable = (path: string | null | undefined): path is string => !!path &&
+      (bundle.project.files.some(file => file.path === path && file.kind === 'FILE') || this.saves.has(path));
+    const selected = this.selectedView;
+    if (selected && (selected.projectId !== bundle.project.projectId || selected.sessionId !== bundle.session.sessionId || bundle.session.writeOwner === 'COACH' || !selectable(selected.path))) this.selectedView = null;
+    this.state.activePath = this.selectedView?.path ?? (selectable(bundle.activeDocument?.path) ? bundle.activeDocument!.path
+      : selectable(bundle.session.activeFilePath) ? bundle.session.activeFilePath
+      : bundle.project.files.find(f => f.kind === 'FILE')?.path ?? '');
     if (bundle.activeDocument) this.installDocument(bundle.activeDocument, false);
     this.proposals = new Map(bundle.proposals.map(p => [p.proposalId, p]));
     this.state.activeProposal = bundle.proposals[0] ? mapProposal(bundle.proposals[0]) : null;
@@ -349,6 +359,11 @@ export class LiveBackend {
       }
       if (bundle.report) this.observeFinishReport(bundle.report);
       else void this.reconcileFinish();
+      // Selection made while the snapshot was loading was not sent offline.
+      // Advertise only its view, never replay CREATE/RENAME/DELETE or a save.
+      if (this.selectedView && this.selectedView.path === this.state.activePath && this.documents.has(this.state.activePath)
+        && this.session?.activeFilePath !== this.state.activePath) this.send('VIEW_CHANGED', { path: this.state.activePath,
+          documentVersion: this.documents.get(this.state.activePath)!.version, cursor: null, selection: null });
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -535,6 +550,7 @@ export class LiveBackend {
       const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(n => n.toString(16).padStart(2, '0')).join('');
       if (generation !== this.generation || this.vetoPending || this.invalidInterventions.has(p.interventionId) || this.session?.controlEpoch !== p.controlEpoch) return;
       if (hash !== p.contentHash) throw new Error('Niezgodny hash kroku. Wymagana synchronizacja.');
+      this.selectedView = null; this.selectionRequest++;
       this.pendingSteps.set(p.stepId, { step: p, content }); this.state.activePath = p.path; this.publish();
       this.emit('step', { ...p, text: p.textBlock } satisfies CoachEditStep);
     } catch (error) { this.fail(error); this.resync(); }
@@ -568,17 +584,25 @@ export class LiveBackend {
     catch { void fallback(); }
   }
   async selectFile(path: string) {
-    const generation = this.generation;
+    const request = ++this.selectionRequest, projectId = this.project?.projectId, sessionId = this.session?.sessionId;
+    const current = () => !this.stopped && request === this.selectionRequest && projectId === this.project?.projectId && sessionId === this.session?.sessionId;
     if (this.session?.writeOwner === 'COACH' && path !== this.state.activePath) this.triggerVeto();
     try {
-      const save = this.saves.get(path);
-      const deletedDraft = !!save?.conflict && !this.documents.has(path);
-      if (!this.documents.has(path) && !deletedDraft) await this.loadFile(path);
-      if (generation !== this.generation || this.stopped) return;
+      // A valid same-project snapshot invalidates the cache/read, not this latest
+      // user intent. Reload into its current generation, never install stale bytes.
+      let generation: number;
+      do {
+        generation = this.generation;
+        const save = this.saves.get(path);
+        if (!this.documents.has(path) && !(save?.conflict && !this.documents.has(path))) await this.loadFile(path);
+        if (!current()) return;
+      } while (generation !== this.generation);
+      const save = this.saves.get(path), deletedDraft = !!save?.conflict && !this.documents.has(path);
+      this.selectedView = projectId && sessionId ? { path, projectId, sessionId } : null;
       this.state.activePath = path;
       if (save?.conflict) this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: this.documents.get(path)?.content ?? '', diskDeleted: deletedDraft };
       if (this.synced && !deletedDraft) this.send('VIEW_CHANGED', { path, documentVersion: this.documents.get(path)?.version ?? null, cursor: null, selection: null }); this.publish();
-    } catch (error) { this.fail(error); }
+    } catch (error) { if (current()) this.fail(error); }
   }
   async flushAll() {
     this.saves.forEach((_, path) => this.flushFile(path));
@@ -595,17 +619,22 @@ export class LiveBackend {
       // New folder means new consent and no inherited executable approval.
       const settings: Wire.Settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
       const project = await this.http<Wire.Project>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
+      this.selectedView = null; this.selectionRequest++;
       this.generation++; this.lastSeq = 0; this.documents.clear(); this.loadErrors.clear(); this.state.fileConflict = null; this.state.activePath = '';
       this.projectState(project); this.reconnect(); return true;
     } catch (error) { this.fail(error); return false; }
   }
   async mutateFile(operation: 'CREATE' | 'RENAME' | 'DELETE', path: string, newPath: string | null = null, content: string | null = null) {
+    const projectId = this.project?.projectId, sessionId = this.session?.sessionId, selection = this.selectionRequest;
+    const current = () => !this.stopped && projectId === this.project?.projectId && sessionId === this.session?.sessionId;
     try {
       await this.flushAll();
+      if (!current()) return;
       const project = await this.http<Wire.Project>('/api/file', 'POST', this.commandBody({ operation, path, newPath, content, baseVersion: operation === 'CREATE' ? null : this.documents.get(path)?.version ?? this.project?.files.find(f => f.path === path)?.version, controlEpoch: this.session?.controlEpoch }));
+      if (!current()) return;
       this.documents.delete(path); this.projectState(project); this.publish();
-      if (operation !== 'DELETE') await this.selectFile(newPath ?? path);
-    } catch (error) { this.fail(error); }
+      if (operation !== 'DELETE' && selection === this.selectionRequest) await this.selectFile(newPath ?? path);
+    } catch (error) { if (current()) this.fail(error); }
   }
   async startTimer() {
     try { this.sessionState(await this.http<Wire.Session>('/api/session/start', 'POST', this.commandBody({ limitMs: this.state.limitMs || null, pauseOnHidden: this.state.pauseOnHidden }))); this.publish(); } catch (error) { this.fail(error); }
