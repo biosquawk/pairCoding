@@ -30,6 +30,7 @@ export interface ProjectFile {
   content: string;
   readOnly?: boolean;
   loaded?: boolean;
+  loadError?: string;
 }
 
 export interface RunProfile {

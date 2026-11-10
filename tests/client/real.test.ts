@@ -58,6 +58,14 @@ test('REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, exte
   assert.equal(client.getState().files.find(f => f.path === 'solution.ts')?.content, 'const other = 9;\n');
   assert.equal(client.getState().projectSettings.aiConsent, false);
   assert.deepEqual(client.getState().projectSettings.runProfiles, []);
+  const noTask = path.join(dir, 'no-task'); fs.mkdirSync(noTask); fs.writeFileSync(path.join(noTask, 'main.py'), 'value = 1\n');
+  await client.openProject(noTask);
+  await until(() => !client.getState().isOffline && client.getState().scenario.title === noTask, 'missing task does not disconnect editor');
+  assert.match(client.getState().connectionError ?? '', /challenge.md/);
+  await client.selectFile('main.py');
+  client.saveFileContent('main.py', 'value = 2\n');
+  await until(() => client.getState().pendingPaths.length === 0, 'editor still saves without challenge.md');
+  assert.equal(fs.readFileSync(path.join(noTask, 'main.py'), 'utf8'), 'value = 2\n');
 });
 
 test('REGRESSION: lost veto ACK then real reconnect snapshot proves cutoff and unlocks preserved draft', async t => {
