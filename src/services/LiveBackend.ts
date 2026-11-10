@@ -410,7 +410,10 @@ export class LiveBackend {
     if (!doc || doc.readOnly || this.preparing || (this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
     const current = this.saves.get(path);
     if (!current && doc.content === content) return;
-    this.saves.set(path, current ? { ...current, draft: { ...current.draft, content } } : { draft: { content, baseVersion: doc.version }, conflict: false });
+    // Timer callbacks own this Save object. Replacing it would strand the copied
+    // timer handle when the original callback expires behind a conflict/veto barrier.
+    if (current) current.draft = { ...current.draft, content };
+    else this.saves.set(path, { draft: { content, baseVersion: doc.version }, conflict: false });
     this.state.activePointer = null; this.state.activeHintBubble = null;
     if (this.state.fileConflict?.path === path) this.state.fileConflict = { ...this.state.fileConflict, localDraftContent: content };
     this.projectState(this.project!); this.persist(); this.schedule(path); this.publish();
