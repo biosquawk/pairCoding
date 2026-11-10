@@ -5,7 +5,10 @@ import { EventEmitter } from 'node:events';
 import type { Document, FileEntry, Project, Settings, Snapshot } from '../shared/protocol';
 import type { MutationAuth } from './WriteGate';
 import { AppError } from './errors';
+import { SnapshotStorage, type FrozenSnapshot, snapshotAllowed, identity, snapshotFailure } from './SnapshotStorage';
+import { SnapshotJournal, type RestoreBefore } from './SnapshotJournal';
 
+const activeRoots = new Set<string>(); // synchronous guard shared by all instances in this server
 const MAX_BYTES = 1048576;
 const MAX_FILES = 1000;
 const EXCLUDED = new Set(['.git', 'node_modules', 'target', '__pycache__', '.venv', 'dist', '.paircoach']);
@@ -23,9 +26,13 @@ export type ExternalSync = { operation: 'CREATED' | 'UPDATED' | 'DELETED'; path:
 export class WorkspaceService extends EventEmitter {
   readonly rootPath: string;
   readonly dataDir: string;
-  readonly projectId = randomUUID();
+  readonly projectId: string;
   workspaceVersion = 0;
   settings: Settings;
+  private readonly snapshotStore: SnapshotStorage;
+  private readonly snapshotJournal: SnapshotJournal;
+  private mutationBusy = false;
+  private recoveryRequired = false;
   private records = new Map<string, Tracked>();
   private versions = new Map<string, number>();
   private directories: string[] = [];
@@ -52,9 +59,15 @@ export class WorkspaceService extends EventEmitter {
     }
     this.dataDir = path.resolve(dataDir ?? path.join(this.rootPath, '.paircoach'));
     if (this.dataDir === this.rootPath) throw new AppError(400, 'INVALID_DATA_DIR', 'Data directory must not be the workspace root.');
+    this.snapshotStore = new SnapshotStorage(this.rootPath, this.dataDir, (p, missing) => this._safePath(p, missing));
+    this.projectId = this.snapshotStore.projectId;
+    this.snapshotJournal = new SnapshotJournal(this.snapshotStore, (p, missing) => this._safePath(p, missing),
+      (phase, index) => this.emit('snapshotCheckpoint', { phase, index }));
+    try { this.recoveryRequired = this.snapshotJournal.hasPending(); }
+    catch { this.recoveryRequired = true; } // Gate validates/reports the exact cause before any mutation.
     this.settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md',
       runProfiles: [], aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'] };
-    this.scan(true);
+    if (!this.recoveryRequired) this.scan(true);
     // Watch each real directory without following symlinks; polling covers missed events.
     this.refreshWatchers();
     this.poll = setInterval(() => this.watchScan(), 500);
@@ -227,10 +240,13 @@ export class WorkspaceService extends EventEmitter {
     for (const file of [...this.records.keys()]) if (!found.has(file)) this.external(file, null, initial);
   }
 
-  scanExternal(): void { this.scan(); this.refreshWatchers(); }
+  scanExternal(): void {
+    if (this.recoveryRequired) throw snapshotFailure('Workspace has pending snapshot recovery; construct WriteGate before publishing state.');
+    this.scan(); this.refreshWatchers();
+  }
 
   private watchScan(): void {
-    if (this.closed) return;
+    if (this.closed || activeRoots.has(this.rootPath) || this.recoveryRequired) return;
     try { this.scanExternal(); }
     catch (error) { this.emit('watcherError', error instanceof AppError ? error : new AppError(503, 'WATCHER_FAILED', 'Reload workspace; watcher could not scan safely.')); }
   }
@@ -277,6 +293,8 @@ export class WorkspaceService extends EventEmitter {
   }
 
   updateSettings(settings: Settings): void {
+    this._assertWritable();
+    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another synchronous workspace operation is in progress.');
     if (!settings || !['IMPLEMENTATION', 'CODE_REVIEW'].includes(settings.taskMode) || typeof settings.aiConsent !== 'boolean' ||
         !Array.isArray(settings.runProfiles) || settings.runProfiles.length > 2 || !Array.isArray(settings.contextPatterns) ||
         settings.contextPatterns.length > 100 || settings.contextPatterns.some(p => typeof p !== 'string' || !p || p.length > 1024)) {
@@ -355,6 +373,7 @@ export class WorkspaceService extends EventEmitter {
   private refreshDirectories(): void { this.directories = this.collect().dirs; this.refreshWatchers(); }
 
   _replace(relative: string, baseVersion: number, content: string, actor: string, authorize: () => void): Document {
+    this._assertWritable();
     const before = this._fresh(relative, baseVersion);
     const absolute = this._safePath(relative);
     const temporary = this.temp(absolute, this.encoded(content, before.document!), Number(fs.statSync(absolute).mode) & 0o777);
@@ -368,6 +387,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   _create(relative: string, content: string, actor: string, authorize: () => void): Document {
+    this._assertWritable();
     const absolute = this._safePath(relative, true);
     const bytes = this.encoded(content);
     if (fs.existsSync(absolute)) throw new AppError(409, 'FILE_EXISTS', 'Destination already exists.');
@@ -456,6 +476,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   _rename(relative: string, newPath: string, baseVersion: number, actor: string, authorize: () => void): void {
+    this._assertWritable();
     const before = this._fresh(relative, baseVersion);
     const from = this._safePath(relative), to = this._safePath(newPath, true);
     if (fs.existsSync(to)) throw new AppError(409, 'FILE_EXISTS', 'Destination already exists.');
@@ -584,6 +605,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   _delete(relative: string, baseVersion: number, actor: string, authorize: () => void): void {
+    this._assertWritable();
     const before = this._fresh(relative, baseVersion);
     const absolute = this._safePath(relative);
     // Minimal durable safety copy. Full snapshot/restore journal belongs to GATE003.
@@ -615,10 +637,123 @@ export class WorkspaceService extends EventEmitter {
     }
   }
 
-  createSnapshot(_label: string, _paths?: string[]): Snapshot { throw new AppError(503, 'SNAPSHOTS_NOT_READY', 'Snapshots require GATE003 acceptance.'); }
-  listSnapshots(): Snapshot[] { throw new AppError(503, 'SNAPSHOTS_NOT_READY', 'Snapshots require GATE003 acceptance.'); }
+  /** @internal Shared by every gate referencing this workspace; listeners cannot reenter a mutation. */
+  _withMutation<T>(action: () => T): T {
+    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another synchronous workspace operation is in progress.');
+    this._assertWritable();
+    this.mutationBusy = true; activeRoots.add(this.rootPath);
+    try { return action(); } finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); }
+  }
+
+  _assertWritable(): void {
+    if (this.closed) throw new AppError(503, 'WORKSPACE_CLOSED', 'Workspace is closed.');
+    if (!this.recoveryRequired) {
+      try { this.recoveryRequired = this.snapshotJournal.hasPending(); }
+      catch { this.recoveryRequired = true; }
+    }
+    if (this.recoveryRequired) throw snapshotFailure(`Pending/invalid snapshot journal in ${this.snapshotJournal.base}. Preserve all material; recovery is required before writing.`);
+  }
+
+  /** @internal Called only by the gate constructor, before exposing normal mutation authority. */
+  _recoverSnapshots(): void {
+    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Recovery cannot reenter an active workspace operation.');
+    this.mutationBusy = true; activeRoots.add(this.rootPath);
+    try {
+      this.snapshotJournal.recover();
+      this.recoveryRequired = false;
+      this.scanExternal();
+    } catch (error) {
+      this.recoveryRequired = true;
+      const failure = snapshotFailure(`Recovery required in ${this.snapshotJournal.base}. Preserve public paths and copy recovery material to NEW names before manual resolution.`);
+      failure.cause = error; throw failure;
+    } finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); }
+  }
+
+  private captureSnapshot(paths?: string[]): { files: RestoreBefore[]; validate: () => void; version: number } {
+    this.scanExternal();
+    const version = this.workspaceVersion;
+    const baseline = new Map([...this.records].map(([p, r]) => [p, r.stamp]));
+    const selected = paths === undefined ? [...baseline.keys()].filter(snapshotAllowed).sort() : paths;
+    this.snapshotStore.paths(selected);
+    const files = selected.map((relative, index): RestoreBefore => {
+      const absolute = this._safePath(relative, true);
+      const disk = this.disk(relative);
+      let file: RestoreBefore;
+      if (!disk) file = { path: relative, rawBase64: null, mode: null, identity: null, mtimeNs: null };
+      else {
+        if (!disk.raw) throw disk.error ?? new AppError(403, 'UNSAFE_PATH', 'Snapshot requires a regular, bounded, unlinked file.');
+        const stat = fs.lstatSync(absolute, { bigint: true });
+        const prefix = [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs, stat.mode].join(':') + ':';
+        if (!disk.stamp.startsWith(prefix)) throw new AppError(409, 'DISK_CONFLICT', 'File changed during snapshot capture.');
+        file = { path: relative, rawBase64: disk.raw.toString('base64'), mode: Number(stat.mode & 0o777n), identity: identity(stat), mtimeNs: String(stat.mtimeNs) };
+      }
+      this.emit('snapshotCheckpoint', { phase: 'SNAPSHOT_FILE_CAPTURED', index });
+      return file;
+    });
+    const validate = () => {
+      let changed = version !== this.workspaceVersion;
+      const collected = this.collect().files;
+      if (collected.length !== baseline.size || collected.some(p => !baseline.has(p))) changed = true;
+      for (const [p, stamp] of baseline) if (this.disk(p)?.stamp !== stamp) changed = true;
+      // Missing explicit paths (tombstones) must still be missing after every other capture.
+      for (const f of files) if (f.rawBase64 === null && this.disk(f.path) !== null) changed = true;
+      if (changed) {
+        this.scanExternal();
+        throw new AppError(409, 'DISK_CONFLICT', 'Workspace changed during capture; no snapshot was published with an old version.');
+      }
+    };
+    validate();
+    return { files, validate, version };
+  }
+
+  createSnapshot(label: string, paths?: string[]): Snapshot {
+    return this._withMutation(() => {
+      const captured = this.captureSnapshot(paths);
+      return this.snapshotStore.put(label, captured.version, captured.files, captured.validate);
+    });
+  }
+
+  listSnapshots(): Snapshot[] { return this.snapshotStore.list(); }
+  /** Internal frozen material only: never an automatic AI, wire, or log payload. */
+  readSnapshot(snapshotId: string): FrozenSnapshot { return this.snapshotStore.read(snapshotId); }
+
   restoreSnapshot(_snapshotId: string, _paths: string[], _auth: MutationAuth): Snapshot {
-    throw new AppError(503, 'SNAPSHOTS_NOT_READY', 'Restore/journal/recovery require GATE003 implementation.');
+    throw new AppError(403, 'WRITE_GATE_REQUIRED', 'Only WriteGate may authorize snapshot restoration.');
+  }
+
+  /** @internal WriteGate is the sole authority; expected version is the ORIGINAL proposal version. */
+  _restoreSnapshot(snapshotId: string, paths: string[], expectedWorkspaceVersion: number, authorize: () => void): Snapshot {
+    this._assertWritable();
+    if (!Number.isSafeInteger(expectedWorkspaceVersion) || expectedWorkspaceVersion < 0) throw new AppError(400, 'INVALID_VERSION', 'A nonnegative expectedWorkspaceVersion is required.');
+    this.snapshotStore.paths(paths, false);
+    const source = this.snapshotStore.read(snapshotId);
+    const sourceFiles = new Map(source.files.map(f => [f.path, f]));
+    if (paths.some(p => !sourceFiles.has(p))) throw new AppError(400, 'INVALID_SNAPSHOT_PATHS', 'Restore is limited to an explicit subset of the snapshot.');
+    this.scanExternal(); authorize();
+    if (this.workspaceVersion !== expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Proposal workspace version is stale.');
+    let backup: Snapshot, captured: ReturnType<WorkspaceService['captureSnapshot']>;
+    try {
+      captured = this.captureSnapshot(paths);
+      backup = this.snapshotStore.put('Backup before restore ' + snapshotId, captured.version, captured.files, () => { captured.validate(); authorize(); });
+    } catch (error) {
+      if (error instanceof AppError && ['DISK_CONFLICT', 'WORKSPACE_VERSION_CONFLICT', 'STALE_EPOCH', 'LEASE_REQUIRED', 'SESSION_MISMATCH', 'WRITE_OWNER_CONFLICT'].includes(error.code)) throw error;
+      const failure = new AppError(503, 'SNAPSHOT_BACKUP_FAILED', 'Durable backup failed; task files were not modified.');
+      failure.cause = error; throw failure;
+    }
+    const preflight = () => {
+      captured.validate(); authorize();
+      if (this.workspaceVersion !== expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Proposal workspace version changed before restore.');
+    };
+    preflight();
+    try {
+      this.snapshotJournal.run(captured.files, paths.map(p => sourceFiles.get(p)!), backup.snapshotId, authorize, preflight);
+    } catch (error) {
+      try { this.recoveryRequired = this.snapshotJournal.hasPending(); } catch { this.recoveryRequired = true; }
+      if (!this.recoveryRequired) this.scanExternal();
+      throw error;
+    }
+    this.scanExternal(); // post-close stamps only; no historical document version is replayed
+    return backup;
   }
 
   close(): void {
