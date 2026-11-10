@@ -267,3 +267,101 @@ test('RENAME late symlink capture is retained without opening or changing its ou
   const capture = path.join(operations, fs.readdirSync(operations)[0], 'source');
   assert.equal(fs.lstatSync(capture).isSymbolicLink(), true); assert.equal(fs.readlinkSync(capture), outside);
 });
+
+
+// Observe actual open/close syscalls: no fake stats, WorkspaceService, or file data.
+// The pin (unlike short-lived disk reads) was opened on the private publication
+// alias. Windows may settle ctime on this fd's last close. Publishing state first
+// is wrong even on filesystems where that close does not change metadata.
+function observeRenamePins(t: any, f: ReturnType<typeof fixture>, onTargetClose?: () => void) {
+  const realOpen = fs.openSync, realClose = fs.closeSync;
+  let targetPin: number | undefined, sourcePin: number | undefined;
+  let targetClosed = false, sourceClosed = false;
+  t.mock.method(fs, 'openSync', (...args: any[]) => {
+    const fd = (realOpen as any)(...args);
+    if (typeof args[1] === 'number') {
+      if (path.basename(String(args[0])).startsWith('.paircoach-write-')) targetPin = fd;
+      if (targetPin !== undefined && sourcePin === undefined && String(args[0]) === f.source) sourcePin = fd;
+    }
+    return fd;
+  });
+  t.mock.method(fs, 'closeSync', (fd: number) => {
+    realClose(fd);
+    if (fd === targetPin && !targetClosed) { targetClosed = true; onTargetClose?.(); }
+    if (fd === sourcePin && !sourceClosed) sourceClosed = true;
+  });
+  syncBuiltinESMExports();
+  return () => ({ targetOpened: targetPin !== undefined, sourceOpened: sourcePin !== undefined,
+    targetClosed, sourceClosed });
+}
+
+for (const ambiguous of [false, true]) test(`RENAME last-close ordering: ${ambiguous ? 'ambiguous publication' : 'success'} tracks final metadata only after both real pins close`, t => {
+  const f = fixture(t), pins = observeRenamePins(t, f);
+  const tracked: ReturnType<typeof pins>[] = [], stamped: ReturnType<typeof pins>[] = [];
+  const realStat = fs.lstatSync;
+  let lastMetadataRead: ReturnType<typeof pins> | undefined;
+  t.mock.method(fs, 'lstatSync', (...args: any[]) => {
+    const result = (realStat as any)(...args);
+    if (String(args[0]) === f.target && args[1]?.bigint) lastMetadataRead = pins();
+    return result;
+  });
+  syncBuiltinESMExports();
+  f.workspace.on(ambiguous ? 'external' : 'changed', (e: any) => {
+    if (e.path === 'target.ts') { tracked.push(pins()); stamped.push(lastMetadataRead!); }
+  });
+  if (ambiguous) {
+    const realLink = fs.linkSync;
+    t.mock.method(fs, 'linkSync', (from: fs.PathLike, to: fs.PathLike) => {
+      realLink(from, to);
+      if (String(to) === f.target) throw Object.assign(Error('published but result unknown'), { code: 'EIO' });
+    });
+    syncBuiltinESMExports();
+    assert.throws(f.rename, conflict);
+  } else f.rename();
+  assert.deepEqual(tracked, [{ targetOpened: true, sourceOpened: true, targetClosed: true, sourceClosed: true }]);
+  assert.deepEqual(stamped, tracked, 'the actual stamp read, not just the event, must follow last close');
+  // The tracked metadata is the real post-close metadata: reads/scans must not
+  // manufacture another document/workspace version or external event.
+  const events: any[] = []; f.workspace.on('external', e => events.push(e));
+  assert.equal(f.workspace.getDocument('target.ts').version, 1);
+  f.workspace.scanExternal();
+  assert.equal(f.workspace.workspaceVersion, 1); assert.deepEqual(events, []);
+  assert.deepEqual(fs.readFileSync(f.target), original);
+});
+
+for (const victim of ['source', 'destination', 'destination-in-place'] as const) test(`RENAME last-close validation never absorbs a real foreign ${victim} replacement as own success`, t => {
+  const f = fixture(t);
+  const pins = observeRenamePins(t, f, () => {
+    const file = victim === 'source' ? f.source : f.target;
+    if (victim === 'destination-in-place') fs.writeFileSync(file, foreign);
+    else {
+      if (fs.existsSync(file)) fs.unlinkSync(file);
+      fs.writeFileSync(file, foreign, { flag: 'wx' });
+    }
+  });
+  assert.throws(f.rename, conflict);
+  assert.equal(pins().targetClosed, true); assert.equal(pins().sourceClosed, true);
+  assertBoth(f.parent);
+  assert.deepEqual(fs.readFileSync(victim === 'source' ? f.source : f.target), foreign);
+  const events: any[] = []; f.workspace.on('external', e => events.push(e));
+  f.workspace.scanExternal(); assert.deepEqual(events, [], 'catch must reconcile after all own handles close');
+  if (victim !== 'source') assert.equal(f.workspace.getDocument('target.ts').content, 'EXTERNAL LATEST BYTES\n');
+});
+
+test('RENAME retains ctime-only external change detection after successful final-close tracking', t => {
+  const f = fixture(t); f.rename();
+  const events: any[] = []; f.workspace.on('external', e => events.push(e));
+  // A real, completed external hardlink cycle changes only ctime: the final
+  // inode/bytes/mtime/mode/nlink are unchanged. No stat or clock is fabricated.
+  const before = fs.statSync(f.target, { bigint: true });
+  const alias = path.join(f.root, '.paircoach-write-external-metadata');
+  fs.linkSync(f.target, alias); fs.unlinkSync(alias);
+  const after = fs.statSync(f.target, { bigint: true });
+  assert.equal(after.ino, before.ino); assert.equal(after.mtimeNs, before.mtimeNs);
+  assert.equal(after.mode, before.mode); assert.equal(after.nlink, before.nlink);
+  assert.deepEqual(fs.readFileSync(f.target), original);
+  assert.notEqual(after.ctimeNs, before.ctimeNs, 'real external alias cycle must change ctime');
+  const doc = f.workspace.getDocument('target.ts');
+  assert.equal(doc.version, 2); assert.equal(f.workspace.workspaceVersion, 2);
+  assert.equal(events.length, 1); assert.equal(events[0].operation, 'UPDATED');
+});
