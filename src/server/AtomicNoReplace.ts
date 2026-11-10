@@ -25,21 +25,28 @@ except Exception:
     print('{"ok":false,"code":"ATOMIC_MOVE_UNAVAILABLE"}')
     sys.exit(1)
 `;
-const windowsCode = `
+const windowsCode = String.raw`
 using System;
 using System.IO;
+[assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.8")]
 public static class PairCoachAtomicMove {
+  private static string Extended(string file) {
+    if (file.StartsWith(@"\\?\")) return file;
+    if (file.StartsWith(@"\\")) return @"\\?\UNC\" + file.Substring(2);
+    if (file.Length > 2 && file[1] == ':' && file[2] == '\\') return @"\\?\" + file;
+    throw new ArgumentException();
+  }
   public static int Main(string[] args) {
     try {
       if (args.Length != 2) throw new ArgumentException();
-      File.Move(args[0], args[1]);
-      Console.WriteLine("{\\"ok\\":true}");
+      File.Move(Extended(args[0]), Extended(args[1]));
+      Console.WriteLine("{\"ok\":true}");
       return 0;
     } catch (Exception error) {
       int number = error.HResult & 65535;
       string code = number == 80 || number == 183 ? "EEXIST" :
         number == 2 || number == 3 ? "ENOENT" : number == 5 ? "EACCES" : "EIO";
-      Console.WriteLine("{\\"ok\\":false,\\"code\\":\\"" + code + "\\"}");
+      Console.WriteLine("{\"ok\":false,\"code\":\"" + code + "\"}");
       return 1;
     }
   }

@@ -46,3 +46,14 @@ test('real restore helper overhead is measured, not assumed Windows-equivalent',
   console.log('NATIVE_RESTORE_OVERHEAD ' + JSON.stringify({platform: process.platform, files: 1, moves, elapsedMs: performance.now() - start}));
   assert.equal(moves, 1); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });
+
+test('native no-replace supports long absolute paths without losing occupied destination', t => {
+  const f = fixture(t), directory = path.join(f.parent, ...['a', 'b', 'c', 'd'].map(c => c.repeat(200)));
+  fs.mkdirSync(directory, {recursive: true});
+  const from = path.join(directory, 'source.ts'), to = path.join(directory, 'destination.ts');
+  fs.writeFileSync(from, 'LONG SOURCE'); atomicNoReplace(from, to);
+  assert.equal(fs.readFileSync(to, 'utf8'), 'LONG SOURCE');
+  fs.writeFileSync(from, 'LATE SOURCE');
+  assert.throws(() => atomicNoReplace(from, to), (e: any) => e.code === 'EEXIST');
+  assert.equal(fs.readFileSync(from, 'utf8'), 'LATE SOURCE'); assert.equal(fs.readFileSync(to, 'utf8'), 'LONG SOURCE');
+});
