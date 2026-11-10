@@ -1,4 +1,6 @@
 import { test as base, expect } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Backend, Wire, open, saved, requestRestore, snapshots, session, report, seed, human } from './harness';
 import { append, editor } from '../g3/helpers';
 import { filesBelow } from '../g3/fixture';
@@ -144,11 +146,24 @@ test('MVP2-3: real child hard-kill → rollback/restart; GUI never replays old c
   expect(f.events().filter(e => e.phase === 'PUBLISHED')).toHaveLength(0);
   const list = await snapshots(page, f); expect(list).toHaveLength(2); // source + retained backup
   const stable = filesBelow(f.dataDir);
-  expect(Object.keys(stable).filter(p => p.endsWith('/ROLLED_BACK'))).toHaveLength(1);
-  expect(Object.keys(stable).filter(p => p.endsWith('/COMMITTED'))).toHaveLength(0);
+  // Snapshot journal belongs to the workspace, NOT the server's session dataDir.
+  const journalRoot = path.join(f.rootPath, '.paircoach', 'snapshot-journal-v1');
+  const journalBytes = () => Object.fromEntries(Object.keys(filesBelow(journalRoot)).sort()
+    .map(p => [p, fs.readFileSync(path.join(journalRoot, p)).toString('base64')]));
+  const stableJournal = journalBytes();
+  const stableSessionBytes = Object.fromEntries(Object.keys(stable).sort()
+    .map(p => [p, fs.readFileSync(path.join(f.dataDir, p)).toString('base64')]));
+  expect(Object.keys(stableJournal).filter(p => p.endsWith('/ROLLED_BACK'))).toHaveLength(1);
+  expect(Object.keys(stableJournal).filter(p => p.endsWith('/COMMITTED'))).toHaveLength(0);
   await page.screenshot({ path: info.outputPath('restart-unknown-not-replayed.png') });
   await f.kill(); await f.start(port); // second startup must not forward/re-rollback again
   expect(f.read()).toBe(human); expect(filesBelow(f.dataDir)).toEqual(stable);
+  const secondJournal = journalBytes();
+  expect(secondJournal).toEqual(stableJournal); // all journal paths AND literal file bytes
+  expect(Object.keys(secondJournal).filter(p => p.endsWith('/ROLLED_BACK'))).toHaveLength(1);
+  expect(Object.keys(secondJournal).filter(p => p.endsWith('/COMMITTED'))).toHaveLength(0);
+  expect(Object.fromEntries(Object.keys(filesBelow(f.dataDir)).sort()
+    .map(p => [p, fs.readFileSync(path.join(f.dataDir, p)).toString('base64')]))).toEqual(stableSessionBytes);
   await page.getByRole('button', { name: 'Połącz ponownie', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Edytor pliku main.py', exact: true })).toBeVisible();
   expect(w.decisions()).toHaveLength(1); expect(f.checkpoints()).toHaveLength(1);
@@ -157,5 +172,6 @@ test('MVP2-3: real child hard-kill → rollback/restart; GUI never replays old c
   await info.attach('forward-vs-rollback', { contentType: 'application/json', body: Buffer.from(JSON.stringify({
     originalDecision: decision, forwardPublications: 0, technicalRollbackMarkers: 1,
     oldSessionId, restartSessionId: f.ready.sessionId, stableDataHashes: stable,
+    journalRoot, stableJournalHashes: filesBelow(journalRoot), journalByteIdenticalAfterSecondRestart: true, sessionByteIdenticalAfterSecondRestart: true,
   }, null, 2)) });
 });
