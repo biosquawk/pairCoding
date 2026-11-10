@@ -64,13 +64,21 @@ export default function App() {
   useEffect(() => {
     const unsub = client.onStateChanged((newState) => {
       setState(newState);
-      // Ensure active path is in open tabs
-      if (newState.activePath && !openTabs.includes(newState.activePath)) {
-        setOpenTabs((prev) => [...prev, newState.activePath]);
-      }
+      // Clean up deleted/renamed tabs and ensure active path is valid
+      setOpenTabs((prev) => {
+        const existingPaths = new Set(newState.files.map((f) => f.path));
+        let validTabs = prev.filter((p) => existingPaths.has(p));
+        if (newState.activePath && existingPaths.has(newState.activePath) && !validTabs.includes(newState.activePath)) {
+          validTabs = [...validTabs, newState.activePath];
+        }
+        if (validTabs.length === 0 && newState.files.length > 0) {
+          validTabs = [newState.activePath || newState.files[0].path];
+        }
+        return validTabs;
+      });
     });
     return unsub;
-  }, [openTabs]);
+  }, []);
 
   // Handle Double-Escape Keydown for VETO (<= 400ms interval, !e.repeat)
   useEffect(() => {
@@ -279,6 +287,7 @@ export default function App() {
               openTabs={openTabs}
               activePath={state.activePath}
               writeOwner={state.writeOwner}
+              isOffline={state.isOffline}
               controlEpoch={state.controlEpoch}
               fileConflict={state.fileConflict}
               activePointer={state.activePointer}
@@ -342,10 +351,14 @@ export default function App() {
       <ProjectSettingsModal
         isOpen={isSettingsModalOpen}
         settings={projectSettings}
+        snapshots={state.snapshots}
         onClose={() => setIsSettingsModalOpen(false)}
         onSave={(updated) => {
           setProjectSettings(updated);
           client.updateProjectSettings(updated);
+        }}
+        onRestoreSnapshot={(snapshotId) => {
+          client.restoreSnapshotById(snapshotId);
         }}
       />
     </div>

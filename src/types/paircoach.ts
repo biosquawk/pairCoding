@@ -140,6 +140,13 @@ export interface FileConflict {
   localDraftContent: string;
 }
 
+export interface SnapshotItem {
+  id: string;
+  label: string;
+  timestamp: number;
+  files: { path: string; content: string }[];
+}
+
 export interface ChatEntry {
   id: string;
   sender: 'STUDENT' | 'COACH' | 'SYSTEM';

@@ -184,6 +184,14 @@ export class PairCoachClient {
     simulator.updateProjectSettings(settings);
   }
 
+  public getSnapshots() {
+    return simulator.getSnapshots();
+  }
+
+  public restoreSnapshotById(snapshotId: string) {
+    simulator.restoreSnapshotById(snapshotId);
+  }
+
   // Dev simulator triggers
   public devStartCoachDemo() {
     simulator.startCoachDemonstration();

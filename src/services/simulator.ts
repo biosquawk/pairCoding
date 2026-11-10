@@ -22,6 +22,7 @@ import {
   ProposalType,
   SessionReport,
   SessionStatus,
+  SnapshotItem,
   TaskMode,
   TestOutcome,
   TrainingScenario,
@@ -53,6 +54,7 @@ export class MockBackendSimulator {
   private cooldownDebounceTimer: any = null;
   private fileConflict: { path: string; diskContent: string; localDraftContent: string } | null = null;
   private projectSettings: ProjectSettings;
+  private snapshots: SnapshotItem[] = [];
 
   // Timer
   private startTime: number = 0;
@@ -119,6 +121,14 @@ export class MockBackendSimulator {
     this.workspaceVersion = 1;
     this.fileConflict = null;
     this.vetoBaselineContent.clear();
+    this.snapshots = [
+      {
+        id: 'snap-initial',
+        label: 'Stan początkowy zadania (Baseline)',
+        timestamp: Date.now(),
+        files: scenario.files.map((f) => ({ path: f.path, content: f.content })),
+      },
+    ];
     this.stopTimer();
 
     this.activePointer = null;
@@ -189,6 +199,7 @@ export class MockBackendSimulator {
       workspaceVersion: this.workspaceVersion,
       fileConflict: this.fileConflict,
       projectSettings: this.projectSettings,
+      snapshots: this.snapshots,
       stats: {
         coachInterventionsCount: this.coachInterventionsCount,
         userVetoCount: this.userVetoCount,
@@ -322,6 +333,7 @@ export class MockBackendSimulator {
           );
         }
         this.emit('TIMER_TICK', { elapsedMs: this.elapsedMs, limitMs: this.limitMs, status: this.sessionStatus });
+        this.emit('STATE_CHANGED', this.getFullState());
       }
     }, 1000);
 
@@ -395,10 +407,47 @@ export class MockBackendSimulator {
       return;
     }
 
+    // DEC-004 & Requirement 3: Automatic file selection before coach demo
+    if (this.currentScenario.taskMode === 'CODE_REVIEW') {
+      const reviewPath = this.currentScenario.reviewNotesPath || 'review.md';
+      if (this.activePath !== reviewPath) {
+        this.setActivePath(reviewPath);
+      }
+    } else {
+      const isTaskOrTest =
+        this.activePath === this.currentScenario.taskFilePath ||
+        this.activePath.includes('test') ||
+        this.activePath.includes('.test.') ||
+        this.activePath.startsWith('test_');
+      if (isTaskOrTest) {
+        const mainImpl =
+          this.currentScenario.files.find(
+            (f) =>
+              (f.path.endsWith('.ts') || f.path.endsWith('.py') || f.path.endsWith('.js')) &&
+              !f.path.includes('test') &&
+              f.path !== this.currentScenario.taskFilePath
+          ) ||
+          this.currentScenario.files.find(
+            (f) => f.path !== this.currentScenario.taskFilePath && f.path !== this.currentScenario.reviewNotesPath
+          );
+        if (mainImpl && this.activePath !== mainImpl.path) {
+          this.setActivePath(mainImpl.path);
+        }
+      }
+    }
+
     const interventionId = `interv-${Date.now()}`;
     this.currentInterventionId = interventionId;
     this.isInterventionAborted = false;
     this.coachInterventionsCount += 1;
+
+    // Record automatic recovery snapshot before coach intervention
+    this.snapshots.unshift({
+      id: `snap-${Date.now()}`,
+      label: `Przed pokazem trenera (${new Date().toLocaleTimeString()})`,
+      timestamp: Date.now(),
+      files: Array.from(this.files.values()).map((f) => ({ path: f.path, content: f.content })),
+    });
 
     this.writeOwner = 'COACH';
     this.coachMode = 'INTERVENING';
@@ -406,7 +455,9 @@ export class MockBackendSimulator {
 
     this.addChatMessage(
       'COACH',
-      '🤖 Przejmuję klawiaturę, aby pokazać Ci zoptymalizowaną konstrukcję w kodzie. Wciśnij 2× Esc lub kliknij przycisk na pasku, jeśli chcesz mi przerwać!'
+      this.currentScenario.taskMode === 'CODE_REVIEW'
+        ? '🤖 Przejmuję klawiaturę w review.md, aby pokazać Ci przykładową profesjonalną uwagę z przeglądu kodu. Wciśnij 2× Esc lub kliknij przycisk na pasku, jeśli chcesz mi przerwać!'
+        : '🤖 Przejmuję klawiaturę, aby pokazać Ci zoptymalizowaną konstrukcję w kodzie. Wciśnij 2× Esc lub kliknij przycisk na pasku, jeśli chcesz mi przerwać!'
     );
 
     this.emit('COACH_DEMO_STARTED', { interventionId, path: this.activePath, controlEpoch: this.controlEpoch });
@@ -416,6 +467,32 @@ export class MockBackendSimulator {
     let steps: CoachEditStep[] = [];
     if (stepsOverride && stepsOverride.length > 0) {
       steps = stepsOverride;
+    } else if (this.currentScenario.taskMode === 'CODE_REVIEW') {
+      // In CODE_REVIEW, coach notes are added strictly to reviewNotesPath (review.md)
+      steps = [
+        {
+          path: this.activePath,
+          interventionId,
+          controlEpoch: this.controlEpoch,
+          stepIndex: 1,
+          totalSteps: 2,
+          range: { startLine: 6, startColumn: 1, endLine: 7, endColumn: 1 },
+          text: `- [x] [KRYTYCZNY] services/PaymentProcessor.ts:18 - Dane karty (CVV i numer karty) logowane jawnym tekstem. Krytyczne naruszenie PCI-DSS §3.2.\n`,
+          explanation: 'Krok 1/2: Wskazanie wycieku danych karty płatniczej do pliku audytu',
+          delayMs: 1400,
+        },
+        {
+          path: this.activePath,
+          interventionId,
+          controlEpoch: this.controlEpoch,
+          stepIndex: 2,
+          totalSteps: 2,
+          range: { startLine: 10, startColumn: 1, endLine: 11, endColumn: 1 },
+          text: `- [x] [WYSOKI] services/PaymentProcessor.ts:10 - Brak sprawdzania klucza idempotencji transakcji (nagłówek Idempotency-Key). Ryzyko wielokrotnego obciążenia.\n`,
+          explanation: 'Krok 2/2: Wskazanie podatności na podwójne obciążenie płatności',
+          delayMs: 1600,
+        },
+      ];
     } else if (this.activePath.endsWith('solution.ts')) {
       steps = [
         {
@@ -459,6 +536,39 @@ export class MockBackendSimulator {
           text: `  throw new Error("Brak pary spełniającej warunek targetu");\n`,
           explanation: 'Krok 3/3: Zwrócenie błędu w przypadku braku rozwiązania',
           delayMs: 1200,
+        },
+      ];
+    } else if (this.activePath.endsWith('.py')) {
+      steps = [
+        {
+          path: this.activePath,
+          interventionId,
+          controlEpoch: this.controlEpoch,
+          stepIndex: 1,
+          totalSteps: 2,
+          range: { startLine: 4, startColumn: 1, endLine: 6, endColumn: 1 },
+          text: `        # Trener AI: Zastosujmy OrderedDict dla operacji O(1)
+        from collections import OrderedDict
+        self.cache = OrderedDict()
+`,
+          explanation: 'Krok 1/2: Zastosowanie OrderedDict w Pythonie',
+          delayMs: 1400,
+        },
+        {
+          path: this.activePath,
+          interventionId,
+          controlEpoch: this.controlEpoch,
+          stepIndex: 2,
+          totalSteps: 2,
+          range: { startLine: 8, startColumn: 1, endLine: 11, endColumn: 1 },
+          text: `    def get(self, key: int) -> int:
+        if key in self.cache:
+            self.cache.move_to_end(key)
+            return self.cache[key]
+        return -1
+`,
+          explanation: 'Krok 2/2: Przeniesienie elementu na koniec jako ostatnio używanego',
+          delayMs: 1600,
         },
       ];
     } else {
@@ -886,6 +996,31 @@ export class MockBackendSimulator {
       this.currentScenario.capabilities.runTestsReason = undefined;
     }
 
+    this.emit('STATE_CHANGED', this.getFullState());
+  }
+
+  public getSnapshots(): SnapshotItem[] {
+    return this.snapshots;
+  }
+
+  public restoreSnapshotById(snapshotId: string) {
+    const snap = this.snapshots.find((s) => s.id === snapshotId);
+    if (!snap) return;
+
+    for (const snapFile of snap.files) {
+      const file = this.files.get(snapFile.path);
+      if (file) {
+        file.content = snapFile.content;
+        file.version += 1;
+        this.emit('FILE_UPDATED', { ...file, isExternalOrSnapshot: true });
+      }
+    }
+
+    this.workspaceVersion += 1;
+    this.addChatMessage(
+      'SYSTEM',
+      `🔄 Przywrócono stan z migawki: "${snap.label}". Modele dokumentów zostały zsynchronizowane.`
+    );
     this.emit('STATE_CHANGED', this.getFullState());
   }
 

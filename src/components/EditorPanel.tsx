@@ -32,6 +32,7 @@ interface EditorPanelProps {
   openTabs: string[];
   activePath: string;
   writeOwner: WriteOwner;
+  isOffline?: boolean;
   controlEpoch: number;
   fileConflict: FileConflict | null;
   activePointer: CoachPointer | null;
@@ -53,6 +54,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   openTabs,
   activePath,
   writeOwner,
+  isOffline,
   controlEpoch,
   fileConflict,
   activePointer,
@@ -143,15 +145,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     } else {
       // Model exists; ensure language is correct
       monaco.editor.setModelLanguage(model, getLanguageForPath(activeFile.path));
-      // Item 3: Synchronize model if content changed from external file sync or snapshot restore
-      if (model.getValue() !== activeFile.content && !isApplyingCoachStepRef.current) {
-        isApplyingCoachStepRef.current = true;
-        try {
-          model.setValue(activeFile.content);
-        } finally {
-          isApplyingCoachStepRef.current = false;
-        }
-      }
     }
 
     if (editor.getModel() !== model) {
@@ -170,7 +163,27 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         editor.restoreViewState(savedState);
       }
     }
-  }, [activePath, activeFile]);
+  }, [activePath]);
+
+  // Synchronize model only when change originates from external sync or snapshot restore
+  useEffect(() => {
+    const unsubFile = client.onFileUpdated((file: any) => {
+      if (file.path === activePath && file.isExternalOrSnapshot) {
+        const editor = editorRef.current;
+        if (!editor) return;
+        const model = editor.getModel();
+        if (model && model.getValue() !== file.content) {
+          isApplyingCoachStepRef.current = true;
+          try {
+            model.setValue(file.content);
+          } finally {
+            isApplyingCoachStepRef.current = false;
+          }
+        }
+      }
+    });
+    return unsubFile;
+  }, [activePath]);
 
   // Item 2: Close Undo stack boundary immediately upon Veto
   useEffect(() => {
@@ -390,15 +403,28 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
         {/* Right Tab Status Label */}
         <div className="text-[11px] px-2 py-0.5 font-mono hidden sm:flex items-center gap-2">
+          {activeFile && (
+            <span className="text-zinc-500 text-[10px] bg-zinc-800/80 border border-zinc-700/60 px-1.5 py-0.5 rounded font-mono">
+              v{activeFile.version}
+            </span>
+          )}
           {writeOwner === 'COACH' ? (
             <span className="text-blue-400 font-semibold animate-pulse flex items-center gap-1">
               <Bot className="w-3.5 h-3.5" />
               Pisze Trener AI
             </span>
           ) : writeOwner === 'STUDENT' ? (
-            <span className="text-red-400 font-medium">Tryb ucznia (Piszesz Ty)</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-red-400 font-medium">Tryb ucznia (Piszesz Ty)</span>
+              <span className="text-zinc-600">·</span>
+              {isOffline ? (
+                <span className="text-amber-400 font-normal">Niezapisany draft (Offline)</span>
+              ) : (
+                <span className="text-emerald-400 font-normal">Zapisano</span>
+              )}
+            </div>
           ) : (
-            <span className="text-zinc-400">Synchronizacja...</span>
+            <span className="text-zinc-400">Synchronizacja / Zapis niepotwierdzony</span>
           )}
         </div>
       </div>
@@ -434,9 +460,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         {activeFile ? (
           <Editor
             height="100%"
-            path={activeFile.path}
             defaultLanguage={getLanguageForPath(activeFile.path)}
-            value={activeFile.content}
+            defaultValue={activeFile.content}
             theme="paircoach-dark"
             onMount={handleEditorMount}
             onChange={(newVal) => {
