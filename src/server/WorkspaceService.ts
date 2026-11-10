@@ -464,6 +464,14 @@ export class WorkspaceService extends EventEmitter {
     let pin: number | undefined, sourcePin: number | undefined;
     let published = false, captured = false;
     let recovery: string | undefined;
+    const closePins = () => {
+      // Drop ownership before close: an ambiguous close must not be replayed
+      // against a descriptor number that the OS could already have reused.
+      const target = pin, source = sourcePin;
+      pin = sourcePin = undefined;
+      try { if (target !== undefined) fs.closeSync(target); }
+      finally { if (source !== undefined) fs.closeSync(source); }
+    };
     try {
       recovery = this.renameRecovery(relative, newPath, before, temporary);
       pin = fs.openSync(temporary, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
@@ -522,8 +530,12 @@ export class WorkspaceService extends EventEmitter {
           afterCapture.mtimeNs !== stat.mtimeNs || afterCapture.ctimeNs !== stat.ctimeNs || afterCapture.nlink !== 1n) {
         throw new AppError(409, 'DISK_CONFLICT', 'Captured source was edited during validation; recovery retained.');
       }
-      // Revalidate destination AFTER capture. Never destroy the captured inode,
-      // even on success: it may be the last original copy or still have an IDE fd.
+      // Windows may settle link/unlink ctime only on the last handle close.
+      // Close BOTH own pins before the final read/track, then revalidate identity,
+      // bytes and source absence. Never reuse a pre-close destination stamp or
+      // waive ctime checks in disk(): later real external changes must still sync.
+      // The captured inode remains retained even if an IDE still has it open.
+      closePins();
       const destination = this.disk(newPath);
       if (!matchesDestination(destination) || fs.existsSync(this._safePath(relative, true))) {
         throw new AppError(409, 'DISK_CONFLICT', 'A public path changed during capture.');
@@ -537,6 +549,9 @@ export class WorkspaceService extends EventEmitter {
       this.emit('changed', { path: newPath, workspaceVersion: this.workspaceVersion, actor });
       this.refreshDirectories();
     } catch (error) {
+      // This includes ambiguous publication and cleanup failures. Reconciliation
+      // must observe post-close metadata too, not publish a stamp finally invalidates.
+      try { closePins(); } catch (closeError) { this.emit('watcherError', closeError); }
       const cleanupError = this.cleanupRenameLink(temporary, 2);
       if (!published && !cleanupError) throw error;
       // Reconcile a syscall with unknown outcome by reading its private target.
@@ -565,10 +580,7 @@ export class WorkspaceService extends EventEmitter {
         'Preserve both public paths. Copy original and source from recovery to NEW names before resolving private aliases; see intent.json.');
       incomplete.cause = error;
       throw incomplete;
-    } finally {
-      if (pin !== undefined) fs.closeSync(pin);
-      if (sourcePin !== undefined) fs.closeSync(sourcePin);
-    }
+    } finally { closePins(); }
   }
 
   _delete(relative: string, baseVersion: number, actor: string, authorize: () => void): void {
