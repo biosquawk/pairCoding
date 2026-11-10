@@ -56,7 +56,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   const ledger = new CommandLedger();
   let chat:ChatEntry[] = [], proposals:Proposal[] = [], report:Report|null = null, lastRun:Run|null = null;
   const facts:unknown[] = [];
-  let seq = 0, closing = false;
+  let seq = 0, closing = false, transitioning = false;
   let coach:CoachService|undefined, execution:ExecutionServices|undefined;
   const peers = new Map<WebSocket,{clientId:string|null; authenticated:boolean; alive:boolean; count:number; since:number}>();
   const server = http.createServer((req,res) => { void handleHttp(req,res); });
@@ -149,13 +149,17 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     });
   }
   async function finish(reason:Report['reason']) {
+    if(transitioning) fail(409,'SESSION_TRANSITION','Poczekaj na utrwalenie bieżącej operacji; lokalny draft pozostaje niezapisany.');
     if (!execution) fail(503,'GATE003_NOT_ENABLED','Runner i raport oczekują odbioru bramki GATE-003.');
+    transitioning=true;
+    try {
     coach?.abort(); session.releaseCoach();
     await execution.runner.stopAll();
     const finalSnapshot=workspace.createSnapshot('Stan końcowy próby');
     session.finish();
     const frozen={session:clone(session.getSession()),snapshot:clone(finalSnapshot),runs:clone(execution.runner.list()),chat:clone(chat),events:clone(facts)};
     report=execution.reports.finish(reason,frozen); emit('SESSION_REPORT',report); return clone(report);
+    } finally { transitioning=false; }
   }
   async function handleHttp(req:IncomingMessage,res:ServerResponse) {
     let requestId:string|null=null;
@@ -206,15 +210,19 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }
       if(url.pathname!=='/api/project/open') session.assertClient(body.clientId,body.sessionId);
       const operation=ledger.run(`HTTP:${body.requestId}`,{route:key,body},async()=>{
+        if(transitioning && !stopMatch) fail(409,'SESSION_TRANSITION','Trwa bezpieczna zmiana sesji; zachowaj draft.');
         if(url.pathname==='/api/project/open') {
           if(session.leaseClientId && session.leaseClientId!==body.clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
           const next=makeWorkspace(body.rootPath);
           try { next.updateSettings(body.settings); } catch(error) { next.close();throw error; }
+          transitioning=true;
+          try {
           coach?.abort(); await execution?.runner.stopAll(); coach?.close();execution?.reports.close();
           session.close();workspace.close();workspace=next;session=new SessionController(workspace);gate=new WriteGate(workspace,session);session.claimLease(body.clientId);
           chat=[];proposals=[];report=null;lastRun=null;facts.length=0;seq=0;
           for(const [ws,p] of peers) { p.authenticated=false;ws.close(1012,'Project changed; reconnect'); }
           bind();return workspace.getProject(session.state.sessionId);
+          } finally { transitioning=false; }
         }
         if(url.pathname==='/api/project/settings') { assertVersion(body.expectedWorkspaceVersion);coach?.abort();session.releaseCoach();workspace.updateSettings(body.settings);snapshot();return workspace.getProject(session.state.sessionId); }
         if(url.pathname==='/api/file') { gate.mutate({...body,actor:'STUDENT'});snapshot();return workspace.getProject(session.state.sessionId); }
@@ -297,6 +305,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }
       const command=message;
       const op=ledger.run(`WS:${message.messageId}`,message,async()=>{
+        if(transitioning && command.type!=='PING') fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
         switch(command.type) {
           case 'CODE_CHANGED': {
             const doc=gate.write({...authInput(command.clientId,command.sessionId,p.controlEpoch),path:p.path,baseVersion:p.baseVersion,content:p.content});
