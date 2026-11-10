@@ -1,4 +1,4 @@
-import type { Document } from '../shared/protocol';
+import type { Document, Snapshot } from '../shared/protocol';
 import { WorkspaceService } from './WorkspaceService';
 import { SessionController } from './SessionController';
 import { AppError } from './errors';
@@ -8,7 +8,9 @@ export type FileMutation = MutationAuth & { operation: 'CREATE' | 'RENAME' | 'DE
   newPath: string | null; content: string | null; baseVersion: number | null };
 
 export class WriteGate {
-  constructor(private readonly workspace: WorkspaceService, private readonly session: SessionController) {}
+  constructor(private readonly workspace: WorkspaceService, private readonly session: SessionController) {
+    this.workspace._recoverSnapshots();
+  }
 
   private authorize(input: MutationAuth): void {
     this.session.assertClient(input.clientId, input.sessionId);
@@ -46,6 +48,10 @@ export class WriteGate {
   }
 
   write(input: MutationAuth & { path: string; baseVersion: number; content: string }): Document {
+    return this.workspace._withMutation(() => this.writeAuthorized(input));
+  }
+
+  private writeAuthorized(input: MutationAuth & { path: string; baseVersion: number; content: string }): Document {
     this.authorize(input);
     this.workspace._safePath(input.path);
     if (input.actor === 'COACH') this.coachPath(input.path);
@@ -54,7 +60,21 @@ export class WriteGate {
     return result;
   }
 
+  restoreSnapshot(input: MutationAuth & { snapshotId: string; paths: string[]; expectedWorkspaceVersion: number }): Promise<Snapshot> {
+    // Caller-owned DTOs may change while we yield: retain the ORIGINAL authority and selection.
+    const accepted = { ...input, paths: Array.isArray(input.paths) ? [...input.paths] : input.paths };
+    return this.workspace._withMutationAsync(async () => {
+      this.authorize(accepted);
+      if (accepted.actor !== 'STUDENT') throw new AppError(403, 'COACH_RESTORE_FORBIDDEN', 'Only the student may accept a restore.');
+      return this.workspace._restoreSnapshot(accepted.snapshotId, accepted.paths, accepted.expectedWorkspaceVersion, () => this.authorize(accepted));
+    });
+  }
+
   mutate(input: FileMutation): void {
+    return this.workspace._withMutation(() => this.mutateAuthorized(input));
+  }
+
+  private mutateAuthorized(input: FileMutation): void {
     this.authorize(input);
     this.workspace._safePath(input.path, true);
     // AI plans propose edits to existing documents, never arbitrary filesystem mutations.
