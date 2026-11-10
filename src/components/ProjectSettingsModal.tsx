@@ -12,6 +12,7 @@ interface ProjectSettingsModalProps {
   isOpen: boolean;
   settings: ProjectSettings;
   snapshots?: SnapshotItem[];
+  snapshotsError?: string | null;
   rootPath?: string;
   onOpenProject?: (rootPath: string) => Promise<boolean>;
   onClose: () => void;
@@ -23,6 +24,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   isOpen,
   settings,
   snapshots = [],
+  snapshotsError,
   rootPath,
   onOpenProject,
   onClose,
@@ -228,6 +230,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
               </span>
             </div>
 
+            {snapshotsError && <p role="alert" className="text-amber-300">Nie można pobrać kopii: {snapshotsError}</p>}
             {snapshots.length === 0 ? (
               <p className="text-[11px] text-zinc-500 italic">Brak zapisanych migawek stanu projektu.</p>
             ) : (

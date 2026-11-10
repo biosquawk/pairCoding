@@ -504,7 +504,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           />
         ) : (
           <div className="h-full flex items-center justify-center text-zinc-500 text-sm">
-            {activeFile?.loaded === false ? 'Wczytywanie pliku…' : 'Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.'}
+            {activeFile?.loadError ? `Nie można otworzyć pliku: ${activeFile.loadError}. Wybierz inny plik.` : activeFile?.loaded === false ? 'Wczytywanie pliku…' : 'Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.'}
           </div>
         )}
 

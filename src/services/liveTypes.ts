@@ -9,6 +9,7 @@ export type ClientState = Omit<ReturnType<typeof simulator.getFullState>, 'fileC
   connectionError: string | null;
   pendingPaths: string[];
   storageError: string | null;
+  snapshotsError: string | null;
 };
 export type UpdatedFile = ProjectFile & { isExternalOrSnapshot?: boolean };
 export type CoachStep = CoachEditStep;

@@ -33,6 +33,7 @@ export class LiveBackend {
   private state: ClientState = emptyLiveState();
   private listeners = new Map<string, Set<(value: any) => void>>();
   private documents = new Map<string, Wire.Document>();
+  private loadErrors = new Map<string, string>();
   private saves = new Map<string, Save>();
   private pendingSteps = new Map<string, { step: ServerPayloads['COACH_STEP_EDIT']; content: string }>();
   private invalidInterventions = new Set<string>();
@@ -194,7 +195,7 @@ export class LiveBackend {
     const visible = [...project.files];
     this.saves.forEach((save, path) => { if (!visible.some(f => f.path === path)) visible.push({ path, kind: 'FILE', version: save.draft.baseVersion }); });
     this.state.files = visible.map(f => ({ path: f.path, kind: f.kind, version: f.version ?? 0,
-      content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path) || this.saves.has(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
+      content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path) || this.saves.has(f.path), loadError: this.loadErrors.get(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
   }
   private sessionState(session: Wire.Session) {
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
@@ -228,7 +229,12 @@ export class LiveBackend {
   }
   private async loadFile(path: string, external = false) {
     const generation = this.generation;
-    const doc = await this.http<Wire.Document>(`/api/file?path=${encodeURIComponent(path)}`);
+    let doc: Wire.Document;
+    try { doc = await this.http<Wire.Document>(`/api/file?path=${encodeURIComponent(path)}`); this.loadErrors.delete(path); }
+    catch (error) {
+      this.loadErrors.set(path, error instanceof Error ? error.message : String(error));
+      if (this.project) this.projectState(this.project); this.publish(); throw error;
+    }
     if (generation !== this.generation || this.stopped) return;
     const existing = this.documents.get(path);
     if (existing && existing.version > doc.version) return;
@@ -238,7 +244,7 @@ export class LiveBackend {
     const generation = ++this.generation;
     this.synced = false; this.lastSeq = seq;
     this.saves.forEach(save => { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; save.timer = undefined; });
-    this.documents.clear(); this.projectState(bundle.project); this.restoreDrafts();
+    this.documents.clear(); this.loadErrors.clear(); this.projectState(bundle.project); this.restoreDrafts();
     this.sessionState(bundle.session);
     if (this.vetoPending && this.vetoCutoff && bundle.session.writeOwner === 'STUDENT'
       && (bundle.session.sessionId !== this.vetoCutoff.sessionId || bundle.session.controlEpoch > this.vetoCutoff.epoch)) {
@@ -262,12 +268,19 @@ export class LiveBackend {
         }
       }
       this.projectState(this.project!);
+      const readErrors: string[] = [];
       for (const path of paths) {
         if (generation !== this.generation || this.stopped) return;
-        if (!this.documents.has(path!)) await this.loadFile(path!);
+        if (!this.documents.has(path!)) {
+          try { await this.loadFile(path!); }
+          catch (error) {
+            const save = this.saves.get(path!); if (save) save.conflict = true;
+            readErrors.push(`Nie można odczytać ${path}: ${error instanceof Error ? error.message : String(error)}. Wybierz inny plik lub popraw ścieżkę zadania w ustawieniach; drafty zachowano.`);
+          }
+        }
       }
       if (generation !== this.generation || this.stopped) return;
-      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer); this.state.connectionError = null;
+      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer); this.state.connectionError = readErrors[0] ?? null;
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -495,7 +508,7 @@ export class LiveBackend {
       // New folder means new consent and no inherited executable approval.
       const settings: Wire.Settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
       const project = await this.http<Wire.Project>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
-      this.generation++; this.lastSeq = 0; this.documents.clear(); this.state.fileConflict = null; this.state.activePath = '';
+      this.generation++; this.lastSeq = 0; this.documents.clear(); this.loadErrors.clear(); this.state.fileConflict = null; this.state.activePath = '';
       this.projectState(project); this.reconnect(); return true;
     } catch (error) { this.fail(error); return false; }
   }
@@ -559,12 +572,14 @@ export class LiveBackend {
       // Only human-confirmed structured profiles. Never parse the display command into shell execution.
       const wireSettings: Wire.Settings = { ...this.project.settings, aiConsent: settings.aiConsent, taskMode: settings.taskMode, taskFilePath: settings.taskFilePath || null, reviewNotesPath: settings.reviewNotesPath, runProfiles: settings.wireRunProfiles ?? this.project.settings.runProfiles, contextPatterns: settings.contextPatterns ?? this.project.settings.contextPatterns };
       const project = await this.http<Wire.Project>('/api/project/settings', 'PUT', this.commandBody({ expectedWorkspaceVersion: this.state.workspaceVersion, settings: wireSettings }));
-      this.projectState(project); if (wireSettings.taskFilePath) await this.loadFile(wireSettings.taskFilePath); this.publish(); return true;
+      this.projectState(project);
+      if (wireSettings.taskFilePath) { try { await this.loadFile(wireSettings.taskFilePath); } catch (error) { this.fail(new Error(`Ustawienia zapisano, ale plik zadania jest niedostępny: ${error instanceof Error ? error.message : String(error)}`)); } }
+      this.publish(); return true;
     } catch (error) { this.fail(error); return false; }
   }
   async refreshSnapshots() {
-    try { const snapshots = await this.http<Wire.Snapshot[]>('/api/snapshots'); this.state.snapshots = snapshots.map(s => ({ id: s.snapshotId, label: s.label, timestamp: Date.parse(s.createdAt), files: s.paths.map(path => ({ path, content: '' })) })); this.publish(); }
-    catch (error) { this.fail(error); }
+    try { const snapshots = await this.http<Wire.Snapshot[]>('/api/snapshots'); this.state.snapshots = snapshots.map(s => ({ id: s.snapshotId, label: s.label, timestamp: Date.parse(s.createdAt), files: s.paths.map(path => ({ path, content: '' })) })); this.state.snapshotsError = null; this.publish(); }
+    catch (error) { this.state.snapshotsError = error instanceof Error ? error.message : String(error); this.publish(); }
   }
   restoreSnapshotById(snapshotId: string) { this.safeSend('PROPOSAL_REQUEST', { kind: 'RESTORE_SNAPSHOT', snapshotId }); }
   async resolveConflict(choice: 'KEEP_LOCAL' | 'LOAD_DISK') {
