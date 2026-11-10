@@ -84,7 +84,7 @@ test('TEST005 external sync and a delayed older ACK preserve both versions', asy
   f.ack(f.changes()[0], 2);
   assert.equal(f.client.getState().fileConflict?.localDraftContent, 'mine'); assert.equal(f.client.getState().fileConflict?.diskContent, 'disk external');
   assert.equal(f.client.getState().files.find(x => x.path === 'solution.ts')?.content, 'mine'); assert.ok(f.stored.size);
-  f.client.resolveConflict('LOAD_DISK'); assert.equal(f.client.getState().files.find(x => x.path === 'solution.ts')?.content, 'disk external'); assert.equal(f.client.getState().fileConflict, null);
+  await f.client.resolveConflict('LOAD_DISK'); assert.equal(f.client.getState().files.find(x => x.path === 'solution.ts')?.content, 'disk external'); assert.equal(f.client.getState().fileConflict, null);
   assert.ok([...f.stored.keys()].some(k => k.includes(':conflict:')), 'explicit resolution retains recovery copy');
 });
 test('TEST010/011 veto stops old steps synchronously, permits protected local draft before ACK', async t => {

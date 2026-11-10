@@ -137,6 +137,7 @@ export interface ActionProposal {
 }
 
 export interface FileConflict {
+  diskDeleted?: boolean;
   path: string;
   diskContent: string;
   localDraftContent: string;

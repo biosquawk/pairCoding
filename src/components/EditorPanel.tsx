@@ -108,6 +108,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     return 'plaintext';
   };
 
+  const modelUri = (monaco: Monaco, path: string) => monaco.Uri.from({ scheme: 'paircoach', authority: client.getState().scenario.id, path: `/${path}` });
+
   // Handle Monaco Editor mount
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
@@ -143,7 +145,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     const monaco = monacoRef.current;
     if (!editor || !monaco || !activeFile || activeFile.loaded === false) return;
 
-    const uri = monaco.Uri.parse(`file:///${activeFile.path}`);
+    const uri = modelUri(monaco, activeFile.path);
     let model = monaco.editor.getModel(uri);
 
     if (!model) {
@@ -175,7 +177,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   // External/snapshot synchronization updates inactive models too. Ordinary ACK never calls setValue.
   useEffect(() => client.onFileUpdated((file) => {
     if (!file.isExternalOrSnapshot || !monacoRef.current) return;
-    const model = monacoRef.current.editor.getModel(monacoRef.current.Uri.parse(`file:///${file.path}`));
+    const model = monacoRef.current.editor.getModel(modelUri(monacoRef.current, file.path));
     if (model && model.getValue() !== file.content) {
       isApplyingCoachStepRef.current = true;
       try { model.setValue(file.content); } finally { isApplyingCoachStepRef.current = false; }
@@ -205,7 +207,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       // Read synchronous client state, not the potentially stale React render's epoch.
       if (!client.canApplyStep(step)) return;
-      const uri = monaco.Uri.parse(`file:///${step.path}`);
+      const uri = modelUri(monaco, step.path);
       let model = monaco.editor.getModel(uri);
       if (!model) {
         const file = client.getState().files.find(f => f.path === step.path);
@@ -436,7 +438,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              <strong>Konflikt synchronizacji:</strong> Plik na dysku uległ zmianie, ale posiadasz lokalny niepotwierdzony draft.
+              <strong>Konflikt synchronizacji:</strong> {fileConflict.diskDeleted ? 'Plik usunięto na dysku; lokalny draft zachowano. Zachowanie draftu odtworzy plik po Twojej decyzji.' : 'Plik na dysku uległ zmianie, ale posiadasz lokalny niepotwierdzony draft.'}
             </span>
           </div>
           <details className="w-full">
@@ -481,6 +483,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             options={{
               readOnly: writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !!activeFile.readOnly,
               ariaLabel: `Edytor pliku ${activeFile.path}`,
+              quickSuggestions: false,
+              suggestOnTriggerCharacters: false,
+              wordBasedSuggestions: 'off',
               minimap: { enabled: false },
               fontSize: 13,
               fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
