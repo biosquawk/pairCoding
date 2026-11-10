@@ -9,6 +9,7 @@ import {
   EndReason,
   HintBubbleSeverity,
   ProjectFile,
+  ProjectSettings,
   ProposalType,
   TrainingScenario,
   WindowPresence,
@@ -20,9 +21,20 @@ export type CoachStepListener = (step: CoachEditStep) => void;
 
 export class PairCoachClient {
   private static instance: PairCoachClient;
+  private authToken: string | null = null;
 
   private constructor() {
-    // Phase 1 uses the authoritative simulator
+    // Contract 3.0.0: Read and clean token from window.location.hash (#token=...)
+    if (typeof window !== 'undefined' && window.location.hash) {
+      const hash = window.location.hash.substring(1);
+      const params = new URLSearchParams(hash);
+      const token = params.get('token');
+      if (token) {
+        this.authToken = token;
+        // Clean URL hash without reloading
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    }
   }
 
   public static getInstance(): PairCoachClient {
@@ -30,6 +42,10 @@ export class PairCoachClient {
       PairCoachClient.instance = new PairCoachClient();
     }
     return PairCoachClient.instance;
+  }
+
+  public getAuthToken(): string | null {
+    return this.authToken;
   }
 
   // Subscriptions
@@ -158,6 +174,14 @@ export class PairCoachClient {
 
   public retryReport() {
     simulator.retryReport();
+  }
+
+  public resolveConflict(choice: 'KEEP_LOCAL' | 'LOAD_DISK') {
+    simulator.resolveConflict(choice);
+  }
+
+  public updateProjectSettings(settings: ProjectSettings) {
+    simulator.updateProjectSettings(settings);
   }
 
   // Dev simulator triggers

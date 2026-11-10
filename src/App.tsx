@@ -279,6 +279,8 @@ export default function App() {
               openTabs={openTabs}
               activePath={state.activePath}
               writeOwner={state.writeOwner}
+              controlEpoch={state.controlEpoch}
+              fileConflict={state.fileConflict}
               activePointer={state.activePointer}
               activeHintBubble={state.activeHintBubble}
               activeProposal={state.activeProposal}
@@ -290,6 +292,7 @@ export default function App() {
               onDismissBubble={() => client.dismissHintBubble()}
               onBubblePosChange={(x, y) => client.updateBubblePos(x, y)}
               onProposalResponse={(id, accept) => client.respondToProposal(id, accept)}
+              onResolveConflict={(choice) => client.resolveConflict(choice)}
             />
           </div>
 
@@ -340,7 +343,10 @@ export default function App() {
         isOpen={isSettingsModalOpen}
         settings={projectSettings}
         onClose={() => setIsSettingsModalOpen(false)}
-        onSave={(updated) => setProjectSettings(updated)}
+        onSave={(updated) => {
+          setProjectSettings(updated);
+          client.updateProjectSettings(updated);
+        }}
       />
     </div>
   );

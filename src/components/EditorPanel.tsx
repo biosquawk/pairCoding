@@ -12,6 +12,7 @@ import {
   CoachEditStep,
   CoachHintBubble,
   CoachPointer,
+  FileConflict,
   ProjectFile,
   WriteOwner,
 } from '../types/paircoach';
@@ -31,6 +32,8 @@ interface EditorPanelProps {
   openTabs: string[];
   activePath: string;
   writeOwner: WriteOwner;
+  controlEpoch: number;
+  fileConflict: FileConflict | null;
   activePointer: CoachPointer | null;
   activeHintBubble: CoachHintBubble | null;
   activeProposal: ActionProposal | null;
@@ -42,6 +45,7 @@ interface EditorPanelProps {
   onDismissBubble: () => void;
   onBubblePosChange: (x: number, y: number) => void;
   onProposalResponse: (proposalId: string, accept: boolean) => void;
+  onResolveConflict: (choice: 'KEEP_LOCAL' | 'LOAD_DISK') => void;
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
@@ -49,6 +53,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   openTabs,
   activePath,
   writeOwner,
+  controlEpoch,
+  fileConflict,
   activePointer,
   activeHintBubble,
   activeProposal,
@@ -60,6 +66,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   onDismissBubble,
   onBubblePosChange,
   onProposalResponse,
+  onResolveConflict,
 }) => {
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -136,9 +143,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     } else {
       // Model exists; ensure language is correct
       monaco.editor.setModelLanguage(model, getLanguageForPath(activeFile.path));
+      // Item 3: Synchronize model if content changed from external file sync or snapshot restore
       if (model.getValue() !== activeFile.content && !isApplyingCoachStepRef.current) {
-        // Sync external updates without resetting entire undo stack if same
-        // Note: For regular user typing, onChange already maintains it
+        isApplyingCoachStepRef.current = true;
+        try {
+          model.setValue(activeFile.content);
+        } finally {
+          isApplyingCoachStepRef.current = false;
+        }
       }
     }
 
@@ -160,12 +172,32 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   }, [activePath, activeFile]);
 
+  // Item 2: Close Undo stack boundary immediately upon Veto
+  useEffect(() => {
+    const unsubVeto = client.onVetoExecuted(() => {
+      const editor = editorRef.current;
+      if (editor) {
+        const model = editor.getModel();
+        model?.pushStackElement();
+      }
+    });
+    return unsubVeto;
+  }, []);
+
   // Subscribe to Coach Step Edits directly on Monaco model
   useEffect(() => {
     const unsubStep = client.onCoachStep((step: CoachEditStep) => {
       const editor = editorRef.current;
       const monaco = monacoRef.current;
       if (!editor || !monaco) return;
+
+      // Item 4: Reject late coach steps where controlEpoch does not match currentControlEpoch (TEST-010)
+      if (step.controlEpoch !== undefined && step.controlEpoch !== controlEpoch) {
+        console.warn(
+          `[PairCoach] Odrzucono spóźniony krok trenera (step.controlEpoch=${step.controlEpoch} !== currentControlEpoch=${controlEpoch})`
+        );
+        return;
+      }
 
       const model = editor.getModel();
       if (!model) return;
@@ -223,7 +255,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     return unsubStep;
-  }, [activePath, onContentChange]);
+  }, [activePath, controlEpoch, onContentChange]);
 
   // Handle readOnly property based on writeOwner
   useEffect(() => {
@@ -289,7 +321,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       if (!isDraggingBubble) return;
       const dx = e.clientX - dragStartRef.current.mouseX;
       const dy = e.clientY - dragStartRef.current.mouseY;
-      const newX = Math.max(10, Math.min(window.innerWidth - 350, dragStartRef.current.startX + dx));
+      // Item 1: Correct formula for right-anchored position (dx > 0 reduces right, moving element right)
+      const newX = Math.max(10, Math.min(window.innerWidth - 390, dragStartRef.current.startX - dx));
       const newY = Math.max(10, Math.min(window.innerHeight - 200, dragStartRef.current.startY + dy));
       setBubblePos({ x: newX, y: newY });
       onBubblePosChange(newX, newY);
@@ -369,6 +402,32 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           )}
         </div>
       </div>
+
+      {/* Conflict Banner (Item 3) */}
+      {fileConflict && fileConflict.path === activePath && (
+        <div className="bg-amber-950/95 border-b-2 border-amber-500 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs text-amber-200 z-30 shadow-lg">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+            <span>
+              <strong>Konflikt synchronizacji:</strong> Plik na dysku uległ zmianie, ale posiadasz lokalny niepotwierdzony draft.
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => onResolveConflict('KEEP_LOCAL')}
+              className="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-600 font-medium text-xs transition-colors"
+            >
+              Zachowaj mój lokalny draft
+            </button>
+            <button
+              onClick={() => onResolveConflict('LOAD_DISK')}
+              className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs shadow transition-colors"
+            >
+              Załaduj wersję z dysku
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Editor Body */}
       <div className="flex-1 relative overflow-hidden">

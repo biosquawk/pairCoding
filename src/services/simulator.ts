@@ -18,6 +18,7 @@ import {
   ExecutionStatus,
   HintBubbleSeverity,
   ProjectFile,
+  ProjectSettings,
   ProposalType,
   SessionReport,
   SessionStatus,
@@ -44,6 +45,14 @@ export class MockBackendSimulator {
   private sessionStatus: SessionStatus = 'STOPPED';
   private pauseOnHidden: boolean = true;
   private windowPresence: WindowPresence = 'FOCUSED';
+
+  // Versioning and Control Epoch (Contract 3.0.0)
+  private controlEpoch: number = 1;
+  private workspaceVersion: number = 1;
+  private vetoBaselineContent: Map<string, string> = new Map();
+  private cooldownDebounceTimer: any = null;
+  private fileConflict: { path: string; diskContent: string; localDraftContent: string } | null = null;
+  private projectSettings: ProjectSettings;
 
   // Timer
   private startTime: number = 0;
@@ -76,6 +85,16 @@ export class MockBackendSimulator {
     this.currentScenario = MOCK_SCENARIOS[0];
     this.limitMs = this.currentScenario.defaultTimeLimitMs;
     this.activePath = 'src/solution.ts';
+    this.projectSettings = {
+      aiConsent: true,
+      taskMode: this.currentScenario.taskMode,
+      taskFilePath: this.currentScenario.taskFilePath,
+      reviewNotesPath: this.currentScenario.reviewNotesPath,
+      runProfiles: [
+        { id: 'main', name: 'Run Main', command: 'node dist/index.js', isTest: false },
+        { id: 'test', name: 'Run Tests', command: 'vitest run', isTest: true },
+      ],
+    };
     this.loadScenario(this.currentScenario);
   }
 
@@ -92,10 +111,14 @@ export class MockBackendSimulator {
     this.activePath = defaultActive.path;
 
     this.writeOwner = 'STUDENT';
-    this.coachMode = 'ACTIVE_WATCHING';
-    this.aiStatus = 'READY';
+    this.coachMode = this.projectSettings.aiConsent ? 'ACTIVE_WATCHING' : 'UNAVAILABLE';
+    this.aiStatus = this.projectSettings.aiConsent ? 'READY' : 'OFF';
     this.sessionStatus = 'STOPPED';
     this.elapsedMs = 0;
+    this.controlEpoch = 1;
+    this.workspaceVersion = 1;
+    this.fileConflict = null;
+    this.vetoBaselineContent.clear();
     this.stopTimer();
 
     this.activePointer = null;
@@ -162,6 +185,10 @@ export class MockBackendSimulator {
       activeRun: this.activeRun,
       report: this.report,
       isOffline: this.isOffline,
+      controlEpoch: this.controlEpoch,
+      workspaceVersion: this.workspaceVersion,
+      fileConflict: this.fileConflict,
+      projectSettings: this.projectSettings,
       stats: {
         coachInterventionsCount: this.coachInterventionsCount,
         userVetoCount: this.userVetoCount,
@@ -191,12 +218,13 @@ export class MockBackendSimulator {
     this.emit('STATE_CHANGED', this.getFullState());
   }
 
-  public updateFileContent(path: string, content: string, fromUser = true) {
+  public updateFileContent(path: string, content: string, fromUser = true, isExternalOrSnapshot = false) {
     const file = this.files.get(path);
     if (!file) return;
 
     file.content = content;
     file.version += 1;
+    this.workspaceVersion += 1;
 
     // Invalidate pointer or hint bubble if document version changed
     if (this.activePointer && this.activePointer.path === path) {
@@ -207,13 +235,32 @@ export class MockBackendSimulator {
     }
 
     if (fromUser) {
-      // If user was in cooldown after veto and typed non-whitespace, coach returns to active watching
-      if (this.coachMode === 'COOLDOWN_AFTER_VETO' && content.trim().length > 0) {
-        this.coachMode = 'ACTIVE_WATCHING';
+      // Rule 4: Do not immediately exit COOLDOWN_AFTER_VETO on first keystroke.
+      // Compare non-whitespace content with baseline recorded at veto time,
+      // and require a 2000 ms debounce pause before returning to ACTIVE_WATCHING.
+      if (this.coachMode === 'COOLDOWN_AFTER_VETO') {
+        const baseline = this.vetoBaselineContent.get(path) || '';
+        const hasSubstantialEdit = content.replace(/\s+/g, '') !== baseline.replace(/\s+/g, '');
+
+        if (hasSubstantialEdit) {
+          if (this.cooldownDebounceTimer) {
+            clearTimeout(this.cooldownDebounceTimer);
+          }
+          this.cooldownDebounceTimer = setTimeout(() => {
+            if (this.coachMode === 'COOLDOWN_AFTER_VETO') {
+              this.coachMode = 'ACTIVE_WATCHING';
+              this.addChatMessage(
+                'SYSTEM',
+                '👁️ Trener AI powrócił do aktywnej obserwacji po Twojej samodzielnej zmianie kodu (2s pauzy).'
+              );
+              this.emit('STATE_CHANGED', this.getFullState());
+            }
+          }, 2000);
+        }
       }
     }
 
-    this.emit('FILE_UPDATED', file);
+    this.emit('FILE_UPDATED', { ...file, isExternalOrSnapshot });
     this.emit('STATE_CHANGED', this.getFullState());
   }
 
@@ -343,6 +390,11 @@ export class MockBackendSimulator {
   public async startCoachDemonstration(stepsOverride?: CoachEditStep[]) {
     if (this.writeOwner === 'COACH') return;
 
+    if (!this.projectSettings.aiConsent) {
+      this.addChatMessage('SYSTEM', 'Pokaz trenera jest niedostępny: zgoda AI (aiConsent) jest wyłączona w ustawieniach projektu.');
+      return;
+    }
+
     const interventionId = `interv-${Date.now()}`;
     this.currentInterventionId = interventionId;
     this.isInterventionAborted = false;
@@ -357,7 +409,7 @@ export class MockBackendSimulator {
       '🤖 Przejmuję klawiaturę, aby pokazać Ci zoptymalizowaną konstrukcję w kodzie. Wciśnij 2× Esc lub kliknij przycisk na pasku, jeśli chcesz mi przerwać!'
     );
 
-    this.emit('COACH_DEMO_STARTED', { interventionId, path: this.activePath });
+    this.emit('COACH_DEMO_STARTED', { interventionId, path: this.activePath, controlEpoch: this.controlEpoch });
     this.emit('STATE_CHANGED', this.getFullState());
 
     // Prepare steps depending on active file and scenario
@@ -369,6 +421,7 @@ export class MockBackendSimulator {
         {
           path: this.activePath,
           interventionId,
+          controlEpoch: this.controlEpoch,
           stepIndex: 1,
           totalSteps: 3,
           range: { startLine: 7, startColumn: 1, endLine: 16, endColumn: 1 },
@@ -381,6 +434,7 @@ export class MockBackendSimulator {
         {
           path: this.activePath,
           interventionId,
+          controlEpoch: this.controlEpoch,
           stepIndex: 2,
           totalSteps: 3,
           range: { startLine: 9, startColumn: 1, endLine: 9, endColumn: 1 },
@@ -398,6 +452,7 @@ export class MockBackendSimulator {
         {
           path: this.activePath,
           interventionId,
+          controlEpoch: this.controlEpoch,
           stepIndex: 3,
           totalSteps: 3,
           range: { startLine: 17, startColumn: 1, endLine: 17, endColumn: 1 },
@@ -411,6 +466,7 @@ export class MockBackendSimulator {
         {
           path: this.activePath,
           interventionId,
+          controlEpoch: this.controlEpoch,
           stepIndex: 1,
           totalSteps: 2,
           range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1 },
@@ -423,6 +479,8 @@ export class MockBackendSimulator {
 
     // Apply steps sequentially with delay
     for (const step of steps) {
+      step.controlEpoch = this.controlEpoch;
+
       if (this.isInterventionAborted || this.currentInterventionId !== interventionId) {
         break;
       }
@@ -440,8 +498,8 @@ export class MockBackendSimulator {
     // Finished or aborted
     if (!this.isInterventionAborted && this.currentInterventionId === interventionId) {
       this.writeOwner = 'STUDENT';
-      this.coachMode = 'ACTIVE_WATCHING';
-      this.aiStatus = 'READY';
+      this.coachMode = this.projectSettings.aiConsent ? 'ACTIVE_WATCHING' : 'UNAVAILABLE';
+      this.aiStatus = this.projectSettings.aiConsent ? 'READY' : 'OFF';
       this.currentInterventionId = null;
       this.addChatMessage('COACH', '🏁 Zakończyłem pokaz. Oddaję Ci kontrolę nad edytorem. Sprawdź testy!');
       this.emit('COACH_DEMO_FINISHED', { interventionId });
@@ -456,6 +514,8 @@ export class MockBackendSimulator {
       return;
     }
 
+    const oldEpoch = this.controlEpoch;
+    this.controlEpoch += 1;
     this.isInterventionAborted = true;
     this.userVetoCount += 1;
     this.currentInterventionId = null;
@@ -463,7 +523,13 @@ export class MockBackendSimulator {
     // Transition immediately: write owner restored to student, coach enters cooldown
     this.writeOwner = 'STUDENT';
     this.coachMode = 'COOLDOWN_AFTER_VETO';
-    this.aiStatus = 'READY';
+    this.aiStatus = this.projectSettings.aiConsent ? 'READY' : 'OFF';
+
+    // Store veto baseline content for active file
+    const activeFile = this.files.get(this.activePath);
+    if (activeFile) {
+      this.vetoBaselineContent.set(this.activePath, activeFile.content);
+    }
 
     const sourceLabel =
       source === 'KEY_DOUBLE_ESC'
@@ -477,8 +543,22 @@ export class MockBackendSimulator {
       `🛑 Zgłoszono WETO przez ${sourceLabel}! Trener AI natychmiast przerwał pisanie i przeszedł w stan wstrzymania. Edytor jest w Twoich rękach.`
     );
 
-    this.emit('VETO_EXECUTED', { source });
+    this.emit('VETO_EXECUTED', { source, controlEpoch: this.controlEpoch });
     this.emit('STATE_CHANGED', this.getFullState());
+
+    // TEST-010: Simulate late coach step with stale controlEpoch (Editor must drop it!)
+    setTimeout(() => {
+      this.emit('COACH_STEP', {
+        path: this.activePath,
+        interventionId: 'stale-interv',
+        controlEpoch: oldEpoch,
+        stepIndex: 99,
+        totalSteps: 99,
+        range: { startLine: 1, startColumn: 1, endLine: 1, endColumn: 1 },
+        text: '// [STALE STEP POST-VETO - DROPPED BY EDITOR]\n',
+        explanation: 'Opóźniony krok trenera ze starej epoki sterowania',
+      });
+    }, 40);
   }
 
   // Pointer & Hint Bubble
@@ -586,7 +666,7 @@ export class MockBackendSimulator {
         // Reset file to original
         const orig = this.currentScenario.files.find((f) => f.path === this.activePath);
         if (orig) {
-          this.updateFileContent(this.activePath, orig.content, false);
+          this.updateFileContent(this.activePath, orig.content, false, true);
           this.addChatMessage('SYSTEM', `Przywrócono pierwotną zawartość pliku ${this.activePath}.`);
         }
       } else if (current.type === 'GENERATE_TESTS') {
@@ -729,14 +809,83 @@ export class MockBackendSimulator {
     const file = this.files.get(this.activePath);
     if (!file) return;
 
-    file.content = `// [ZMIANA ZEWNĘTRZNA Z DYSKU]\n` + file.content;
+    const newDiskContent = `// [ZMIANA ZEWNĘTRZNA Z DYSKU ${new Date().toLocaleTimeString()}]\n` + file.content;
+
+    // Item 3: If user is offline (unconfirmed draft) or has unconfirmed changes, trigger CONFLICT state!
+    if (this.isOffline) {
+      this.fileConflict = {
+        path: this.activePath,
+        diskContent: newDiskContent,
+        localDraftContent: file.content,
+      };
+      this.addChatMessage(
+        'SYSTEM',
+        `⚠️ Konflikt synchronizacji: Plik ${this.activePath} został zmodyfikowany na dysku, ale posiadasz lokalny niepotwierdzony draft w trybie Offline.`
+      );
+      this.emit('STATE_CHANGED', this.getFullState());
+      return;
+    }
+
+    file.content = newDiskContent;
     file.version += 1;
+    this.workspaceVersion += 1;
 
     this.addChatMessage(
       'SYSTEM',
       `⚠️ Wykryto zewnętrzną zmianę pliku ${this.activePath} na dysku! Zaktualizowano model dokumentu.`
     );
-    this.emit('FILE_UPDATED', file);
+    this.emit('FILE_UPDATED', { ...file, isExternalOrSnapshot: true });
+    this.emit('STATE_CHANGED', this.getFullState());
+  }
+
+  public resolveConflict(choice: 'KEEP_LOCAL' | 'LOAD_DISK') {
+    if (!this.fileConflict) return;
+    const file = this.files.get(this.fileConflict.path);
+    if (file) {
+      if (choice === 'LOAD_DISK') {
+        file.content = this.fileConflict.diskContent;
+        file.version += 1;
+        this.workspaceVersion += 1;
+        this.addChatMessage('SYSTEM', `Rozwiązano konflikt: Załadowano wersję pliku ${file.path} z dysku.`);
+        this.emit('FILE_UPDATED', { ...file, isExternalOrSnapshot: true });
+      } else {
+        file.version += 1;
+        this.workspaceVersion += 1;
+        this.addChatMessage('SYSTEM', `Rozwiązano konflikt: Zachowano Twój lokalny draft pliku ${file.path}.`);
+        this.emit('FILE_UPDATED', { ...file, isExternalOrSnapshot: false });
+      }
+    }
+    this.fileConflict = null;
+    this.emit('STATE_CHANGED', this.getFullState());
+  }
+
+  public updateProjectSettings(settings: ProjectSettings) {
+    this.projectSettings = settings;
+
+    // AI consent effect
+    if (!settings.aiConsent) {
+      this.aiStatus = 'OFF';
+      this.coachMode = 'UNAVAILABLE';
+      this.addChatMessage('SYSTEM', 'Ustawienia zaktualizowane: Wyłączono zgodę AI (aiConsent = false). Trener AI nie będzie interweniował.');
+    } else if (this.aiStatus === 'OFF') {
+      this.aiStatus = 'READY';
+      this.coachMode = 'ACTIVE_WATCHING';
+      this.addChatMessage('SYSTEM', 'Ustawienia zaktualizowane: Włączono zgodę AI (aiConsent = true). Trener AI jest gotowy.');
+    }
+
+    // Task mode effect
+    this.currentScenario.taskMode = settings.taskMode;
+    this.currentScenario.taskFilePath = settings.taskFilePath;
+    this.currentScenario.reviewNotesPath = settings.reviewNotesPath;
+
+    if (settings.taskMode === 'CODE_REVIEW') {
+      this.currentScenario.capabilities.canRunTests = false;
+      this.currentScenario.capabilities.runTestsReason = 'Zadanie Code Review nie posiada zestawu testów jednostkowych — ocena następuje na podstawie review.md';
+    } else {
+      this.currentScenario.capabilities.canRunTests = true;
+      this.currentScenario.capabilities.runTestsReason = undefined;
+    }
+
     this.emit('STATE_CHANGED', this.getFullState());
   }
 

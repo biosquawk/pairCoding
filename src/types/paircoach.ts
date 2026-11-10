@@ -52,6 +52,8 @@ export interface Capabilities {
   runTestsReason?: string;
   docsPlugin: PluginStatus;
   autocompletePlugin: PluginStatus;
+  docs?: PluginStatus;
+  autocomplete?: PluginStatus;
 }
 
 export type ExecutionStatus =
@@ -121,12 +123,21 @@ export type ProposalType =
 
 export interface ActionProposal {
   id: string;
+  proposalId?: string;
   type: ProposalType;
+  kind?: ProposalType;
   questionText: string;
   paths: string[];
   yesLabel: string;
   noLabel: string;
   expiresAt?: number;
+  resetTimer?: boolean;
+}
+
+export interface FileConflict {
+  path: string;
+  diskContent: string;
+  localDraftContent: string;
 }
 
 export interface ChatEntry {
@@ -161,6 +172,7 @@ export type WindowPresence = 'FOCUSED' | 'BLURRED' | 'HIDDEN';
 export interface CoachEditStep {
   path: string;
   interventionId: string;
+  controlEpoch?: number;
   stepIndex: number;
   totalSteps: number;
   range: {
