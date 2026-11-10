@@ -37,3 +37,12 @@ CoachAdapter constructor(options:{workspace:WorkspaceService,session:SessionCont
 
 ## Transport K
 K createPairCoachServer({rootPath?,dataDir?,token?,port?,enableCoach?}) returns {server,workspace,session,gate,listen():Promise<number>,close():Promise<void>} for real tests. Default 127.0.0.1:8080. bootstrap JSON {token}; GET session/project discover ids before HELLO. WS HELLO claims lease (same clientId reconnect ok; second rejected), every command validates envelope & payload; close revokes control. Global session seq per broadcast, snapshot resync supported. request/message IDs durable-in-session dedup maps: same payload returns prior result/ACK DUPLICATE; changed payload409. Shared veto dedup identity across HTTP/WS. No production test-only coach endpoints; tests inject provider in process.
+
+## Additive agreements (after initial delegation)
+- P1: SessionController.setAiStatus(status), mute(durationSeconds:number|null). canCoach requires RUNNING/FOCUSED/lease/consent/READY|THINKING and no manual pause/cooldown; initial G1 OFF.
+- P6: CoachAdapter.updateRun(run) for actual run facts; sensitiveValues:[token] supplied by wiring solely for exact secret redaction, never context/provider.
+- P4: Runner.setApprovedProfiles(profiles) fail-closed internally, K supplies current human settings before start. {runId} placeholder in approved args/report glob, env PAIRCOACH_RUN_ID. Static-report freshness requires pre-run comparison.
+- P3 factory: src/server/http.ts createPairCoachServer supports staticDir and devBootstrap, plus in-process coachFactory/executionFactory (no production fixture endpoint). UI built fixture can use same loopback origin; Vite3000 uses1278080.
+- HUMAN amendment 67ce0485-0556-4a4c-bf7c-6069b793ca59 resolves AC027 reference: include the contextual 100-trial Windows/Chromium metrics001..004 p95/max in required acceptance. Do not omit, or claim all001..027 PASS without evidence.
+- Linux toolchain absent from initial sandbox PATH; operator supplied shared Node22.22.2 (verified SHA25681925c0995b5c1427b5d538e6a90ca2fdc4daffb786b09af749beaf7369d4e90), independent Node22.22.0 download also checked official SHA256. All npm caches stay in permitted role paths. No global config change.
+- Initial package esbuild0.25 conflicts with Vite8.3 peer^0.27|^0.28 (npm ERESOLVE): K aligns direct esbuild^0.28.2 rather than force/legacy-peer-deps.
