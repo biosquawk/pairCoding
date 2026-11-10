@@ -1,25 +1,25 @@
-# PairCoach preview — reprodukowalne archiwum źródeł
+# PairCoach MVP2 — archiwum exact Git, nie deklaracja odbioru
 
-Narzędzie `scripts/package-windows.mjs` jest potrzebne, bo zwykłe ZIP całego
-folderu dołącza zależności, `.git`, `.env` i dane QA, a `npm pack --dry-run`
-nie określa zatwierdzonej rewizji/zakresu. To **nie jest runner, launcher,
-instalator, pełny odbiór v3 ani publikacja**. Nie zmienia package.json/lock.
-Używa Node i Git, bez nowej biblioteki archiwum, nie wykonuje npm scripts.
+Zakres P4: `docs/windows*.md` i `scripts/package-windows.mjs`. Package/lock/core
+nie są zmieniane przez pakowanie. Instrukcja dotyczy MVP2 po wznowieniu przez
+HUMAN dae99189; stare odroczenie G3/19/100 dotyczyło **tylko MVP1**, nie MVP2.
+Przygotowanie jest **NOT_FINAL**, dopóki K nie rozliczy pełnego właściwego zakresu.
+Nie zmieniamy opublikowanego MVP1, live8080 ani alarmu.
 
-## Producent (K/P4, exact SHA pierwszego preview)
+## 1. Producent — dopiero exact finalacceptedSHA od K
 
-HUMAN bcd56587 autoryzuje pierwsze wydanie do kodowania i feedbacku bez czekania
-na crash/recovery,19/100 i pełny audyt27AC. K integruje stabilny frontend/backend,
-Codex provider i dokumentację w osobnej gałęzi; zachowuje G3 poza tym wydaniem.
-Po scoped review exact kandydata, nie dopiero po pełnym G3:
+Node >=22.22.0 i Git; użyj czystego repo kandydata, nie repo nadrzędnego Thalamusa.
+K wskazuje pełny SHA po integracji/review. Nie pakuj ruchomego HEAD jako gotowego
+wydania. Przed tym etapem można sprawdzić help/list/dry-run bez produkcji ZIP.
 
 ```powershell
-# Ustaw cwd na repo kandydata, NIE katalog nadrzędnego projektu Thalamusa.
 $ErrorActionPreference = 'Stop'
-$sha = (git rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0) { throw 'Brak repo' }
-# Porównaj $sha z pełnym SHA wskazanym do odbioru. Nie pakuj ruchomego HEAD bez odbioru.
-git status --short
+$sha = Read-Host 'Wklej pelny 40-znakowy finalacceptedSHA od K'
+if ($sha -notmatch '^[a-f0-9]{40}$') { throw 'Niepoprawny SHA' }
+$headSha = (git rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or $headSha -ne $sha) { throw 'Niezgodna rewizja' }
+$dirty = git status --porcelain
+if ($LASTEXITCODE -ne 0 -or $dirty) { throw 'Wymagany czysty checkout' }
 node --version
 npm.cmd --version
 git --version
@@ -29,98 +29,89 @@ node scripts/package-windows.mjs --commit $sha --list
 if ($LASTEXITCODE -ne 0) { throw 'Lista FAIL' }
 node scripts/package-windows.mjs --commit $sha --dry-run
 if ($LASTEXITCODE -ne 0) { throw 'Plan FAIL' }
-# Dopiero po review listy, źródeł i sekretów; rodzic C:\PairCoach musi istnieć.
-$out = Join-Path 'C:\PairCoach' ('package-preview-' + $sha)
+# Review listy/źródeł/sekretów. Rodzic C:\PairCoach musi już istnieć.
+$out = Join-Path 'C:\PairCoach' ('package-mvp2-' + $sha)
 node scripts/package-windows.mjs --commit $sha --output $out
-if ($LASTEXITCODE -ne 0) { throw 'Pakowanie FAIL — zachowaj niepełny katalog, odczytaj stan przed ponowieniem' }
+if ($LASTEXITCODE -ne 0) { throw 'Pakowanie FAIL — zachowaj wynik; odczytaj stan przed ponowieniem' }
 ```
 
-Help/list/dry-run nie uruchamiają serwera, testów, Windowskampanii ani AI,
-nie tworzą katalogu wyniku. Pełne40SHA jest obowiązkowe. Skrypt pakujący musi
-być zgodny ze wskazanym commitem; self-check dopuszcza wyłącznie różnicę
-końców linii LF/CRLF (także czysty checkout `core.autocrlf=true`). Inna zmiana
-helpera, w tym polityki pakowania lub pojedynczy CR, jest odrzucana. Nie trzeba
-zmieniać globalnego ustawienia Git. Pakowane są **bloby Git**, nie pliki
-robocze, build czy niezacommitowane poprawki. Brudne drzewo nie zmienia archiwum,
-ale przed odbiorem dostawca ma je wyjaśnić i przygotować czystą rewizję.
+Helper tworzy wyłącznie nowy katalog **poza repo** (realpath rodzica), odmawia
+nadpisania istniejącego wyniku. Częściowego wyniku nie kasuj automatycznie.
+Przy nieznanym wyniku najpierw odczytaj stan; nie ponawiaj publikacji.
+Nie uruchamia npm, AI, serwera, Windowskampanii ani wdrożenia. Self-check wymaga
+helpera zgodnego z wybranym commitem (wyjątek: tylko LF/CRLF). Wejściem są bloby
+Git, nie build, runtime, niezacommitowany plik ani zewnętrzny node_modules.
+
+## 2. Zawartość / źródłowe command closure
 
 Allowlist: package.json, package-lock.json, tsconfig.json, vite.config.ts,
-index.html, metadata.json, playwright.config.ts, `src/**`, `docs/windows*.md`, `scripts/package*.mjs` oraz dokładnie `scripts/clean.mjs`.
-Dodatkowa denylist blokuje `.env*` (także `.env.example`), klucze PEM/KEY/PFX/P12,
-katalogi sekretów/credentials, node_modules, .git, .paircoach, runtime/.runtime, tmp, dist, logi,
-artifacts, test-results, playwright-report, coverage. Śledzone źródła `tests/**` (także `tests/qa`) i potrzebne helper/config/fixture
-są dozwolone: TS/TSX/JS/JSX/MJS/CJS/JSON/XML/TXT/MD/PY/JAVA/PS1 oraz
-`tests/qa/.gitignore`. Raw output (runtime, logi, trace, screenshots, reports,
-artifacts) jest wykluczony. To decyzja K z bieżącego TASK, nie rozszerzenie QA.
-Nie uruchamiamy kampanii podczas pakowania. Nowy typ pliku wymagany przez
-przyszłą integrację musi przejść review polityki przed dodaniem. Symlink/submodule
-w wybranym zakresie są odrzucane. Helper nie odczytuje zmiennych API/tokenów,
-nie skanuje jednak treści zwykłych źródeł w poszukiwaniu każdego sekretu.
-Review źródeł przed dystrybucją nadal jest wymagane.
+index.html, metadata.json, playwright.config.ts, `src/**`, `docs/windows*.md`,
+`scripts/package*.mjs`, **istniejący `scripts/clean.mjs`** i śledzone źródła/support
+`tests/**` (TS/TSX/JS/JSX/MJS/CJS/JSON/XML/TXT/MD/PY/JAVA/PS1, tests/qa/.gitignore).
+Denylist nadal wyklucza .git, node_modules, .env*, klucze PEM/KEY/PFX/P12,
+credentials/secrets, .paircoach, runtime/.runtime, tmp/.tmp, dist, artifacts,
+logs, traces, screenshots, reports, test-results, playwright-report, coverage.
+Symlink/submodule i niebezpieczna nazwa w dozwolonym zakresie są odrzucane.
+Nie wkładamy raw QA ani danych/poświadczeń właściciela. Nie ma automatycznej
+pełnej detekcji sekretów w treści źródeł — wymagany review przed dystrybucją.
 
-Wynik w nowym katalogu poza repo:
-- `paircoach-v3-preview-<pełny40SHA>.zip`, jeden katalog główny o tym samym ID;
-- `manifest.json`: status PLAYABLE_PREVIEW_SOURCE_NOT_FULL_ACCEPTANCE, exactSHA, ZIP SHA256,
-  rozmiar, ścieżki/rozmiary/hash każdego źródła, wersje Git/Node/OS;
-- `SHA256SUMS`: hash ZIP-u i manifestu (manifest nie hashuje sam siebie).
+Każdy script ze wskazanego bloba package.json musi odpowiadać literalnemu
+kontraktowi helpera. Nieznany/zmieniony/lifecycle script, brak wymaganego pliku
+lub deklaracji dependency blokuje list/dry-run/output **przed zapisem**.
+To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 
-Nie powstaje obraz kontenera ani digest obrazu — N/A. Dane sesji użytkownika
-pozostają poza paczką; build/install/start/zdrowe wdrożenie to osobne wyniki.
-
-ZIP używa `git archive --format=zip -0` (STORE, bez zależności od kompresora),
-stałych bajtów commitu, czasu commitu i prefiksu z pełnym SHA. Wymagaj tej samej
-wersji Git dla identycznego bajtowo powtórzenia; manifest zapisuje platformę
-narzędzi, więc nie obiecujemy identycznego manifestu na innym OS/Node.
-`core.autocrlf` nie przerabia blobów. Skrypt kontroluje listę i hash zawartości
-ZIP-u względem manifestu; export-ignore/export-subst nie mogą cicho usunąć lub
-zmienić wymaganych plików. Odtwórz do **drugiego nowego katalogu** i porównaj
-SHA256 ZIP-ów. Nie ponawiaj zapisu do tego samego katalogu: najpierw odczytaj
-istniejący wynik, by nie utracić dowodów poprzedniej próby.
-
-## Command closure: każda deklarowana komenda
-
-Helper odczytuje scripts/dependencies ze wskazanego **bloba package.json**.
-Zna wyłącznie aktualny, jawnie zreviewowany kontrakt komend (nie uruchamia
-powłoki ani scripts). Zmieniona/nowa komenda, lifecycle script lub brak pliku
-w ZIP/deklaracji narzędzia blokują **list/dry-run/output** przed zapisem.
-Jeśli stabilna baza nie ma `scripts/clean.mjs`, K bierze byte-identical helper
-z odebranego runtime `03fcf6ddaae55b5b82e28f4cf49465f55e8b09e1`. Nie trzeba
-scalać nieukończonego G3. Brak pliku nadal blokuje pakowanie; nie odtwarzamy go.
-
-| npm command | Zakres w archiwum źródłowym |
+| Komenda | Warunek i rola |
 |---|---|
-| `ci` | Standardowe npm, package+lock, sieć; bez `--omit=dev`. Native dependencies instalują się na platformie odbiorcy, nie z WSL. |
-| `clean` | `node scripts/clean.mjs`; plik obowiązkowy. Przed build, w odrębnej instalacji. |
-| `build` | Vite, index.html/config/src; tworzy dist, nie EXE backendu. |
-| `lint`, `typecheck` | TypeScript, tsconfig/src; kompilator z devDependencies. |
-| `start`, `server` | tsx + src/server/index.ts; backend8080, po build serwuje UI. |
-| `dev` | Vite3000, nie samodzielny backend. |
-| `dev:full` | concurrently + server + dev; lokalny development. |
-| `preview` | Najpierw build; sam frontend bez backendu, nie ścieżka odbioru produktu. |
-| `test` | Źródła testów/helper/config/fixture w ZIP; `tsx --test tests/**/*.test.ts`. To nie osobna kampania przeglądarkowa Playwright. Testy uruchamiaj jawnie we właściwym środowisku, nie automatycznie podczas smoke. |
+| `npm.cmd ci` | Wbudowana komenda npm, package+lock, sieć; pełne devDependencies. Własne Windows native dependencies, **bez kopiowania WSL**. |
+| `npm.cmd run clean` | Istniejący scripts/clean.mjs usuwa tylko dist; nie dowody/dane sesji. |
+| `npm.cmd run build` | Vite: index/config/src → dist; nie samodzielny EXE. |
+| `npm.cmd run lint`, `npm.cmd run typecheck` | TypeScript + tsconfig/src. |
+| `npm.cmd start`, `npm.cmd run server` | tsx src/server/index.ts; backend, po build serwuje UI. |
+| `npm.cmd run dev` | Vite3000, nie samodzielna integracja backendu. |
+| `npm.cmd run dev:full` | concurrently + server/dev; development. |
+| `npm.cmd run preview` | Najpierw build; frontend preview bez API, nie odbiór produktu. |
+| `npm.cmd test` | Źródła testów są w ZIP; tsx --test tests/**/*.test.ts. Nie uruchamiaj całych historycznych kampanii podczas smoke. |
 
-Manifest zawiera `commands`: literalne polecenie, requiredFiles/dependencies,
-prerequisite, scope i NOT_RUN_BY_PACKAGER dla **każdego** scriptu. To kontrola
-statycznej kompletności, nie dowód wykonania npm ani poprawności importów.
-`ci` jest wbudowaną komendą npm, nie script package.json. Dodatkowe runtime
-zasoby/importy muszą być sprawdzone z rzeczywistego ZIP przez ROOT.
-Nie zmieniamy package.json, nie ukrywamy ani nie usuwamy komendy test. Brak źródeł *.test.ts lub zależnych scripts dev/server także blokuje pakowanie.
+Manifest.commands zawiera wszystkie 10 scripts, requiredFiles/dependencies,
+prerequisite i NOT_RUN_BY_PACKAGER. Źródła lokalnych importów/helperów trzeba
+sprawdzić względem finalnego drzewa, a operacyjne ci/build/start/API/GUI —
+z rzeczywiście rozpakowanej paczki. Koffi 3.3.7 pochodzi z istniejącego lockfile;
+Windows npm ci musi faktycznie załadować natywną bibliotekę przy scenariuszu
+restore. Brak dependency/syscall to fail-closed, nie fallback overwrite.
 
-## Kontrola pierwszego wydania
+## 3. Identyfikacja i niezależna kontrola
 
-1. Zweryfikuj ZIP/manifest/SHA256SUMS i każdy plik względem exactSHA.
-   Sprawdź brak sekretów, runtime QA, .git, node_modules i danych sesji.
-2. ROOT wykona **jeden krótki smoke świeżego ZIP** według windows-zip-smoke.md:
-   ci → build → start → LIVE/realny zapis → zgoda/start → rzeczywista odpowiedź
-   Codex na aktualny kod/zadanie/czat. Nie powtarza historycznych kampanii.
-3. K zapisuje exactSHA, ID/hash, wersje, komendy/exity i oddzielne wyniki;
-   po swoim odbiorze publikuje autoryzowany preview z krótką instrukcją i URL.
-   Sam helper niczego nie publikuje ani nie potwierdza zdrowia produktu.
-4. Crash/recovery, pełneG3,19/100 i final27AC pozostają DEFERRED dla kolejnego
-   wydania; zachować commity i dowody. Brak tej kampanii nie blokuje preview,
-   nie wolno jednak relabelować jej jako PASS. Realny Gemini jest alternatywą,
-   nie substytutem wymaganego teraz działającego Codex.
+Nowy katalog wyniku zawiera:
+- `paircoach-v3-mvp2-<pełny40SHA>.zip` z jednym korzeniem o tym samym ID;
+- `manifest.json`: status **MVP2_SOURCE_RUNTIME_ACCEPTANCE_SEPARATE**, sourceCommit,
+  packageId, ZIP bytes/SHA256, ścieżki/bytes/SHA256 źródeł, wersje Node/Git/OS;
+- `SHA256SUMS`: hash ZIP i manifestu. Manifest nie hashuje sam siebie.
 
-Własny wynik helpera: kompletność bajtów i wejść komend, **nie** runtime/AI PASS.
-Nazwa i status preview nie sugerują pełnego odbioru. Nie odczytujemy auth.json,
-nie utrwalamy kluczy, tokenów ani prywatnych logów. Nie kasujemy starych dowodów.
+Status oznacza wyłącznie archiwum źródeł; nie PASS Windows ani zgoda na publikację.
+Brak kontenera/digestu obrazu: N/A. ZIP powstaje przez Git archive STORE (-0),
+czas commitu i stały prefiks. Reprodukcja przy tej samej wersji Git do **drugiego
+nowego katalogu** ma dać ten sam hash ZIP; manifest narzędzi może różnić się
+pomiędzy OS/Node. Nie zmieniamy globalnego core.autocrlf.
+
+Wewnętrzna kontrola ZIP sprawdza listę/bajty każdego pliku względem Git.
+K wykonuje niezależny odczyt np. Python zipfile: lista ZIP=manifest=allowlist,
+każdy plik ZIP=Git blob SHA256, brak dodatkowych plików/sekretów/raw QA.
+export-ignore/export-subst nie mogą cicho zmienić źródeł. Negatywne kontrole:
+ponowny output do tego samego katalogu odrzucony bez zmiany hashy, błędne SHA,
+nieznany script/brak clean odrzucone przed utworzeniem wyniku.
+
+## 4. Osobne wyniki i dystrybucja
+
+Po finalacceptedSHA: **windows-zip-smoke.md** → odrębny Windows katalog i port
+18082 (nie live8080), świeży ZIP→ci→clean→build→proces/HTTP→GUI/ACK→Run/Test→
+finish/report→restore/restart. P3/ROOT rozliczają swoje nowe G3/19 i AC027/100;
+nie uruchamiamy ich ponownie ani nie uznajemy za zaliczone przez helpera.
+Nie powtarzamy odebranych G1/G2/29 lub native60821/21+3/3 na niezmienionym kodzie.
+
+Raport K wiąże exact finalSHA/ID/hash, wersje, komendy/exity oraz odrębne statusy
+ZIP, ci, build, start, health, API/GUI, recovery, pełny odbiór i dostępność.
+Wyniki historyczne mają własny SHA/środowisko; nie są nowym jednolitym runem.
+Dopiero K po odczycie dowodów/kontrteście wydaje decyzję i publikuje w zakresie
+zgody. Sam helper, RESULT_READY ani instrukcja nie oznaczają ACCEPTED.
+Rollback przed zmianą środowiska: osobna stara instalacja + jej zgodne dane;
+nowe dane/drafty zachować, niczego nie nadpisywać. Nie aktualizować MVP1 w miejscu.

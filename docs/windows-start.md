@@ -1,10 +1,11 @@
-# PairCoach — pierwsza wersja do kodowania i feedbacku (Windows)
+# PairCoach MVP2 — Windows: instalacja i praca
 
-To **preview**, nie pełny odbiór v3. Zgodnie z decyzją właściciela z 10.11.2026
-odłożono crash/recovery, pełną kampanię Windows i końcowe 27 AC. Nie polegaj na
-kopii odzyskiwania ani raporcie końcowym w tej wersji. Pracuj na osobnym zadaniu
-lub kopii kodu; regularnie zachowuj własne kopie. Stan krótkiego smoke i dokładny
-commit są w raporcie dostawy K, a tożsamość źródeł w `manifest.json`.
+MVP2 rozszerza MVP1 o snapshot/recovery, Run/Test i raport. Ten dokument opisuje
+obsługę, **nie zastępuje odbioru**. Przed dystrybucją K wiąże instrukcję, ZIP
+i wyniki Windows z jednym finalnym SHA. Dopóki nie ma tych wyników, kandydat
+ma status **NOT_FINAL**. Nie używaj tej instrukcji do aktualizacji żywego MVP1.
+Wykonuj pierwszą próbę na kopii zadania. Manifest identyfikuje źródła; rzeczywiste
+PASS/FAIL/NOT_RUN oraz ograniczenia są w raporcie dostawy K.
 
 ## 1. Rozpakuj i zbuduj — jedno okno PowerShell
 
@@ -25,7 +26,7 @@ $zip = Join-Path (Get-Location) $manifest.archive.name
 if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() -ne $manifest.archive.sha256) { throw 'Hash ZIP niezgodny' }
 $mh = (Get-FileHash .\manifest.json -Algorithm SHA256).Hash.ToLower()
 if (-not ((Get-Content .\SHA256SUMS) -contains "$mh  manifest.json")) { throw 'Hash manifestu niezgodny' }
-$homeDir = Join-Path $env:LOCALAPPDATA 'PairCoachPreview'
+$homeDir = Join-Path $env:LOCALAPPDATA 'PairCoachMVP2'
 New-Item -ItemType Directory -Path $homeDir -Force | Out-Null
 $destination = Join-Path $homeDir ('install-' + $manifest.sourceCommit)
 if (Test-Path $destination) { throw 'Ta instalacja już istnieje — nie nadpisuj jej' }
@@ -40,6 +41,8 @@ node --version
 npm.cmd --version
 npm.cmd ci
 if ($LASTEXITCODE -ne 0) { throw 'npm ci FAIL — zachowaj błąd, nie używaj --force' }
+npm.cmd run clean
+if ($LASTEXITCODE -ne 0) { throw 'Clean FAIL — zachowaj błąd' }
 npm.cmd run build
 if ($LASTEXITCODE -ne 0) { throw 'Build FAIL — zachowaj błąd' }
 ```
@@ -121,8 +124,8 @@ osobnym scenariuszem. Nie ustawiaj sekretów przez `VITE_*`, nie dodawaj `.env`
 do paczki ani nie loguj całego środowiska. Surowe logi Run nie są kontekstem AI.
 Ustawienia **Profile uruchamiania** zatwierdzają lokalny kod z prawami Twojego
 konta, nie sandbox — do pierwszego kodowania/czatu nie są potrzebne.
-Snapshot/restore, crash recovery i pełny Run/Report nie są warunkiem ani obietnicą
-tego pierwszego wydania. Docs/autocomplete pozostają NOT_INSTALLED.
+Snapshot/restore, Run/Test i raport opisano poniżej. Docs/autocomplete
+pozostają NOT_INSTALLED. Nie twierdzimy, że opcjonalne narzędzia językowe są zainstalowane.
 
 ## 4. Zatrzymaj, wróć do zadania, zabezpiecz pracę
 
@@ -146,4 +149,108 @@ krótką czynność i błąd, bez tokenów, kluczy i prywatnych logów.
 
 Dokumentacja OpenAI: [logowanie](https://developers.openai.com/codex/auth),
 [CLI i login status](https://developers.openai.com/codex/cli/reference).
-Procedura krótkiego odbioru z ZIP: `windows-zip-smoke.md`.
+Procedura odbioru odrębnej instalacji MVP2 z ZIP: `windows-zip-smoke.md`.
+
+## 5. Zatwierdź RunProfile w GUI → Run Main / Run Tests / Stop
+
+W **Ustawienia Projektu i Trenera AI** rozwiń **Konfiguracja Run/Test i kontekstu AI**.
+Pole **Profile uruchamiania (JSON, [] = brak)** przyjmuje najwyżej dwa profile,
+po jednym RUN_MAIN i RUN_TESTS. Wpisanie nie wystarcza: wybierz **Zapisz Ustawienia**
+i poczekaj na potwierdzenie/zamknięcie formularza. Błąd pozostawia formularz otwarty.
+Nowy folder nie dziedziczy zatwierdzenia poleceń z poprzedniego zadania.
+
+Przykład dla utworzonego wyżej solution.js (dostosuj ścieżkę EXE do swojego Node):
+
+```json
+[{"kind":"RUN_MAIN","executable":"C:/Program Files/nodejs/node.exe","args":["solution.js"],"cwd":".","timeoutMs":10000,"testReportFormat":"NONE","testReportGlob":null}]
+```
+
+To zwykłe uruchomienie pliku funkcji, może zakończyć się bez wydruku.
+Nie jest dowodem poprawności sum. Dla własnych testów dopisz drugi profil
+RUN_TESTS z **rzeczywistym** skryptem testowym. Przykładowo dla Node:
+`executable` jak wyżej, `args:["tests.cjs"]`, `cwd:"."`, `timeoutMs:10000`,
+`testReportFormat:"JUNIT_XML"`, `testReportGlob:"target/run-{runId}.xml"`.
+Plik tests.cjs musi istnieć w folderze zadania, wykonywać asercje i zapisywać
+świeży JUnit z dodatnią liczbą testów. `PAIRCOACH_RUN_ID` jest przekazywany do
+procesu; `{runId}` rozwija się w args i globie. Nie tworzymy testów automatycznie
+po samym dodaniu profilu. Nie zatwierdzaj komendy z nieznanego źródła.
+
+Każdy argument to osobny element tablicy; nie wpisuj `&&`, przekierowań ani
+całego polecenia do executable. Bez cmd.exe/PowerShell. Program działa z prawami
+Twojego konta, **nie w sandboxie**. Profil uruchamia tylko lokalny kod, który znasz.
+Po zapisaniu wybierz **Run Main** albo **Run Tests**, obserwuj **Konsola**.
+Brak profilu/narzędzia to jawny brak konfiguracji/EXECUTABLE_NOT_FOUND.
+Exit0 bez świeżego JUnit daje UNKNOWN; raport z 0 testów daje NO_TESTS, nie PASSED.
+PASSED dotyczy tylko wykazanych testów tego Run. Edycja w trakcie uruchomienia
+może oznaczyć wynik jako dotyczący starszego workspace (workspaceChangedDuringRun).
+**Stop** kończy własny Run; weto trenera i Ctrl+C serwera to inne operacje.
+Nie zabijaj globalnie node.exe. Końcowy odbiór drzewa procesów wymaga native Windows.
+
+## 6. Kopie odzyskiwania → Przywróć → jawne Tak/Nie
+
+Lista jest w ustawieniach w **Kopie odzyskiwania (Snapshots)**. Kopia końcowa powstaje
+przy zakończeniu próby; początkowo lista może być pusta. Aby uzyskać pierwszą
+kopię zwykłą ścieżką GUI, zakończ próbną sesję według §7. Ręczna edycja po
+zakończeniu pozostaje możliwa, raport nadal opisuje zamrożony stan. Przed przywróceniem wybranego
+stanu aplikacja tworzy trwałą kopię objętej bieżącej pracy. Brak bezpiecznej
+kopii lub zmiana podstawy blokują operację, nie są zgodą na nadpisanie.
+
+1. Poczekaj na autosave/ACK. Wybierz **Poproś o przywrócenie** przy konkretnej kopii.
+   To tylko żądanie propozycji, jeszcze bez zmiany plików.
+2. Sprawdź pytanie i zakres. **Nie, pracuję dalej** zamyka decyzję bez restore.
+   **Tak, wykonaj** świadomie zatwierdza wskazaną propozycję. Nie klikaj ponownie.
+3. Poczekaj na terminalny wynik i aktualizację plików/listy; sprawdź treść na
+   dysku i dostępność kopii sprzed restore. Timer nie jest resetowany.
+   STALE_PROPOSAL wymaga nowej propozycji po odczycie stanu, nie powtarzania starej.
+
+Przy operacji trwającej ponad **5 s** klient pokazuje **wynik nieznany (UNKNOWN)**.
+To nie FAIL i nie dowód braku wykonania. Nie powtarzaj zgody, nie zamykaj serwera
+ani nie edytuj plików w celu „odblokowania”. Aplikacja rozlicza późny ACK/stan;
+po reconnect odczytuje wynik tej samej decyzji zamiast nowej mutacji. Brak wyniku
+lub RECOVERY_REQUIRED: zachowaj drafty i dane, zgłoś identyfikator/komunikat K.
+Nie wydłużaj limitów ani nie usuwaj dziennika. Samo istnienie wpisu kopii
+nie dowodzi udanego odzyskania — liczą się bajty i terminalny stan.
+
+## 7. Zakończ/Porzuć → raport; timeout nie oznacza powtórzenia
+
+Po potwierdzonym zapisie wybierz **Zakończ** lub **Porzuć**, powód, następnie
+**Potwierdź i Wygeneruj Raport**. Zielone testy nie kończą sesji samoczynnie.
+Backend zatrzymuje własny Run i utrwala końcowy snapshot/fakty; raport jest
+asynchroniczny: **PENDING → READY lub FAILED**, w zakładce **Raport**.
+Po 5 s może pojawić się „Wynik zakończenia jest nieznany” wraz z requestId.
+**Nie klikaj finish ponownie.** Klient sprawdza stan bez kolejnego POST;
+późny terminalny wynik ma rozliczyć ten sam finish i usunąć jego komunikat.
+Przy SESSION_REPLACED zachowaj ID poprzedniej sesji; nie uznawaj nowej za jej wynik.
+
+READY dotyczy zamrożonego materiału i faktycznie wykonanych uruchomień,
+nie przyszłych edycji. Przy FAILED zachowane są pliki/fakty; wybierz jawnie
+**Ponów generowanie raportu** (ponawiasz raport, nie finish i nie snapshot).
+**Codex jako CoachProvider nie oznacza Codex do raportu**: aktualny standardowy
+start używa dla raportu Gemini, jeśli skonfigurowano klucz i zgodę; w przeciwnym
+razie lokalnego podsumowania faktów bez oceny AI. Nie dodawaj sekretów do GUI.
+Nie opisuj lokalnego raportu jako potwierdzonej odpowiedzi zewnętrznego modelu.
+
+## 8. Po przerwaniu/awarii — zachowaj oba magazyny i restartuj tę samą instalację
+
+Zabezpiecz niezapisane drafty. Nie uruchamiaj dwóch serwerów na tych samych danych.
+Po potwierdzeniu, że poprzedni proces się zakończył, zachowaj kopię **całego**
+workspace i `$data` do nowych nazw. Użyj tej samej ścieżki workspace/data,
+instalacji, konta i konfiguracji z §2/4; nie twórz ponownie plików zadania.
+Dane kopii są w `$data` w podkatalogu zależnym od pełnej ścieżki workspace.
+Przeniesienie/zmiana nazwy workspace nie jest równoważne wznowieniu tego samego stanu.
+
+Startup odczytuje dziennik przerwanego restore i próbuje bezpiecznego recovery
+przed udostępnieniem zapisu. Po gotowości sprawdź rzeczywiste bajty, kopie i brak
+powtórnej mutacji. Nie zakładaj automatycznego odtworzenia timera, logowania,
+starej sesji lub stanu Run po każdym rodzaju awarii. Nie ma obietnicy pełnej
+transakcyjności po utracie zasilania ani naprawiania obcych zmian kosztem ich utraty.
+
+Jeśli startup odmawia/RECOVERY_REQUIRED utrzymuje się, zachowaj publiczne pliki,
+cały `$data` i draft. Nie usuwaj journal, HMAC/sekretu magazynu ani prywatnych
+slotów i nie kopiuj snapshotów w miejsce bieżącej pracy. Zgłoś komunikat oraz
+SHA z manifestu do K; ręczne rozstrzygnięcie wymaga odczytu obu materiałów i kopii
+do **nowych nazw**, nie nadpisania. Nie powtarzaj awarii na jedynym egzemplarzu zadania.
+
+Rollback wersji: po zatrzymaniu własnego procesu zachowaj nowe dane/pracę,
+wróć do poprzedniej instalacji z **jej osobną zgodną kopią danych**.
+Nie kieruj starszego MVP1 na dane MVP2 i nie nadpisuj nowszej pracy starszą kopią.

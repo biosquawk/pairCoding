@@ -1,11 +1,11 @@
-// Playable preview source archive only. No implied acceptance, build, start or publication.
+// MVP2 source archive only. No implied acceptance, build, start or publication.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const help = `PairCoach PLAYABLE PREVIEW — archiwum źródeł; odbiór uruchomienia jest osobny.
+const help = `PairCoach MVP2 SOURCE — archiwum źródeł; odbiór uruchomienia jest osobny.
 Użycie (z repo; Node + Git):
   node scripts/package-windows.mjs --help
   node scripts/package-windows.mjs --commit <pełne40SHA> --list
@@ -13,7 +13,7 @@ Użycie (z repo; Node + Git):
   node scripts/package-windows.mjs --commit <pełne40SHA> --output <nowyKatalogPozaRepo>
 --list: ścieżki ze wskazanego commitu. --dry-run: plan i hashe, ZERO zapisów.
 --output: ZIP + manifest.json + SHA256SUMS; nie nadpisuje istniejącego katalogu.
-Pakuj uzgodniony exact commit preview; smoke Windows i realny Codex wymagają osobnych dowodów.
+Pakuj uzgodniony exact commit MVP2; build, Windows/recovery i AI wymagają osobnych dowodów.
 Nie uruchamia npm, serwera, AI, testów Windows, publikacji ani wdrożenia.
 `;
 const sha256 = data => createHash('sha256').update(data).digest('hex');
@@ -134,14 +134,14 @@ function main() {
   }
   const pkg = JSON.parse(git(root, ['show', `${commit}:package.json`]).toString('utf8'));
   const commands = commandClosure(pkg, paths);
-  const packageId = `paircoach-v3-preview-${commit}`;
+  const packageId = `paircoach-v3-mvp2-${commit}`;
   if (mode === 'list') { process.stdout.write(selected.map(e => e.path).join('\n') + '\n'); return; }
   const files = selected.map(e => {
     const bytes = git(root, ['cat-file', 'blob', e.oid]);
     return { path: e.path, bytes: bytes.length, sha256: sha256(bytes) };
   });
-  const plan = { status: 'PLAYABLE_PREVIEW_SOURCE_NOT_FULL_ACCEPTANCE', packageId, sourceCommit: commit,
-    releaseScope: 'First coding-and-feedback preview; crash recovery and full Windows/27AC campaign deferred by owner bcd56587-ef66-4913-a202-d942a09de105',
+  const plan = { status: 'MVP2_SOURCE_RUNTIME_ACCEPTANCE_SEPARATE', packageId, sourceCommit: commit,
+    releaseScope: 'MVP2 source candidate: snapshot/recovery/run/report; packaging does not establish Windows, GUI, recovery or final acceptance',
     format: 'git-archive-zip', prefix: `${packageId}/`, commands, files };
   if (mode === 'dry-run') { process.stdout.write(JSON.stringify(plan, null, 2) + '\n'); return; }
   const destination = path.resolve(output);
