@@ -425,14 +425,15 @@ export class LiveBackend {
     }
   }
   saveFileContent(path: string, content: string) {
-    const doc = this.documents.get(path);
-    if (!doc || doc.readOnly || this.preparing || (this.synced && this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
-    const current = this.saves.get(path);
-    if (!current && doc.content === content) return;
+    const doc = this.documents.get(path), current = this.saves.get(path);
+    // A deleted-on-disk file may still have an editable protected draft. Preserve new typing
+    // without manufacturing a disk version or clearing the explicit conflict barrier.
+    if ((!doc && !current) || doc?.readOnly || this.preparing || (this.synced && this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
+    if (!current && doc?.content === content) return;
     // Timer callbacks own this Save object. Replacing it would strand the copied
     // timer handle when the original callback expires behind a conflict/veto barrier.
     if (current) current.draft = { ...current.draft, content };
-    else this.saves.set(path, { draft: { content, baseVersion: doc.version }, conflict: false });
+    else this.saves.set(path, { draft: { content, baseVersion: doc!.version }, conflict: false });
     this.state.activePointer = null; this.state.activeHintBubble = null;
     if (this.state.fileConflict?.path === path) this.state.fileConflict = { ...this.state.fileConflict, localDraftContent: content };
     this.projectState(this.project!); this.persist(); this.schedule(path); this.publish();
