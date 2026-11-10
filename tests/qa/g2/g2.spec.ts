@@ -141,10 +141,11 @@ test('TEST-012: cooldown ignores scrolling/wait/whitespace; ACKed new code + 2s 
   const afterVeto = f.disk(), calls = provider.calls.length;
   await page.locator('.monaco-editor').hover(); await page.mouse.wheel(0, 500); await page.waitForTimeout(2200);
   expect(provider.calls).toHaveLength(calls); expect((await session(page, f)).cooldownAfterVeto).toBe(true);
-  await append(page, '   \n'); await saved(f, relay, afterVeto + '   \n'); await page.waitForTimeout(2200);
+  // Newline is whitespace; native Enter after spaces auto-indents (independent Windows baseline).
+  await append(page, '\n'); await saved(f, relay, afterVeto + '\n'); await page.waitForTimeout(2200);
   expect(provider.calls).toHaveLength(calls); expect((await session(page, f)).cooldownAfterVeto).toBe(true);
   await append(page, '# new_substantive_fact\n');
-  await saved(f, relay, afterVeto + '   \n# new_substantive_fact\n');
+  await saved(f, relay, afterVeto + '\n# new_substantive_fact\n');
   await page.waitForTimeout(1500);
   expect(provider.calls).toHaveLength(calls); expect((await session(page, f)).cooldownAfterVeto).toBe(true);
   await expect.poll(() => provider.calls.length).toBe(calls + 1);
