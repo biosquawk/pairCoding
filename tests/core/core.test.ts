@@ -446,3 +446,41 @@ test('Settings validation is atomic; no timers/watchers remain after idempotent 
     assert.equal(f.workspace.listenerCount('changed'), 0);
   } finally { f.close(); }
 });
+
+test('Workspace count limit: exactly 1000 files opens, next CREATE and 1001-file open reject', () => {
+  const parent = fs.mkdtempSync(path.join(process.cwd(), '.paircoach-test-'));
+  const root = path.join(parent, 'project'); fs.mkdirSync(root);
+  let workspace: WorkspaceService | null = null;
+  let session: SessionController | null = null;
+  try {
+    for (let n = 0; n < 1000; n++) fs.writeFileSync(path.join(root, `f${n}.ts`), 'x');
+    workspace = new WorkspaceService(root, path.join(parent, 'data'));
+    session = new SessionController(workspace); session.claimLease('tab-1');
+    assert.equal(workspace.listFiles().length, 1000);
+    const gate = new WriteGate(workspace, session);
+    assert.throws(() => gate.mutate({ clientId: 'tab-1', sessionId: session!.state.sessionId, controlEpoch: 0, actor: 'STUDENT',
+      operation: 'CREATE', path: 'over-limit.ts', content: 'x', newPath: null, baseVersion: null }), error('TOO_MANY_FILES', 413));
+    assert.equal(fs.existsSync(path.join(root, 'over-limit.ts')), false);
+    session.close(); workspace.close();
+    fs.writeFileSync(path.join(root, 'over-limit.ts'), 'x');
+    assert.throws(() => new WorkspaceService(root), error('TOO_MANY_FILES', 413));
+  } finally {
+    session?.close(); workspace?.close(); fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('DELETE safety backup failure blocks deletion; dataDir symlink/junction is rejected', () => {
+  const f = fixture();
+  try {
+    fs.writeFileSync(f.workspace.dataDir, 'not a directory');
+    const mutation = { ...f.auth(), operation: 'DELETE' as const, path: 'main.ts', newPath: null, content: null, baseVersion: 1 };
+    assert.throws(() => f.gate.mutate(mutation), error('UNSAFE_DATA_DIR', 403));
+    assert.equal(f.workspace.getDocument('main.ts').content, 'let x = 1;\n');
+    fs.unlinkSync(f.workspace.dataDir);
+    const outside = path.join(f.parent, 'foreign-data'); fs.mkdirSync(outside);
+    fs.symlinkSync(outside, f.workspace.dataDir, process.platform === 'win32' ? 'junction' : 'dir');
+    assert.throws(() => f.gate.mutate(mutation), error('UNSAFE_DATA_DIR', 403));
+    assert.equal(fs.readdirSync(outside).length, 0);
+    assert.equal(f.workspace.workspaceVersion, 0);
+  } finally { f.close(); }
+});
