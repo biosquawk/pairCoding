@@ -6,7 +6,7 @@ import { randomUUID } from 'node:crypto';
 import childProcess from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { AtomicMoveSession, prepareAtomicSession } from '../../src/server/AtomicNoReplace';
-import { fixture, code } from './helpers';
+import { fixture, code, open } from './helpers';
 
 test('one transaction worker services 100 individual real no-replace requests, bounded nonce replies; occupied bytes preserved', t => {
   const f = fixture(t), directory = path.join(f.parent, 'session');
@@ -72,4 +72,19 @@ test('project DTO uses the existing registry: NOT_INSTALLED plus approved profil
   assert.deepEqual(f.workspace.getProject(f.session.state.sessionId).capabilities, {canRunMain: false, canRunTests: false, docs: 'NOT_INSTALLED', autocomplete: 'NOT_INSTALLED'});
   f.workspace.updateSettings({...f.workspace.settings, runProfiles: [{kind: 'RUN_TESTS', executable: 'node', args: ['--test'], cwd: '.', timeoutMs: 5000, testReportFormat: 'NONE', testReportGlob: null}]});
   assert.deepEqual(f.workspace.getProject(f.session.state.sessionId).capabilities, {canRunMain: false, canRunTests: true, docs: 'NOT_INSTALLED', autocomplete: 'NOT_INSTALLED'});
+});
+
+
+test('another workspace object in the same Node process never stops the live worker', t => {
+  const f = fixture(t), snapshot = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK'); let observed = false;
+  f.workspace.on('snapshotCheckpoint', e => {
+    if (e.phase !== 'CAPTURE_MOVE_ARMED') return;
+    assert.throws(() => open(f.root, f.data), code('WORKSPACE_BUSY'));
+    const base = f.file('.paircoach/snapshot-journal-v1');
+    const directory = path.join(base, fs.readdirSync(base).find(n => n.startsWith('transaction-'))!);
+    const session = path.join(directory, fs.readdirSync(directory).find(n => /^\.atomic-[a-f0-9-]{36}$/.test(n))!);
+    assert.equal(fs.existsSync(path.join(session, 'STOP')), false); observed = true;
+  });
+  f.restore(snapshot.snapshotId, ['a.ts']);
+  assert.equal(observed, true); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });

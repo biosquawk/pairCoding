@@ -12,6 +12,7 @@ type Entry = { path: string; before: Image | null; after: Image | null; original
   originalMtime: string | null; forward: Identity | null; rollback: Identity | null };
 type Intent = { format: number; id: string; binding: unknown; backupId: string; ownerPid: number; entries: Entry[] };
 const operationName = /^transaction-([0-9a-f-]{36})$/;
+const activeWorkers = new Set<string>();
 
 /** No forward replay. All captured entries are retained, even after a clean rollback/commit. */
 export class SnapshotJournal {
@@ -63,7 +64,7 @@ export class SnapshotJournal {
   }
 
   private terminal(directory: string, intent: Intent): boolean {
-    this.assertNoActiveMove(directory);
+    this.assertNoActiveMove(directory, intent.ownerPid);
     let terminal = false;
     for (const state of ['COMMITTED', 'ROLLED_BACK']) if (this.exists(path.join(directory, state))) {
       const marker = this.store.readSigned<{ id: string; state: string; binding: unknown }>(path.join(directory, state), 8192);
@@ -167,7 +168,7 @@ export class SnapshotJournal {
     // Bind the lock/dir identities BEFORE launch. A crash before spawn is also recoverable.
     this.store.writeSigned(sessionDir + '.json', {binding: this.store.binding, descriptor}, 8192);
     const move = new AtomicMoveSession(sessionDir, descriptor);
-    this.worker = {name, move}; move.start();
+    this.worker = {name, move}; activeWorkers.add(sessionDir); move.start();
     return this.worker;
   }
 
@@ -177,10 +178,11 @@ export class SnapshotJournal {
     worker.move.close(); // STOP + real OS exclusive lock barrier, never PID guessing
     const receipt = worker.move.directory + '.quiesced';
     if (!this.exists(receipt)) this.store.writeSigned(receipt, {binding: this.store.binding, descriptor: worker.move.descriptor}, 8192);
+    activeWorkers.delete(worker.move.directory);
     this.worker = undefined;
   }
 
-  private assertNoActiveMove(directory: string): void {
+  private assertNoActiveMove(directory: string, ownerPid: number): void {
     privateDirectory(directory);
     const quiesced = new Set<string>();
     for (const file of fs.readdirSync(directory).filter(n => /^\.atomic-[a-f0-9-]{36}\.json$/.test(n))) {
@@ -188,11 +190,18 @@ export class SnapshotJournal {
       const record = this.store.readSigned<{binding: unknown; descriptor: AtomicSessionIdentity}>(path.join(directory, file), 8192);
       this.store.assertBinding(record.binding);
       if (this.worker?.move.directory === sessionDir) continue;
+      if (activeWorkers.has(sessionDir)) throw snapshotFailure('Another journal in this process owns the worker; never stop a live writer.');
       const receipt = sessionDir + '.quiesced';
       if (this.exists(receipt)) {
         if (JSON.stringify(this.store.readSigned(receipt, 8192)) !== JSON.stringify(record)) throw snapshotFailure('Atomic session receipt mismatch.');
         new AtomicMoveSession(sessionDir, record.descriptor).assertStopped();
       } else {
+        if (ownerPid !== process.pid) {
+          let live = false;
+          try { process.kill(ownerPid, 0); live = true; }
+          catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') live = true; }
+          if (live) throw snapshotFailure('Another process may still own this worker; never signal a live writer.');
+        }
         // Permanent STOP handles a delayed spawn, lock barrier handles an in-flight
         // syscall. Only after BOTH can recovery inspect bytes and perform rollback.
         new AtomicMoveSession(sessionDir, record.descriptor).close();
@@ -354,7 +363,7 @@ export class SnapshotJournal {
   }
 
   private rollback(directory: string, intent: Intent): void {
-    this.assertNoActiveMove(directory);
+    this.assertNoActiveMove(directory, intent.ownerPid);
     this.checkpoint('ROLLBACK_BEGIN', -1);
     for (let i = intent.entries.length - 1; i >= 0; i--) {
       // Treat the journal as untrusted before each effect, including resumed recovery.

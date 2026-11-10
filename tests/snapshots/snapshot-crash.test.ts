@@ -120,6 +120,18 @@ test('startup never rolls back a journal owned by another still-live process', {
   restart(f); assert.deepEqual(files(f), expectedWork); restart(f);
 });
 
+test('a second backend never signals STOP to a still-live worker; recovery after actual owner kill succeeds', {timeout: 60000}, async t => {
+  const f = seed(t);
+  await killAt(t, f, 'restore', 'CAPTURE_MOVE_ARMED', '0', () => {
+    restart(f, 'RECOVERY_REQUIRED');
+    const base = f.file('.paircoach/snapshot-journal-v1');
+    const directory = path.join(base, fs.readdirSync(base).find(n => n.startsWith('transaction-'))!);
+    const session = path.join(directory, fs.readdirSync(directory).find(n => /^\.atomic-[a-f0-9-]{36}$/.test(n))!);
+    assert.equal(fs.existsSync(path.join(session, 'STOP')), false, 'a live owner must not be interrupted by a second backend');
+  });
+  restart(f); assert.deepEqual(files(f), expectedWork); restart(f);
+});
+
 for (const action of ['restore', 'recover']) for (const boundary of ['ARMED', 'JOINED']) {
   test(`native helper ${action} ${boundary}: hard kill preserves material and never races uncertain worker`, {timeout: 60000}, async t => {
     const f = seed(t);
