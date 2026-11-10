@@ -118,9 +118,14 @@ export class WorkspaceService extends EventEmitter {
     try { stat = fs.lstatSync(absolute, { bigint: true }); }
     catch (error) { if (isMissing(error)) return null; throw error; }
     if (!stat.isFile()) throw new AppError(403, 'NOT_A_FILE', 'Only regular text files can be opened.');
-    if (stat.nlink > 1n) throw new AppError(403, 'UNSAFE_PATH', 'Hard-linked files are not opened.');
     const metadata = (s: fs.BigIntStats) => [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs, s.mode].join(':');
     const stamp = metadata(stat);
+    // An inaccessible file is still a real tree entry. Never open hardlinks,
+    // including an own publication alias left by failed cleanup. This also
+    // reconciles safely after restart without trusting/replaying a journal path.
+    if (stat.nlink > 1n) return { stamp: stamp + ':hardlink:' + stat.nlink,
+      raw: null, document: null, error: new AppError(403, 'UNSAFE_PATH',
+        'Hard-linked file is unavailable; no bytes were opened. For an incomplete rename consult .paircoach/rename-recovery before removing any private alias.') };
     if (stat.size > BigInt(MAX_BYTES)) return { stamp, raw: null, document: null,
       error: new AppError(413, 'FILE_TOO_LARGE', 'File exceeds 1 MiB UTF-8; it was not truncated or rewritten.') };
     const fd = fs.openSync(absolute, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
@@ -390,51 +395,165 @@ export class WorkspaceService extends EventEmitter {
     } finally { if (temporary && fs.existsSync(temporary)) fs.unlinkSync(temporary); }
   }
 
+  /** Private, append-only recovery material; never a public rollback target. */
+  private renameRecovery(relative: string, newPath: string, before: Tracked, temporary: string): string {
+    // Keep capture on the workspace volume even when dataDir is on another drive.
+    let directory = this.rootPath;
+    for (const component of ['.paircoach', 'rename-recovery']) {
+      directory = path.join(directory, component);
+      try { fs.mkdirSync(directory, { mode: 0o700 }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      const stat = fs.lstatSync(directory);
+      if (stat.isSymbolicLink() || !stat.isDirectory() || fs.realpathSync.native(directory) !== directory) {
+        throw new AppError(403, 'UNSAFE_DATA_DIR', 'Rename recovery must use real private directories.');
+      }
+    }
+    directory = fs.mkdtempSync(path.join(directory, 'operation-'));
+    fs.chmodSync(directory, 0o700);
+    this.recoveryFile(directory, 'original', before.raw!);
+    this.recoveryFile(directory, 'intent.json', Buffer.from(JSON.stringify({
+      format: 1, path: relative, newPath, version: before.version, originalHash: hash(before.raw!),
+      temporary, captured: 'source', policy: 'Retain original and captured bytes; never overwrite either public path.'
+    })));
+    return directory;
+  }
+
+  private recoveryFile(directory: string, name: string, bytes: Buffer): void {
+    const fd = fs.openSync(path.join(directory, name), 'wx', 0o600);
+    try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  }
+
+  /** Bounded retry of our own private entry only; never unlink a public path. */
+  private cleanupRenameLink(temporary: string, attempts = 3): unknown {
+    let last: unknown;
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try { fs.unlinkSync(temporary); return; }
+      catch (error) { if (isMissing(error)) return; last = error; }
+    }
+    return last;
+  }
+
+  private restoreCapturedSource(directory: string, relative: string): void {
+    const captured = path.join(directory, 'source');
+    const stat = fs.lstatSync(captured);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      throw new AppError(403, 'UNSAFE_PATH', 'Unexpected captured entry remains in recovery; it was not opened.');
+    }
+    // An independent copy avoids a public hardlink to retained recovery bytes.
+    // Both copy and no-clobber publish can fail: the captured inode is NEVER deleted.
+    const temporary = path.join(directory, 'restore');
+    fs.copyFileSync(captured, temporary, fs.constants.COPYFILE_EXCL);
+    const fd = fs.openSync(temporary, fs.constants.O_RDWR | (fs.constants.O_NOFOLLOW ?? 0));
+    try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+    try {
+      const from = this._safePath(relative, true);
+      try { fs.linkSync(temporary, from); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+    } finally {
+      const error = this.cleanupRenameLink(temporary);
+      if (error) this.emit('watcherError', error);
+    }
+  }
+
   _rename(relative: string, newPath: string, baseVersion: number, actor: string, authorize: () => void): void {
     const before = this._fresh(relative, baseVersion);
     const from = this._safePath(relative), to = this._safePath(newPath, true);
     if (fs.existsSync(to)) throw new AppError(409, 'FILE_EXISTS', 'Destination already exists.');
     if (!fs.existsSync(path.dirname(to))) throw new AppError(404, 'PARENT_NOT_FOUND', 'Create destination directory first.');
-    // Publish an independent, fsynced copy: linking the source itself would leave
-    // dangerous aliases if removing the source failed (and change its ctime).
     const temporary = this.temp(to, before.raw!, fs.statSync(from).mode & 0o777);
-    // Pin the published inode until the final check: without an open descriptor,
-    // unlink+create can immediately reuse its inode number, even with equal bytes.
-    let pin: number | undefined;
-    let published = false;
+    let pin: number | undefined, sourcePin: number | undefined;
+    let published = false, captured = false;
+    let recovery: string | undefined;
     try {
-      let identity: fs.BigIntStats;
-      try {
-        pin = fs.openSync(temporary, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-        identity = fs.fstatSync(pin, { bigint: true });
-        this._fresh(relative, baseVersion); this._safePath(newPath, true); authorize();
-        // This is the no-clobber linearization point, not an existsSync check.
-        // renameSync would overwrite a destination created by an external IDE.
-        try { fs.linkSync(temporary, to); }
-        catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
-            throw new AppError(409, 'FILE_EXISTS', 'Destination appeared before rename.');
-          }
-          throw error;
-        }
-        published = true;
-      } finally {
-        fs.unlinkSync(temporary); // Drop only the private publication link.
+      recovery = this.renameRecovery(relative, newPath, before, temporary);
+      pin = fs.openSync(temporary, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+      const identity = fs.fstatSync(pin, { bigint: true });
+      sourcePin = fs.openSync(from, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+      const sourceIdentity = fs.fstatSync(sourcePin, { bigint: true });
+      if (!before.stamp.startsWith(`${sourceIdentity.dev}:${sourceIdentity.ino}:`)) {
+        throw new AppError(409, 'DISK_CONFLICT', 'Source changed before capture.');
       }
-      // Publication and removal are two filesystem effects. Source freshness and
-      // authority must still hold after publication; a copy is not a fresh source.
+      this._fresh(relative, baseVersion); this._safePath(newPath, true); authorize();
+      try { fs.linkSync(temporary, to); }
+      catch (error) {
+        // Resolve an ambiguous syscall outcome by observing the pinned inode,
+        // never by replaying publication against the public destination.
+        try {
+          const observed = fs.lstatSync(this._safePath(newPath, true), { bigint: true });
+          published = observed.dev === identity.dev && observed.ino === identity.ino;
+        } catch { /* No safely observable own publication; preserve the original error. */ }
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+          throw new AppError(409, 'FILE_EXISTS', 'Destination appeared before rename.');
+        }
+        throw error;
+      }
+      published = true;
+      // A first cleanup failure aborts the mutation even if bounded retries can
+      // reconcile it. Do not conceal partial publication behind HTTP 200.
+      fs.unlinkSync(temporary);
       this._safePath(relative); this._fresh(relative, baseVersion); authorize();
-      const destination = this.disk(newPath);
-      if (!destination?.stamp.startsWith(`${identity.dev}:${identity.ino}:`) ||
-          !destination.raw?.equals(before.raw!)) {
+      const matchesDestination = (file: DiskFile | null) =>
+        !!file?.stamp.startsWith(`${identity.dev}:${identity.ino}:`) && !!file.raw?.equals(before.raw!);
+      if (!matchesDestination(this.disk(newPath))) {
         throw new AppError(409, 'DISK_CONFLICT', 'Rename destination changed after publication.');
       }
-      fs.unlinkSync(from);
+      // The PUBLIC source is never unlinked. Atomic rename captures the inode
+      // actually present at this boundary, including a late IDE replacement.
+      // The destination is an exclusive entry inside an unguessable private dir.
+      const capture = path.join(recovery, 'source');
+      fs.renameSync(this._safePath(relative), capture);
+      captured = true;
+      const stat = fs.lstatSync(capture, { bigint: true });
+      if (!stat.isFile() || stat.nlink !== 1n || stat.dev !== sourceIdentity.dev || stat.ino !== sourceIdentity.ino ||
+          stat.size !== BigInt(before.raw!.length) || stat.mtimeNs !== sourceIdentity.mtimeNs) {
+        throw new AppError(409, 'DISK_CONFLICT', 'Captured source changed; all captured bytes are retained.');
+      }
+      // Bounded read from the pinned original, not a second path-based open.
+      // An IDE can still write through a pre-existing fd after capture.
+      const bytes = Buffer.alloc(MAX_BYTES + 1);
+      let length = 0;
+      while (length < bytes.length) {
+        const count = fs.readSync(sourcePin, bytes, length, bytes.length - length, length);
+        if (!count) break;
+        length += count;
+      }
+      const afterCapture = fs.fstatSync(sourcePin, { bigint: true });
+      if (!bytes.subarray(0, length).equals(before.raw!) || afterCapture.size !== stat.size ||
+          afterCapture.mtimeNs !== stat.mtimeNs || afterCapture.ctimeNs !== stat.ctimeNs || afterCapture.nlink !== 1n) {
+        throw new AppError(409, 'DISK_CONFLICT', 'Captured source was edited during validation; recovery retained.');
+      }
+      // Revalidate destination AFTER capture. Never destroy the captured inode,
+      // even on success: it may be the last original copy or still have an IDE fd.
+      const destination = this.disk(newPath);
+      if (!matchesDestination(destination) || fs.existsSync(this._safePath(relative, true))) {
+        throw new AppError(409, 'DISK_CONFLICT', 'A public path changed during capture.');
+      }
+      authorize();
+      this.recoveryFile(recovery, 'complete.json', Buffer.from(JSON.stringify({ path: relative, newPath, retained: ['original', 'source'] })));
+      this.records.delete(relative); this.nextVersion(relative);
+      const version = this.nextVersion(newPath);
+      this.records.set(newPath, this.track(newPath, destination!, version));
+      this.workspaceVersion++;
+      this.emit('changed', { path: newPath, workspaceVersion: this.workspaceVersion, actor });
+      this.refreshDirectories();
     } catch (error) {
-      if (!published) throw error;
-      // No unlink(to), even after an inode check: Node has no atomic conditional
-      // unlink, and a foreign replacement could appear between check and cleanup.
-      // Preserve both paths, reconcile observable state, and never ACK success.
+      const cleanupError = this.cleanupRenameLink(temporary, 2);
+      if (!published && !cleanupError) throw error;
+      // Reconcile a syscall with unknown outcome by reading its private target.
+      // This never retries the destructive move of the public source.
+      if (!captured && recovery) captured = fs.existsSync(path.join(recovery, 'source'));
+      if (captured && recovery) {
+        try { this.restoreCapturedSource(recovery, relative); }
+        catch (restoreError) { this.emit('watcherError', restoreError); }
+      }
+      if (recovery) {
+        try { this.recoveryFile(recovery, 'incomplete.json', Buffer.from(JSON.stringify({
+          path: relative, newPath, temporary, captured,
+          code: error instanceof AppError ? error.code : (error as NodeJS.ErrnoException).code ?? 'IO_ERROR'
+        }))); } catch (journalError) { this.emit('watcherError', journalError); }
+      }
+      // Both readable copies and inaccessible (hardlinked) entries are tracked.
+      // No public destination rollback; a foreign replacement always survives.
       for (const relativePath of [relative, newPath]) {
         try { this.external(relativePath, this.disk(relativePath)); }
         catch (reconcileError) { this.emit('watcherError', reconcileError); }
@@ -442,13 +561,14 @@ export class WorkspaceService extends EventEmitter {
       try { this.refreshDirectories(); }
       catch (reconcileError) { this.emit('watcherError', reconcileError); }
       const incomplete = new AppError(409, 'RENAME_INCOMPLETE',
-        'Rename was partially published. No destination was rolled back. Reload both paths and preserve their contents before retrying.');
+        `Rename incomplete. No public path was overwritten or deleted for rollback. Recovery: ${recovery ?? temporary}. ` +
+        'Preserve both public paths. Copy original and source from recovery to NEW names before resolving private aliases; see intent.json.');
       incomplete.cause = error;
       throw incomplete;
-    } finally { if (pin !== undefined) fs.closeSync(pin); }
-    this.records.delete(relative); this.nextVersion(relative);
-    // A rename is one workspace mutation, but both path identities advance monotonically.
-    this.committed(newPath, actor);
+    } finally {
+      if (pin !== undefined) fs.closeSync(pin);
+      if (sourcePin !== undefined) fs.closeSync(sourcePin);
+    }
   }
 
   _delete(relative: string, baseVersion: number, actor: string, authorize: () => void): void {

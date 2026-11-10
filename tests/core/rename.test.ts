@@ -78,11 +78,11 @@ test('RENAME successful: exact CRLF/BOM, mode, single link and monotonic identit
   noTemps(f);
 });
 
-test('RENAME source unlink fails after publication: 409, two independent copies retained, records reconciled', t => {
-  const f = fixture(t), realUnlink = fs.unlinkSync;
-  t.mock.method(fs, 'unlinkSync', (file: fs.PathLike) => {
+test('RENAME source capture fails after publication: 409, two independent copies retained, records reconciled', t => {
+  const f = fixture(t), realRename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (file: fs.PathLike, to: fs.PathLike) => {
     if (String(file) === f.source) throw Object.assign(new Error('injected source sharing violation'), { code: 'EACCES' });
-    return realUnlink(file);
+    return realRename(file, to);
   });
   syncBuiltinESMExports();
   assert.throws(f.rename, isError('RENAME_INCOMPLETE'));
@@ -96,14 +96,14 @@ test('RENAME source unlink fails after publication: 409, two independent copies 
   noTemps(f);
 });
 
-test('RENAME rollback never unlinks a foreign destination replacement made at source-unlink failure', t => {
-  const f = fixture(t), realUnlink = fs.unlinkSync;
-  t.mock.method(fs, 'unlinkSync', (file: fs.PathLike) => {
+test('RENAME rollback never unlinks a foreign destination replacement made at source-capture failure', t => {
+  const f = fixture(t), realUnlink = fs.unlinkSync, realRename = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (file: fs.PathLike, to: fs.PathLike) => {
     if (String(file) === f.source) {
       realUnlink(f.target); fs.writeFileSync(f.target, foreign, { flag: 'wx' });
       throw Object.assign(new Error('source is busy after foreign target replacement'), { code: 'EBUSY' });
     }
-    return realUnlink(file);
+    return realRename(file, to);
   });
   syncBuiltinESMExports();
   assert.throws(f.rename, isError('RENAME_INCOMPLETE'));
