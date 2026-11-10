@@ -162,6 +162,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return (
         <div key={node.fullPath}>
           <div
+            role="button" tabIndex={0} aria-expanded={!isCollapsed} aria-label={`Folder ${node.fullPath}`}
+            onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleDir(node.fullPath); } }}
             onClick={() => toggleDir(node.fullPath)}
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
             className="flex items-center gap-1.5 py-1 px-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 cursor-pointer select-none rounded"
@@ -185,6 +187,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
     return (
       <div
         key={node.fullPath}
+        role="button" tabIndex={0} aria-label={`Otwórz plik ${node.fullPath}`} aria-pressed={isActive}
+        onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); if (!isEditing) onSelectFile(node.fullPath); } }}
         style={{ paddingLeft: `${depth * 12 + 10}px` }}
         className={`group flex items-center justify-between py-1 px-2 text-xs cursor-pointer select-none rounded transition-colors ${
           isActive
@@ -229,7 +233,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
           {/* Quick Actions (Rename / Delete) */}
           {!isSpecialTask && !isSpecialNotes && !isEditing && (
-            <div className="hidden group-hover:flex items-center gap-0.5">
+            <div className="hidden group-hover:flex group-focus-within:flex items-center gap-0.5">
               <button
                 onClick={(e) => {
                   e.stopPropagation();

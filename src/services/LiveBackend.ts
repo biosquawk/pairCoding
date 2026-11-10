@@ -83,7 +83,7 @@ export class LiveBackend {
   private emit(event: string, value: any) { this.listeners.get(event)?.forEach(fn => fn(value)); }
   private publish() {
     this.state = { ...this.state, pendingPaths: [...this.saves.keys()], isOffline: !this.synced,
-      writeOwner: this.vetoPending ? 'STUDENT' : !this.synced || this.preparing ? 'SYNCING' : this.session?.writeOwner ?? 'SYNCING' };
+      writeOwner: !this.synced ? 'SYNCING' : this.vetoPending ? 'STUDENT' : this.preparing ? 'SYNCING' : this.session?.writeOwner ?? 'SYNCING' };
     this.emit('state', this.state);
   }
   private fail(error: unknown) {
@@ -255,6 +255,12 @@ export class LiveBackend {
     this.publish();
     try {
       const paths = new Set([this.state.activePath, bundle.project.settings.taskFilePath, ...this.saves.keys()].filter(Boolean));
+      for (const [path, save] of this.saves) {
+        if (!bundle.project.files.some(file => file.path === path && file.kind === 'FILE')) {
+          save.conflict = true; this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: '', diskDeleted: true }; paths.delete(path);
+        }
+      }
+      this.projectState(this.project!);
       for (const path of paths) {
         if (generation !== this.generation || this.stopped) return;
         if (!this.documents.has(path!)) await this.loadFile(path!);
@@ -405,7 +411,7 @@ export class LiveBackend {
   }
   saveFileContent(path: string, content: string) {
     const doc = this.documents.get(path);
-    if (!doc || doc.readOnly || this.preparing || (this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
+    if (!doc || doc.readOnly || this.preparing || (this.synced && this.session?.writeOwner === 'COACH' && !this.vetoPending)) return;
     const current = this.saves.get(path);
     if (!current && doc.content === content) return;
     this.saves.set(path, current ? { ...current, draft: { ...current.draft, content } } : { draft: { content, baseVersion: doc.version }, conflict: false });
@@ -460,8 +466,13 @@ export class LiveBackend {
   }
   async selectFile(path: string) {
     if (this.session?.writeOwner === 'COACH' && path !== this.state.activePath) this.triggerVeto();
-    try { if (!this.documents.has(path)) await this.loadFile(path); this.state.activePath = path;
-      if (this.synced) this.send('VIEW_CHANGED', { path, documentVersion: this.documents.get(path)?.version ?? null, cursor: null, selection: null }); this.publish();
+    try {
+      const save = this.saves.get(path);
+      const deletedDraft = !!save?.conflict && !this.documents.has(path);
+      if (!this.documents.has(path) && !deletedDraft) await this.loadFile(path);
+      this.state.activePath = path;
+      if (save?.conflict) this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: this.documents.get(path)?.content ?? '', diskDeleted: deletedDraft };
+      if (this.synced && !deletedDraft) this.send('VIEW_CHANGED', { path, documentVersion: this.documents.get(path)?.version ?? null, cursor: null, selection: null }); this.publish();
     } catch (error) { this.fail(error); }
   }
   async flushAll() {
