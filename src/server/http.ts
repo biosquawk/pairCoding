@@ -8,12 +8,14 @@ import { WorkspaceService } from './WorkspaceService';
 import { MOCK_SCENARIOS } from '../data/mockScenarios';
 import { SessionController } from './SessionController';
 import { WriteGate } from './WriteGate';
+import { CoachAdapter, type CoachProvider } from './CoachAdapter';
 import type { ChatEntry, CoachDecision, Proposal, Report, Run, SessionBundle } from '../shared/protocol';
 import { apiError, CommandLedger, TransportError, validateMessage, validateRequest, type ClientMessage } from './transport';
 
 export interface ServerOptions {
   rootPath?: string; dataDir?: string; token?: string; port?: number;
   devBootstrap?: boolean; staticDir?: string; enableCoach?: boolean;
+  coachProvider?: CoachProvider;
   coachFactory?: (context: ServiceContext) => CoachService;
   executionFactory?: (context: ServiceContext) => ExecutionServices;
 }
@@ -105,7 +107,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     workspace.on('watcherError',(error:unknown)=>emit('ERROR',apiError(error)));
     session.on('control',(payload:unknown)=>emit('CONTROL_STATE',payload));
     session.on('veto',()=>coach?.abort());
-    coach=options.enableCoach && options.coachFactory ? options.coachFactory(context()) : undefined;
+    coach=options.enableCoach ? (options.coachFactory?.(context()) ??
+      new CoachAdapter({...context(), provider:options.coachProvider, sensitiveValues:[token]})) : undefined;
     execution=options.executionFactory?.(context());
   }
   bind();
