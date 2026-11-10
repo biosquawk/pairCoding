@@ -218,7 +218,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               </button>
             ) : (
               <button
-                onClick={onResumeTimer}
+                onClick={sessionStatus === 'STOPPED' ? onStartTimer : onResumeTimer}
                 className="p-1 rounded bg-blue-900/80 hover:bg-blue-800 text-blue-200"
                 title={sessionStatus === 'PAUSED' ? 'Wznów czas' : 'Start sesji'}
               >
