@@ -115,6 +115,8 @@ test('G3 ambiguous failure after journal effect remains RECOVERY_REQUIRED, not s
 
 test('G3 missing profile and real zero-test/green JUnit are honest; green never auto-finishes',async t=>{
   const f=await fixture(t);
+  const project=await f.http('GET','/api/project');assert.equal(project.status,200);
+  assert.deepEqual(project.body.capabilities,{docs:'NOT_INSTALLED',autocomplete:'NOT_INSTALLED',canRunMain:false,canRunTests:false});
   const run=()=>f.http('POST','/api/run',{...f.command(),mode:'RUN_TESTS',expectedWorkspaceVersion:f.app.workspace.workspaceVersion});
   assert.equal((await run()).body.code,'RUN_PROFILE_MISSING');
   for(const count of [0,1]) {
@@ -123,6 +125,7 @@ test('G3 missing profile and real zero-test/green JUnit are honest; green never 
     const script=`require('fs').writeFileSync('result.xml','<testsuite tests="${count}" failures="0" errors="0" skipped="0">${count?'<testcase name="actual"/>':''}</testsuite>');console.log('RUN_REAL_${count}')`;
     const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,runProfiles:[{
       kind:'RUN_TESTS',executable:process.execPath,args:['-e',script],cwd:'.',timeoutMs:3000,testReportFormat:'JUNIT_XML',testReportGlob:'result.xml'}]}});assert.equal(update.status,200);
+    assert.deepEqual(update.body.capabilities,{docs:'NOT_INSTALLED',autocomplete:'NOT_INSTALLED',canRunMain:false,canRunTests:true});
     const start=await run();assert.equal(start.status,202,JSON.stringify(start.body));
     const end=await until(async()=>(await f.http('GET',`/api/run/${start.body.runId}`)).body,r=>r.finishedAt!==null);
     assert.equal(end.testOutcome,count?'PASSED':'NO_TESTS');assert.equal(end.testCount,count);assert.equal(end.status,'SUCCEEDED');
