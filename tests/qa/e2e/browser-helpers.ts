@@ -9,6 +9,14 @@ export const editorText = async (page: Page) => (await page.locator('.monaco-edi
 export const editorInput = (page: Page) => page.locator('.monaco-editor')
   .getByRole('textbox', { name: 'Edytor pliku main.py', exact: true });
 
+/** Focus the accessible input; native EditContext's DIV sits under Monaco's view-lines. */
+export async function focusEditor(page: Page) {
+  const input = editorInput(page);
+  await expect(input).toBeVisible();
+  await input.focus();
+  await expect(input).toBeFocused();
+}
+
 export async function openEditor(page: Page) {
   await page.goto('/');
   await page.getByText('main.py', { exact: true }).first().click();
@@ -32,7 +40,7 @@ export async function openEditor(page: Page) {
   await expect(start).not.toBeVisible();
 }
 export async function append(page: Page, text: string) {
-  await editorInput(page).click(); await page.keyboard.press('ControlOrMeta+End');
+  await focusEditor(page); await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.insertText(text);
 }
 export async function chat(page: Page, text: string) {

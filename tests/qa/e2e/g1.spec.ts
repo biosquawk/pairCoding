@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 // Reset only the dedicated fixture, never product sources or expected values.
-import { append, chat, disk, editorInput, editorText, manifest, openEditor, Relay } from './browser-helpers';
+import { append, chat, disk, editorInput, editorText, focusEditor, manifest, openEditor, Relay } from './browser-helpers';
 
 test.beforeEach(async ({ page }) => {
   writeFileSync(path.join(manifest().rootPath, 'main.py'), 'value = 0\n');
@@ -85,7 +85,7 @@ test('AC-011 TEST-011: committed pre-cutoff step arriving after local veto canno
   const late = relay.heldIncoming.find(f => f.data.type === 'COACH_STEP_EDIT')!.data;
   expect(manifest().committedSteps.some((f: any) => f.id === late.payload.stepId)).toBe(true);
   expect(disk()).toContain('coach_fixture_step_2');
-  await editorInput(page).click(); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await focusEditor(page); await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
   const marker = `human_before_veto_ack_${Date.now()}`;
   await append(page, `# ${marker}\n`);
   await expect.poll(() => relay.heldIncoming.some(f => f.data.type === 'ACK' && f.data.payload.replyTo === vetoId)).toBe(true);
@@ -107,7 +107,7 @@ test('AC-006 TEST-006: actual Monaco Undo/Redo groups two committed fixture coac
   await expect.poll(() => disk()).toBe(before + '# coach_fixture_step_1\n# coach_fixture_step_2\n');
   await expect.poll(() => editorText(page)).toContain('coach_fixture_step_2');
   await expect(page.getByText('Tryb ucznia (Piszesz Ty)', { exact: false })).toBeVisible();
-  await editorInput(page).click(); await page.keyboard.press('ControlOrMeta+z');
+  await focusEditor(page); await page.keyboard.press('ControlOrMeta+z');
   await expect.poll(() => disk()).toBe(before);
   await page.keyboard.press(process.platform === 'win32' ? 'Control+y' : 'ControlOrMeta+Shift+z');
   await expect.poll(() => disk()).toBe(before + '# coach_fixture_step_1\n# coach_fixture_step_2\n');
