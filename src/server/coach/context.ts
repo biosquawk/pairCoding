@@ -27,7 +27,7 @@ export function isContextPathAllowed(path: string): boolean {
   if (!path || path.startsWith('/') || /[\\:\x00-\x1f]/.test(path)) return false;
   return path.split('/').every(part => part !== '' && part !== '.' && part !== '..' &&
     !/[. ]$/.test(part) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part) &&
-    !/^(\.env.*|\.git|\.paircoach|node_modules|target|__pycache__|\.venv|dist|\.ssh|\.aws|\.azure|\.config|\.npmrc|\.netrc|\.pypirc)$/i.test(part) &&
+    !/^(\.env.*|\.git|\.paircoach|node_modules|target|__pycache__|\.venv|dist|\.ssh|\.aws|\.docker|\.kube|\.azure|\.config|\.npmrc|\.netrc|\.pypirc)$/i.test(part) &&
     !/(?:^|[._-])(?:credentials?|secrets?|tokens?|passwords?|keystore|id_rsa|id_ed25519)(?:[._-]|$)/i.test(part) &&
     !/\.(pem|key|pfx|p12|jks|kdbx|der|crt)$/i.test(part));
 }

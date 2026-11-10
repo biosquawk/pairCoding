@@ -34,6 +34,7 @@ export class CoachAdapter {
   private lastRun: Run | null = null;
   private active = false;
   private pending: Pending | null = null;
+  private activeRequest: Pending | null = null;
   private editTimer: ReturnType<typeof setTimeout> | null = null;
   private controller: AbortController | null = null;
   private analysisTimer: ReturnType<typeof setTimeout> | null = null;
@@ -117,6 +118,7 @@ export class CoachAdapter {
     const controller = new AbortController();
     this.controller = controller;
     this.active = true;
+    this.activeRequest = pending;
     this.setStatus('THINKING');
     const analysisTimeout = setTimeout(() => {
       controller.abort();
@@ -145,6 +147,7 @@ export class CoachAdapter {
       this.publishControl(); // Also releases the frontend's CONTROL_PREPARE lock on timeout/rejection.
       if (this.controller === controller) this.controller = null;
       this.active = false;
+      if (this.activeRequest === pending) this.activeRequest = null;
       if (!this.closed && this.options.session.getSession().aiStatus === 'THINKING') this.setStatus(this.options.workspace.settings.aiConsent ? 'READY' : 'OFF');
       if (this.pending && this.allowed()) queueMicrotask(() => void this.pump());
     }
@@ -165,7 +168,11 @@ export class CoachAdapter {
       case 'HINT': {
         if (decision.path) {
           const document = context.documents.find(doc => doc.path === decision.path);
-          if (!document || document.version !== decision.documentVersion || this.options.workspace.getDocument(decision.path).version !== decision.documentVersion) throw new Error('STALE_HINT');
+          if (!document) throw new Error('STALE_HINT');
+          const source = this.options.workspace.getDocument(decision.path);
+          if (document.version !== decision.documentVersion || source.version !== decision.documentVersion) throw new Error('STALE_HINT');
+          // A redacted view is not a coordinate system for the original document.
+          if (document.content !== source.content) throw new Error('UNMAPPED_HINT');
           if (decision.range) applyTextEdit(document.content, { range: decision.range, textBlock: 'x' });
         }
         const evidence = new Set([...context.messages.map(message => message.messageId), ...(context.lastRun ? [context.lastRun.runId] : [])]);
@@ -190,7 +197,7 @@ export class CoachAdapter {
         const message = pending.message;
         // File text/provider cannot authorize mute. Only the current explicit chat request.
         if (pending.reason !== 'CHAT' || message?.author !== 'STUDENT' || message.messageId !== decision.sourceUserMessageId ||
-          !/^\s*(?:prosz[ęe][, ]+)?(?:nie\s+przerywaj\b|wycisz\b|zrób\s+przerwę\b|przerwa\b|pauza\b|mute\b|stop\s+interrupting\b|take\s+a\s+break\b)/iu.test(message.text)) throw new Error('MUTE_NOT_AUTHORIZED');
+          !/^\s*(?:prosz[ęe][, ]+)?(?:nie\s+przerywaj|wycisz|zrób\s+przerwę|przerwa|pauza|mute|stop\s+interrupting|take\s+a\s+break)(?![\p{L}\p{N}\p{M}_])/iu.test(message.text)) throw new Error('MUTE_NOT_AUTHORIZED');
         this.options.session.mute(decision.durationSeconds);
         return;
       }
@@ -203,7 +210,10 @@ export class CoachAdapter {
     if (!isCoachWriteAllowed(plan.path, workspace.settings) || !context.documents.some(doc => doc.path === plan.path) ||
       plan.workspaceVersion !== workspace.workspaceVersion || plan.workspaceVersion !== context.workspaceVersion) throw new Error('STALE_OR_FORBIDDEN_PLAN');
     let document = workspace.getDocument(plan.path);
-    if (document.version !== plan.documentVersion || document.readOnly) throw new Error('STALE_DOCUMENT');
+    const sentDocument = context.documents.find(doc => doc.path === plan.path)!;
+    if (document.version !== plan.documentVersion || sentDocument.version !== plan.documentVersion || document.readOnly) throw new Error('STALE_DOCUMENT');
+    // Reject the entire plan before CONTROL_PREPARE; never apply masked coordinates to raw bytes.
+    if (sentDocument.content !== document.content) throw new Error('UNMAPPED_EDIT');
     // Check all sequential coordinates before taking control, but commit one step only after each ACK.
     let preview = document.content;
     for (const step of plan.steps) {
@@ -327,7 +337,11 @@ export class CoachAdapter {
   private readonly onChanged = (event: { path: string; actor: string }) => {
     if (this.pointer?.path === event.path) this.clearPointer();
     if (event.actor !== 'COACH') {
+      // Refresh code, not chat authorization. Full invalidation paths still discard both.
+      const chat = this.pending?.reason === 'CHAT' ? this.pending :
+        this.activeRequest?.reason === 'CHAT' ? this.activeRequest : null;
       this.abort();
+      if (chat && this.allowed()) this.pending = chat;
       this.trigger('EDIT');
     }
   };
@@ -335,6 +349,7 @@ export class CoachAdapter {
   abort(): void {
     this.generation++;
     this.pending = null;
+    this.activeRequest = null;
     if (this.editTimer) { clearTimeout(this.editTimer); this.editTimer = null; }
     this.controller?.abort();
     if (this.analysisTimer) { clearTimeout(this.analysisTimer); this.analysisTimer = null; }
