@@ -21,6 +21,8 @@ Write-Host "Revision $env:PAIRCOACH_QA_REVISION; Node: $(& node --version); brow
 $smoke = $LASTEXITCODE
 if ($smoke -ne 0) { throw "Real browser GATE001 failed exit=$smoke; retain .runtime traces/reports" }
 if ($ReferenceMetrics) {
+  $load = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+  $env:PAIRCOACH_QA_LOAD_NOTE = "Start-of-campaign CPU LoadPercentage=$load; shared host, no exclusive-load isolation; Windows os.loadavg is not a CPU-load measurement"
   & node node_modules\playwright\cli.js test --config tests\qa\metrics.config.ts
   $metrics = $LASTEXITCODE
   if ($metrics -ne 0) { throw "Windows reference metrics failed exit=$metrics; retain raw evidence" }

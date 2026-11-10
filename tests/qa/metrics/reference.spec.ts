@@ -98,6 +98,7 @@ test('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 
     revision: process.env.PAIRCOACH_QA_REVISION || 'UNRECORDED — set exact integrated commit before acceptance',
     platform: process.platform, node: process.version, chromium: browser.version(),
     cpu: os.cpus()[0]?.model, cpuCount: os.cpus().length, totalRAMBytes: os.totalmem(), loadAverage: os.loadavg(),
+    hostLoadNote: process.env.PAIRCOACH_QA_LOAD_NOTE || 'UNRECORDED',
     recordedAt: new Date().toISOString(), fileCount: readdirSync(end.rootPath).length,
     activeDocumentBytesAfter: statSync(path.join(end.rootPath, 'main.py')).size,
     fixture: 'real product backend/frontend; explicit deterministic coach coordinator via K in-process factory; NOT Gemini evidence',
@@ -115,6 +116,7 @@ test('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 
   const artifact = info.outputPath('AC027-reference.json');
   writeFileSync(artifact, JSON.stringify(report, null, 2)); await info.attach('AC027 raw+summary', { path: artifact, contentType: 'application/json' });
   expect(report.revision).not.toMatch(/^UNRECORDED/);
+  expect(report.hostLoadNote, 'record actual reference-host load, not an assumed idle host').not.toBe('UNRECORDED');
   expect(report.activeDocumentBytesAfter).toBeLessThanOrEqual(100 * 1024);
   expect(observed.vetoes).toHaveLength(100); expect(observed.hints).toHaveLength(100);
   expect(observed.vetoes.every((v: any) => v.ownerWasCoach)).toBe(true);
