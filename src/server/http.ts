@@ -101,6 +101,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   function bind() {
     workspace.on('external',(payload:unknown) => { coach?.abort(); emit('EXTERNAL_FILE_SYNC',payload); emit('SESSION_STATE',session.getSession()); });
     session.on('state',()=>emit('SESSION_STATE',session.getSession()));
+    session.on('overtime',()=>{emit('CHAT_REPLY',{replyTo:null,text:'Limit czasu minął. Możesz dalej pisać i samodzielnie zakończyć próbę.'});coach?.trigger('OVERTIME');});
+    workspace.on('watcherError',(error:unknown)=>emit('ERROR',apiError(error)));
     session.on('control',(payload:unknown)=>emit('CONTROL_STATE',payload));
     session.on('veto',()=>coach?.abort());
     coach=options.enableCoach && options.coachFactory ? options.coachFactory(context()) : undefined;
@@ -202,7 +204,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       const stopMatch=req.method==='POST' && /^\/api\/run\/[A-Za-z0-9._:-]+\/stop$/.test(url.pathname);
       const route=routes[key] || (stopMatch ? ['SessionCommand',202] as [string,number]:undefined);
       if(!route) fail(404,'NOT_FOUND','Nieznana komenda.');
-      const body=await readBody(req); requestId=typeof body?.requestId==='string' ? body.requestId:null;
+      const body=await readBody(req); requestId=typeof body?.requestId==='string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(body.requestId) ? body.requestId:null;
       if(!validateRequest(route[0],body)) fail(400,'VALIDATION_ERROR','Komenda niezgodna z kontraktem.');
       if(url.pathname==='/api/session/veto') {
         const op=await veto(body.requestId,body.clientId,body.sessionId,{controlEpoch:body.controlEpoch,activeInterventionId:body.activeInterventionId,lastAppliedSeq:body.lastAppliedSeq});
@@ -309,7 +311,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         switch(command.type) {
           case 'CODE_CHANGED': {
             const doc=gate.write({...authInput(command.clientId,command.sessionId,p.controlEpoch),path:p.path,baseVersion:p.baseVersion,content:p.content});
-            session.noteStudentEdit(p.path,doc.content);coach?.trigger('EDIT');
+            coach?.trigger('EDIT');
             return doc.version;
           }
           case 'PING': return null;
