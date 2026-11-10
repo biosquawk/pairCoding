@@ -92,7 +92,7 @@ test('foreign public replacement between crash/restart is never overwritten/dele
   } finally { s.close(); w.close(); }
 });
 
-for (const tamper of ['manifest', 'captured', 'symlink-ancestor']) test(`untrusted journal ${tamper}: restart refuses effects and preserves outside/current bytes`, { timeout: 60000 }, async t => {
+for (const tamper of ['manifest', 'captured', 'symlink-ancestor', 'completion']) test(`untrusted journal ${tamper}: restart refuses effects and preserves outside/current bytes`, { timeout: 60000 }, async t => {
   const f = seed(t); await killAt(t, f, 'restore', 'PUBLISHED', '0');
   const base = f.file('.paircoach/snapshot-journal-v1');
   const operation = path.join(base, fs.readdirSync(base).find(n => n.startsWith('transaction-'))!);
@@ -101,6 +101,10 @@ for (const tamper of ['manifest', 'captured', 'symlink-ancestor']) test(`untrust
     const file = path.join(operation, 'intent.json'), envelope = JSON.parse(fs.readFileSync(file, 'utf8'));
     const payload = JSON.parse(envelope.payload); payload.entries[0].path = '../outside/a.ts'; envelope.payload = JSON.stringify(payload); fs.writeFileSync(file, JSON.stringify(envelope));
   } else if (tamper === 'captured') fs.writeFileSync(path.join(operation, '1.captured'), 'FOREIGN CAPTURED BYTES');
+  else if (tamper === 'completion') {
+    const completion = fs.readdirSync(operation).find(n => n.endsWith('.move-pending.joined'))!;
+    fs.writeFileSync(path.join(operation, completion), 'CORRUPT COMPLETION');
+  }
   else { fs.renameSync(base, base + '-held'); fs.symlinkSync(outside, base, process.platform === 'win32' ? 'junction' : 'dir'); }
   const before = files(f);
   restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), before);
@@ -114,3 +118,16 @@ test('startup never rolls back a journal owned by another still-live process', {
   await killAt(t, f, 'restore', 'PREPARED', '*', () => { restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), expectedWork); });
   restart(f); assert.deepEqual(files(f), expectedWork); restart(f);
 });
+
+for (const action of ['restore', 'recover']) for (const boundary of ['ARMED', 'RETURNED', 'JOINED']) {
+  test(`in-process native ${action} ${boundary}: hard kill preserves material and never races uncertain worker`, {timeout: 60000}, async t => {
+    const f = seed(t);
+    if (action === 'recover') await killAt(t, f, 'restore', 'PUBLISHED', '0');
+    const phase = `${action === 'restore' ? 'CAPTURE' : 'UNDO'}_MOVE_${boundary}`;
+    await killAt(t, f, action, phase, '0');
+    // ARMED, RETURNED-before-completion-record and JOINED all reconcile
+    // automatically after the REAL syscall owner process is actually dead.
+    restart(f); assert.deepEqual(files(f), expectedWork);
+    restart(f); assert.deepEqual(files(f), expectedWork);
+  });
+}

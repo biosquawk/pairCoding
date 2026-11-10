@@ -29,7 +29,7 @@ try {
   session = new SessionController(workspace);
   const gate = new WriteGate(workspace, session);
   session.claimLease('new-child-lease');
-  if (action === 'restore') gate.restoreSnapshot({ clientId: 'new-child-lease', sessionId: session.state.sessionId,
+  if (action === 'restore') await gate.restoreSnapshot({ clientId: 'new-child-lease', sessionId: session.state.sessionId,
     controlEpoch: session.state.controlEpoch, actor: 'STUDENT', snapshotId, paths: ['a.ts', 'b.ts'], expectedWorkspaceVersion: workspace.workspaceVersion });
   const result = { status: 'OK', action, projectId: workspace.projectId, workspaceVersion: workspace.workspaceVersion };
   process.stdout.write('RESULT ' + JSON.stringify(result) + '\n');

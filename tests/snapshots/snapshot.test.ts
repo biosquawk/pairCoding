@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import childProcess from 'node:child_process';
 import path from 'node:path';
 import { syncBuiltinESMExports } from 'node:module';
 import { WorkspaceService } from '../../src/server/WorkspaceService';
@@ -36,7 +37,7 @@ test('snapshot identity is stable even before first persistence; opening does no
   try { assert.equal(again.workspace.projectId, id); } finally { again.close(); }
 });
 
-test('restore is gated, selective, creates durable before-image, advances versions and never resets timer', t => {
+test('restore is gated, selective, creates durable before-image, advances versions and never resets timer', async t => {
   const f = fixture(t);
   const source = f.workspace.createSnapshot('Original');
   f.session.start(60000, true); f.session.timerAction('PAUSE', null);
@@ -45,7 +46,7 @@ test('restore is gated, selective, creates durable before-image, advances versio
   const timer = f.session.getSession().timer;
   assert.throws(() => f.workspace.restoreSnapshot(source.snapshotId, ['a.ts'], f.auth()), code('WRITE_GATE_REQUIRED'));
   const events: any[] = []; f.workspace.on('external', e => events.push(e));
-  const backup = f.restore(source.snapshotId, ['a.ts']);
+  const backup = await f.restore(source.snapshotId, ['a.ts']);
   assert.equal(backup.workspaceVersion, beforeVersion);
   assert.deepEqual(backup.paths, ['a.ts']);
   assert.equal(Buffer.from(f.workspace.readSnapshot(backup.snapshotId).files[0].rawBase64!, 'base64').toString(), 'WORK A\n');
@@ -58,35 +59,35 @@ test('restore is gated, selective, creates durable before-image, advances versio
   const settled = f.workspace.workspaceVersion; f.workspace.scanExternal(); assert.equal(f.workspace.workspaceVersion, settled, 'no own post-close ctime echo');
 });
 
-test('snapshot raw BOM/CRLF/binary and source mode are restored byte-for-byte, not re-encoded from live file', t => {
+test('snapshot raw BOM/CRLF/binary and source mode are restored byte-for-byte, not re-encoded from live file', async t => {
   const raw = Buffer.from('\ufeffconst text = "ź";\r\n');
   const f = fixture(t, { 'a.ts': raw, 'binary.bin': Buffer.from([0xff, 0, 0xfe]) });
   fs.chmodSync(f.file('a.ts'), 0o640); f.workspace.scanExternal();
   const snapshot = f.workspace.createSnapshot('Raw');
   f.write('a.ts', 'new content'); fs.chmodSync(f.file('a.ts'), 0o600); fs.writeFileSync(f.file('binary.bin'), Buffer.from([1, 2])); f.workspace.scanExternal();
-  f.restore(snapshot.snapshotId, ['a.ts', 'binary.bin']);
+  await f.restore(snapshot.snapshotId, ['a.ts', 'binary.bin']);
   assert.deepEqual(f.bytes('a.ts'), raw); assert.deepEqual(f.bytes('binary.bin'), Buffer.from([0xff, 0, 0xfe]));
   assert.equal(fs.statSync(f.file('a.ts')).mode & 0o777, process.platform === 'win32' ? 0o666 : 0o640);
   assert.equal(f.workspace.getDocument('a.ts').utf8Bom, true); assert.equal(f.workspace.getDocument('a.ts').eol, 'CRLF');
 });
 
-test('explicit tombstone deletion and backup restoration create nested parents without full-tree reset', t => {
+test('explicit tombstone deletion and backup restoration create nested parents without full-tree reset', async t => {
   const f = fixture(t);
   const missing = f.workspace.createSnapshot('Absent', ['deep/file.ts']);
   assert.equal(f.workspace.readSnapshot(missing.snapshotId).files[0].rawBase64, null);
   fs.mkdirSync(f.file('deep')); fs.writeFileSync(f.file('deep/file.ts'), 'KEEP BEFORE DELETE'); fs.writeFileSync(f.file('new.ts'), 'UNSELECTED'); f.workspace.scanExternal();
-  const backup = f.restore(missing.snapshotId, ['deep/file.ts']);
+  const backup = await f.restore(missing.snapshotId, ['deep/file.ts']);
   assert.equal(fs.existsSync(f.file('deep/file.ts')), false); assert.equal(f.bytes('new.ts').toString(), 'UNSELECTED');
   fs.rmdirSync(f.file('deep')); f.workspace.scanExternal();
-  f.restore(backup.snapshotId, ['deep/file.ts']);
+  await f.restore(backup.snapshotId, ['deep/file.ts']);
   assert.equal(f.bytes('deep/file.ts').toString(), 'KEEP BEFORE DELETE'); assert.equal(f.bytes('new.ts').toString(), 'UNSELECTED');
 });
 
-test('empty project and explicit empty snapshot are supported but empty restore is rejected', t => {
+test('empty project and explicit empty snapshot are supported but empty restore is rejected', async t => {
   const f = fixture(t, {}), a = f.workspace.createSnapshot('Empty');
   assert.deepEqual(a.paths, []); assert.deepEqual(f.workspace.readSnapshot(a.snapshotId).files, []);
   assert.deepEqual(f.workspace.createSnapshot('Also empty', []).paths, []);
-  assert.throws(() => f.restore(a.snapshotId, []), code('INVALID_SNAPSHOT_PATHS'));
+  await assert.rejects(() => f.restore(a.snapshotId, []), code('INVALID_SNAPSHOT_PATHS'));
 });
 
 test('snapshot hard excludes secrets/cache independent of AI consent; explicit secret paths fail without publication', t => {
@@ -97,12 +98,12 @@ test('snapshot hard excludes secrets/cache independent of AI consent; explicit s
   assert.equal(f.workspace.listSnapshots().length, 1); assert.equal(f.bytes('.env.local').toString(), 'secret');
 });
 
-test('snapshot path/label/subset/version validation fails closed without changing task bytes', t => {
+test('snapshot path/label/subset/version validation fails closed without changing task bytes', async t => {
   const f = fixture(t), s = f.workspace.createSnapshot('Valid', ['a.ts']);
   for (const label of ['', ' ', 'x'.repeat(201)]) assert.throws(() => f.workspace.createSnapshot(label));
   for (const paths of [['a.ts', 'a.ts'], ['a.ts', 'A.ts'], ['../outside'], ['CON'], ['/absolute'], ['a.ts/x'], ['dir', 'dir/file']]) assert.throws(() => f.workspace.createSnapshot('Bad', paths));
-  assert.throws(() => f.restore(s.snapshotId, ['b.ts']), code('INVALID_SNAPSHOT_PATHS'));
-  assert.throws(() => f.restore(s.snapshotId, ['a.ts'], -1), code('INVALID_VERSION'));
+  await assert.rejects(() => f.restore(s.snapshotId, ['b.ts']), code('INVALID_SNAPSHOT_PATHS'));
+  await assert.rejects(() => f.restore(s.snapshotId, ['a.ts'], -1), code('INVALID_VERSION'));
   assert.throws(() => f.workspace.readSnapshot('../no'), code('INVALID_SNAPSHOT_ID'));
   assert.throws(() => f.workspace.readSnapshot('00000000-0000-4000-8000-000000000001'), code('SNAPSHOT_NOT_FOUND'));
   assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n'); assert.equal(f.workspace.workspaceVersion, 0);
@@ -154,12 +155,12 @@ test('snapshot store cannot be reused by another root/project; no public bytes a
   assert.equal(fs.readFileSync(path.join(other, 'a.ts'), 'utf8'), 'OTHER'); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });
 
-test('stale proposal, wrong lease/session/epoch and coach restore produce no backup or task effect', t => {
+test('stale proposal, wrong lease/session/epoch and coach restore produce no backup or task effect', async t => {
   const f = fixture(t), s = f.workspace.createSnapshot('Source');
   f.write('a.ts', 'WORK');
-  assert.throws(() => f.restore(s.snapshotId, ['a.ts'], 0), code('WORKSPACE_VERSION_CONFLICT'));
+  await assert.rejects(() => f.restore(s.snapshotId, ['a.ts'], 0), code('WORKSPACE_VERSION_CONFLICT'));
   for (const [change, expected] of [[{ clientId: 'not-owner' }, 'LEASE_REQUIRED'], [{ sessionId: 'old' }, 'SESSION_MISMATCH'], [{ controlEpoch: -1 }, 'STALE_EPOCH'], [{ actor: 'COACH' }, 'WRITE_OWNER_CONFLICT']] as const) {
-    assert.throws(() => f.gate.restoreSnapshot({ ...f.auth(), ...change, snapshotId: s.snapshotId, paths: ['a.ts'], expectedWorkspaceVersion: f.workspace.workspaceVersion }), code(expected));
+    await assert.rejects(() => f.gate.restoreSnapshot({ ...f.auth(), ...change, snapshotId: s.snapshotId, paths: ['a.ts'], expectedWorkspaceVersion: f.workspace.workspaceVersion }), code(expected));
   }
   assert.equal(f.workspace.listSnapshots().length, 1); assert.equal(f.bytes('a.ts').toString(), 'WORK');
 });
@@ -186,70 +187,67 @@ test('capture revalidates whole workspace after private writes, including an uns
   assert.equal(injected, true); assert.equal(f.workspace.listSnapshots().length, 0); assert.ok(f.workspace.workspaceVersion > 0);
 });
 
-test('real backup store failure blocks restore before any capture/publication', t => {
+test('real backup store failure blocks restore before any capture/publication', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK');
   let injected = false;
   const base = path.join(f.data, 'snapshots-v1'), held = path.join(f.data, 'held');
   f.workspace.on('snapshotCheckpoint', e => {
     if (e.phase === 'SNAPSHOT_FILE_CAPTURED' && !injected) { injected = true; fs.renameSync(base, held); fs.writeFileSync(base, 'not a directory'); }
   });
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts']), code('SNAPSHOT_BACKUP_FAILED'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts']), code('SNAPSHOT_BACKUP_FAILED'));
   assert.equal(injected, true); assert.equal(f.bytes('a.ts').toString(), 'WORK'); assert.equal(f.bytes('b.ts').toString(), 'SNAP B\n');
   assert.equal(fs.existsSync(f.file('.paircoach/snapshot-journal-v1')), false);
   fs.unlinkSync(base); fs.renameSync(held, base);
 });
 
-test('lease revocation after backup capture is checked before publication and leaves task bytes intact', t => {
+test('lease revocation after backup capture is checked before publication and leaves task bytes intact', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK');
   f.workspace.once('snapshotCheckpoint', () => f.session.releaseLease('tab'));
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts']), code('LEASE_REQUIRED'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts']), code('LEASE_REQUIRED'));
   assert.equal(f.bytes('a.ts').toString(), 'WORK'); assert.equal(f.workspace.listSnapshots().length, 1);
 });
 
-test('reentrant write/mutate/restore from changed/external listeners is blocked by shared workspace guard', t => {
+test('reentrant write/mutate/restore from changed/external listeners is blocked by shared workspace guard', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); let blocked = 0;
+  const rejections: Promise<void>[] = [];
   const reenter = () => {
     assert.throws(() => f.gate.write({ ...f.auth(), path: 'b.ts', content: 'REENTER', baseVersion: 1 }), code('WORKSPACE_BUSY')); blocked++;
     assert.throws(() => f.gate.mutate({ ...f.auth(), operation: 'CREATE', path: 'new.ts', content: 'REENTER', baseVersion: null, newPath: null }), code('WORKSPACE_BUSY')); blocked++;
-    assert.throws(() => f.restore(source.snapshotId, ['b.ts']), code('WORKSPACE_BUSY')); blocked++;
+    rejections.push(assert.rejects(() => f.restore(source.snapshotId, ['b.ts']), code('WORKSPACE_BUSY'))); blocked++;
   };
   f.workspace.once('changed', reenter); f.write('a.ts', 'WORK');
-  f.workspace.once('external', reenter); f.restore(source.snapshotId, ['a.ts']);
+  f.workspace.once('external', reenter); await f.restore(source.snapshotId, ['a.ts']);
+  await Promise.all(rejections);
   assert.equal(blocked, 6); assert.equal(f.bytes('b.ts').toString(), 'SNAP B\n'); assert.equal(fs.existsSync(f.file('new.ts')), false);
 });
 
-test('authority revoked after the first publication rolls back instead of continuing a stale restore', t => {
+test('authority revoked after the first publication rolls back instead of continuing a stale restore', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A'); f.write('b.ts', 'WORK B');
   f.workspace.on('snapshotCheckpoint', e => { if (e.phase === 'PUBLISHED' && e.index === 0) f.session.releaseLease('tab'); });
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('RESTORE_INCOMPLETE'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('RESTORE_INCOMPLETE'));
   assert.equal(f.bytes('a.ts').toString(), 'WORK A'); assert.equal(f.bytes('b.ts').toString(), 'WORK B');
   assert.equal(f.workspace.listSnapshots().length, 2);
   f.session.claimLease('tab'); f.write('a.ts', 'AFTER ROLLBACK'); assert.equal(f.bytes('a.ts').toString(), 'AFTER ROLLBACK');
 });
 
-test('reentrant second Workspace/WriteGate instance for the same root cannot recover a live synchronous transaction', t => {
+test('reentrant second Workspace/WriteGate instance for the same root cannot recover a live synchronous transaction', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK'); let checked = false;
   f.workspace.on('snapshotCheckpoint', e => {
     if (e.phase !== 'PREPARED') return;
-    const w = new WorkspaceService(f.root, f.data);
-    try {
-      // No session or mutation from another instance may bypass the root-scoped guard.
-      assert.throws(() => w._recoverSnapshots(), code('WORKSPACE_BUSY'));
-      assert.throws(() => w._withMutation(() => assert.fail('must not run')), code('WORKSPACE_BUSY'));
-      checked = true;
-    } finally { w.close(); }
+    // No second instance may scan/recover a partially mutated root at construction.
+    assert.throws(() => new WorkspaceService(f.root, f.data), code('WORKSPACE_BUSY'));
+    checked = true;
   });
-  f.restore(source.snapshotId, ['a.ts']); assert.equal(checked, true); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
+  await f.restore(source.snapshotId, ['a.ts']); assert.equal(checked, true); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });
 
-for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${operation} syscall outcome is observed before rollback, never replayed`, t => {
+for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${operation} syscall outcome is observed before rollback, never replayed`, async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A'); f.write('b.ts', 'WORK B');
   let count = 0;
   if (operation === 'capture') {
-    const real = fs.renameSync;
-    t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
-      real(from, to);
-      if (String(from) === f.file('a.ts')) { count++; throw Object.assign(Error('unknown capture result'), { code: 'EIO' }); }
+    f.workspace.on('snapshotCheckpoint', e => {
+      // The REAL in-process syscall has returned, but no completion record exists.
+      if (e.phase === 'CAPTURE_MOVE_RETURNED' && e.index === 0) { count++; throw Object.assign(Error('unknown native result'), {code: 'EIO'}); }
     });
   } else if (operation === 'publish') {
     const real = fs.linkSync;
@@ -265,64 +263,62 @@ for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${opera
     });
   }
   syncBuiltinESMExports();
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('RESTORE_INCOMPLETE'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('RESTORE_INCOMPLETE'));
   assert.equal(count, 1); assert.equal(f.bytes('a.ts').toString(), 'WORK A'); assert.equal(f.bytes('b.ts').toString(), 'WORK B');
 });
 
-test('late foreign source replacement at actual capture syscall survives publicly and in retained material; no success', t => {
+test('late foreign source replacement at actual capture syscall survives publicly and in retained material; no success', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A');
   let injected = false;
-  const real = fs.renameSync;
-  t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
-    if (String(from) === f.file('a.ts') && !injected) { injected = true; fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'FOREIGN LATEST'); }
-    real(from, to);
-  }); syncBuiltinESMExports();
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts']), code('RECOVERY_REQUIRED'));
+  f.workspace.on('snapshotCheckpoint', e => {
+    if (e.phase === 'CAPTURE_MOVE_ARMED' && e.index === 0 && !injected) { injected = true; fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'FOREIGN LATEST'); }
+  });
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts']), code('RECOVERY_REQUIRED'));
   assert.equal(injected, true); assert.equal(f.bytes('a.ts').toString(), 'FOREIGN LATEST');
   const base = f.file('.paircoach/snapshot-journal-v1'), operation = fs.readdirSync(base).find(p => p.startsWith('transaction-'))!;
   assert.equal(fs.readFileSync(path.join(base, operation, '0.captured'), 'utf8'), 'FOREIGN LATEST');
   assert.throws(() => f.write('b.ts', 'MUST BLOCK'), code('RECOVERY_REQUIRED'));
 });
 
-test('no-clobber restore and rollback preserve an external destination created between capture and publication', t => {
+test('no-clobber restore and rollback preserve an external destination created between capture and publication', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A');
   f.workspace.on('snapshotCheckpoint', e => { if (e.phase === 'BEFORE_PUBLICATION') fs.writeFileSync(f.file('a.ts'), 'FOREIGN NEW PUBLIC', { flag: 'wx' }); });
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts']), code('RECOVERY_REQUIRED'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts']), code('RECOVERY_REQUIRED'));
   assert.equal(f.bytes('a.ts').toString(), 'FOREIGN NEW PUBLIC');
   const backup = f.workspace.listSnapshots().find(s => s.snapshotId !== source.snapshotId)!;
   assert.equal(Buffer.from(f.workspace.readSnapshot(backup.snapshotId).files[0].rawBase64!, 'base64').toString(), 'WORK A');
 });
 
-test('even a currently authorized COACH owner cannot execute restore', t => {
+test('even a currently authorized COACH owner cannot execute restore', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source');
   f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: true }); f.session.setAiStatus('READY'); f.session.start(null, true); f.session.acquireCoach('intervention');
-  assert.throws(() => f.gate.restoreSnapshot({ ...f.auth(), actor: 'COACH', snapshotId: source.snapshotId, paths: ['a.ts'], expectedWorkspaceVersion: f.workspace.workspaceVersion }), code('COACH_RESTORE_FORBIDDEN'));
+  await assert.rejects(() => f.gate.restoreSnapshot({ ...f.auth(), actor: 'COACH', snapshotId: source.snapshotId, paths: ['a.ts'], expectedWorkspaceVersion: f.workspace.workspaceVersion }), code('COACH_RESTORE_FORBIDDEN'));
   assert.equal(f.workspace.listSnapshots().length, 1); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });
 
-test('restore backup revalidates earlier captured files after all files: foreign change leaves no task effect/journal', t => {
+test('restore backup revalidates earlier captured files after all files: foreign change leaves no task effect/journal', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A'); f.write('b.ts', 'WORK B');
   f.workspace.on('snapshotCheckpoint', e => { if (e.phase === 'SNAPSHOT_FILE_CAPTURED' && e.index === 1) fs.writeFileSync(f.file('a.ts'), 'LATEST FOREIGN'); });
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('DISK_CONFLICT'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('DISK_CONFLICT'));
   assert.equal(f.bytes('a.ts').toString(), 'LATEST FOREIGN'); assert.equal(f.bytes('b.ts').toString(), 'WORK B');
   assert.equal(f.workspace.listSnapshots().length, 1); assert.equal(fs.existsSync(f.file('.paircoach/snapshot-journal-v1')), false);
 });
 
-test('final verification checks ALL published paths before COMMITTED, never just the last file', t => {
+test('final verification checks ALL published paths before COMMITTED, never just the last file', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A'); f.write('b.ts', 'WORK B');
   f.workspace.on('snapshotCheckpoint', e => { if (e.phase === 'PUBLISHED' && e.index === 1) { fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'LATEST FOREIGN'); } });
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('RECOVERY_REQUIRED'));
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts', 'b.ts']), code('RECOVERY_REQUIRED'));
   assert.equal(f.bytes('a.ts').toString(), 'LATEST FOREIGN');
   const base = f.file('.paircoach/snapshot-journal-v1'), operation = fs.readdirSync(base).find(n => n.startsWith('transaction-'))!;
   assert.equal(fs.existsSync(path.join(base, operation, 'COMMITTED')), false);
   assert.equal(f.workspace.listSnapshots().length, 2);
 });
 
-test('sequential replay using the original proposal version is rejected before a second backup; transport outcome dedupe remains K', t => {
+test('sequential replay using the original proposal version is rejected before a second backup; transport outcome dedupe remains K', async t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK');
   const originalVersion = f.workspace.workspaceVersion;
-  f.restore(source.snapshotId, ['a.ts'], originalVersion);
-  assert.throws(() => f.restore(source.snapshotId, ['a.ts'], originalVersion), code('WORKSPACE_VERSION_CONFLICT'));
+  await f.restore(source.snapshotId, ['a.ts'], originalVersion);
+  await assert.rejects(() => f.restore(source.snapshotId, ['a.ts'], originalVersion), code('WORKSPACE_VERSION_CONFLICT'));
   assert.equal(f.workspace.listSnapshots().length, 2);
 });
 

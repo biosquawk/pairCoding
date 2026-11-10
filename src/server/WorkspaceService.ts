@@ -4,11 +4,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import type { Document, FileEntry, Project, Settings, Snapshot } from '../shared/protocol';
 import type { MutationAuth } from './WriteGate';
+import { drainSteps, drainStepsAsync } from './SnapshotSteps';
 import { AppError } from './errors';
 import { SnapshotStorage, type FrozenSnapshot, snapshotAllowed, identity, snapshotFailure } from './SnapshotStorage';
 import { SnapshotJournal, type RestoreBefore } from './SnapshotJournal';
+import { LanguageFeatureRegistry } from './LanguageFeatureRegistry';
 
-const activeRoots = new Set<string>(); // synchronous guard shared by all instances in this server
+const activeRoots = new Set<string>(); // guard shared by all instances, held across async operations
+const activeAsyncRoots = new Set<string>();
 const MAX_BYTES = 1048576;
 const MAX_FILES = 1000;
 const EXCLUDED = new Set(['.git', 'node_modules', 'target', '__pycache__', '.venv', 'dist', '.paircoach']);
@@ -57,6 +60,7 @@ export class WorkspaceService extends EventEmitter {
       if (error instanceof AppError) throw error;
       throw new AppError(400, 'ROOT_UNAVAILABLE', 'Workspace directory does not exist or is not accessible.');
     }
+    if (activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'An operation owns this workspace root.');
     this.dataDir = path.resolve(dataDir ?? path.join(this.rootPath, '.paircoach'));
     if (this.dataDir === this.rootPath) throw new AppError(400, 'INVALID_DATA_DIR', 'Data directory must not be the workspace root.');
     this.snapshotStore = new SnapshotStorage(this.rootPath, this.dataDir, (p, missing) => this._safePath(p, missing));
@@ -210,37 +214,48 @@ export class WorkspaceService extends EventEmitter {
     this.emit('changed', { path: relative, workspaceVersion: this.workspaceVersion, actor: 'EXTERNAL' });
   }
 
-  private collect(): { files: string[]; dirs: string[] } {
+  private collect(): { files: string[]; dirs: string[] } { return drainSteps(this.collectSteps()); }
+
+  private *collectSteps(): Generator<void, { files: string[]; dirs: string[] }, void> {
     const files: string[] = [], dirs: string[] = [];
-    const walk = (relative: string) => {
-      const directory = relative ? this._safePath(relative) : this.rootPath;
+    const self = this;
+    function* walk(relative: string): Generator<void, void, void> {
+      const directory = relative ? self._safePath(relative) : self.rootPath;
       for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
         const candidate = relative ? `${relative}/${entry.name}` : entry.name;
-        try { this._safePath(candidate); }
+        try { self._safePath(candidate); }
         catch (error) { if (error instanceof AppError && error.status === 403) continue; throw error; }
         if (entry.isSymbolicLink()) continue;
-        if (entry.isDirectory()) { dirs.push(candidate); walk(candidate); }
+        if (entry.isDirectory()) { dirs.push(candidate); yield* walk(candidate); }
         else if (entry.isFile()) {
           files.push(candidate);
           if (files.length > MAX_FILES) throw new AppError(413, 'TOO_MANY_FILES', 'Workspace exceeds 1000 visible files.');
         }
+        yield;
       }
-    };
-    walk('');
+    }
+    yield* walk('');
     return { files, dirs };
   }
 
-  private scan(initial = false): void {
-    const { files, dirs } = this.collect();
+  private scan(initial = false): void { drainSteps(this.scanSteps(initial)); }
+
+  private *scanSteps(initial = false): Generator<void, void, void> {
+    const { files, dirs } = yield* this.collectSteps();
     // Gather first, so a failed scan cannot publish a partially missing tree.
     const found = new Map<string, DiskFile>();
-    for (const file of files) { const disk = this.disk(file); if (disk) found.set(file, disk); }
+    for (const file of files) { const disk = this.disk(file); if (disk) found.set(file, disk); yield; }
     this.directories = dirs;
     for (const [file, disk] of found) this.external(file, disk, initial);
     for (const file of [...this.records.keys()]) if (!found.has(file)) this.external(file, null, initial);
   }
 
   scanExternal(): void {
+    this.assertReadable();
+    this.scanInternal();
+  }
+
+  private scanInternal(): void {
     if (this.recoveryRequired) throw snapshotFailure('Workspace has pending snapshot recovery; construct WriteGate before publishing state.');
     this.scan(); this.refreshWatchers();
   }
@@ -272,6 +287,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   getDocument(relative: string): Document {
+    this.assertReadable();
     this.external(relative, this.disk(relative));
     const tracked = this.records.get(relative);
     if (!tracked) throw new AppError(404, 'FILE_NOT_FOUND', 'File does not exist.');
@@ -280,6 +296,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   listFiles(): FileEntry[] {
+    this.assertReadable();
     return [...this.directories.map(p => ({ path: p, kind: 'DIRECTORY' as const, version: null })),
       ...[...this.records].map(([p, record]) => ({ path: p, kind: 'FILE' as const, version: record.version }))]
       .sort((a, b) => a.path.localeCompare(b.path));
@@ -287,14 +304,12 @@ export class WorkspaceService extends EventEmitter {
 
   getProject(sessionId: string): Project {
     return { projectId: this.projectId, sessionId, rootPath: this.rootPath, workspaceVersion: this.workspaceVersion,
-      settings: structuredClone(this.settings), files: this.listFiles(), capabilities: {
-        canRunMain: this.settings.runProfiles.some(p => p.kind === 'RUN_MAIN'),
-        canRunTests: this.settings.runProfiles.some(p => p.kind === 'RUN_TESTS'), docs: 'NOT_INSTALLED', autocomplete: 'NOT_INSTALLED' } };
+      settings: structuredClone(this.settings), files: this.listFiles(), capabilities: new LanguageFeatureRegistry().getCapabilities(this.settings.runProfiles) };
   }
 
   updateSettings(settings: Settings): void {
+    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
     this._assertWritable();
-    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another synchronous workspace operation is in progress.');
     if (!settings || !['IMPLEMENTATION', 'CODE_REVIEW'].includes(settings.taskMode) || typeof settings.aiConsent !== 'boolean' ||
         !Array.isArray(settings.runProfiles) || settings.runProfiles.length > 2 || !Array.isArray(settings.contextPatterns) ||
         settings.contextPatterns.length > 100 || settings.contextPatterns.some(p => typeof p !== 'string' || !p || p.length > 1024)) {
@@ -320,7 +335,7 @@ export class WorkspaceService extends EventEmitter {
     this.emit('changed', { path: null, workspaceVersion: this.workspaceVersion, actor: 'SETTINGS' });
   }
 
-  /** @internal Only WriteGate uses these mutation primitives. No async critical sections. */
+  /** @internal Only WriteGate uses these mutation primitives. Single-file effects stay synchronous. */
   _baseline(): Map<string, string> { return new Map([...this.records].map(([p, r]) => [p, r.signature])); }
   _signature(content: string): string { return textSignature(lf(content)); }
   _fresh(relative: string, baseVersion: number): Tracked {
@@ -645,6 +660,19 @@ export class WorkspaceService extends EventEmitter {
     try { return action(); } finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); }
   }
 
+  /** Async critical sections MUST retain both guards until terminal commit/rollback. */
+  async _withMutationAsync<T>(action: () => Promise<T>): Promise<T> {
+    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
+    this._assertWritable();
+    this.mutationBusy = true; activeRoots.add(this.rootPath); activeAsyncRoots.add(this.rootPath);
+    try { return await action(); }
+    finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); activeAsyncRoots.delete(this.rootPath); }
+  }
+
+  private assertReadable(): void {
+    if (activeAsyncRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Snapshot capture/restore is in progress; retry after its terminal result.');
+  }
+
   _assertWritable(): void {
     if (this.closed) throw new AppError(503, 'WORKSPACE_CLOSED', 'Workspace is closed.');
     if (!this.recoveryRequired) {
@@ -661,7 +689,7 @@ export class WorkspaceService extends EventEmitter {
     try {
       this.snapshotJournal.recover();
       this.recoveryRequired = false;
-      this.scanExternal();
+      this.scanInternal();
     } catch (error) {
       this.recoveryRequired = true;
       const failure = snapshotFailure(`Recovery required in ${this.snapshotJournal.base}. Preserve public paths and copy recovery material to NEW names before manual resolution.`);
@@ -669,13 +697,14 @@ export class WorkspaceService extends EventEmitter {
     } finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); }
   }
 
-  private captureSnapshot(paths?: string[]): { files: RestoreBefore[]; validate: () => void; version: number } {
-    this.scanExternal();
+  private *captureSnapshotSteps(paths?: string[]): Generator<void, { files: RestoreBefore[]; validate: () => Generator<void, void, void>; version: number }, void> {
+    yield* this.scanSteps();
     const version = this.workspaceVersion;
     const baseline = new Map([...this.records].map(([p, r]) => [p, r.stamp]));
     const selected = paths === undefined ? [...baseline.keys()].filter(snapshotAllowed).sort() : paths;
-    this.snapshotStore.paths(selected);
-    const files = selected.map((relative, index): RestoreBefore => {
+    yield* this.snapshotStore.pathSteps(selected);
+    const files: RestoreBefore[] = [];
+    for (const [index, relative] of selected.entries()) {
       const absolute = this._safePath(relative, true);
       const disk = this.disk(relative);
       let file: RestoreBefore;
@@ -688,71 +717,88 @@ export class WorkspaceService extends EventEmitter {
         file = { path: relative, rawBase64: disk.raw.toString('base64'), mode: Number(stat.mode & 0o777n), identity: identity(stat), mtimeNs: String(stat.mtimeNs) };
       }
       this.emit('snapshotCheckpoint', { phase: 'SNAPSHOT_FILE_CAPTURED', index });
-      return file;
-    });
-    const validate = () => {
-      let changed = version !== this.workspaceVersion;
-      const collected = this.collect().files;
+      files.push(file);
+      yield;
+    }
+    const self = this;
+    function* validate(): Generator<void, void, void> {
+      let changed = version !== self.workspaceVersion;
+      const collected = (yield* self.collectSteps()).files;
       if (collected.length !== baseline.size || collected.some(p => !baseline.has(p))) changed = true;
-      for (const [p, stamp] of baseline) if (this.disk(p)?.stamp !== stamp) changed = true;
+      for (const [p, stamp] of baseline) { if (self.disk(p)?.stamp !== stamp) changed = true; yield; }
       // Missing explicit paths (tombstones) must still be missing after every other capture.
-      for (const f of files) if (f.rawBase64 === null && this.disk(f.path) !== null) changed = true;
+      for (const f of files) { if (f.rawBase64 === null && self.disk(f.path) !== null) changed = true; yield; }
       if (changed) {
-        this.scanExternal();
+        yield* self.scanSteps();
         throw new AppError(409, 'DISK_CONFLICT', 'Workspace changed during capture; no snapshot was published with an old version.');
       }
-    };
-    validate();
+    }
+    yield* validate();
     return { files, validate, version };
   }
 
   createSnapshot(label: string, paths?: string[]): Snapshot {
     return this._withMutation(() => {
-      const captured = this.captureSnapshot(paths);
-      return this.snapshotStore.put(label, captured.version, captured.files, captured.validate);
+      return drainSteps(this.createSnapshotSteps(label, paths));
     });
   }
 
-  listSnapshots(): Snapshot[] { return this.snapshotStore.list(); }
+  /** Yieldable capture for public finish; legacy internal sync API remains compatible. */
+  createSnapshotAsync(label: string, paths?: string[]): Promise<Snapshot> {
+    const selected = Array.isArray(paths) ? [...paths] : paths;
+    return this._withMutationAsync(() => drainStepsAsync(this.createSnapshotSteps(label, selected)));
+  }
+
+  private *createSnapshotSteps(label: string, paths?: string[]): Generator<void, Snapshot, void> {
+    const captured = yield* this.captureSnapshotSteps(paths);
+    return yield* this.snapshotStore.putSteps(label, captured.version, captured.files, captured.validate);
+  }
+
+  listSnapshots(): Snapshot[] { this.assertReadable(); return this.snapshotStore.list(); }
   /** Internal frozen material only: never an automatic AI, wire, or log payload. */
-  readSnapshot(snapshotId: string): FrozenSnapshot { return this.snapshotStore.read(snapshotId); }
+  readSnapshot(snapshotId: string): FrozenSnapshot { this.assertReadable(); return this.snapshotStore.read(snapshotId); }
 
   restoreSnapshot(_snapshotId: string, _paths: string[], _auth: MutationAuth): Snapshot {
     throw new AppError(403, 'WRITE_GATE_REQUIRED', 'Only WriteGate may authorize snapshot restoration.');
   }
 
   /** @internal WriteGate is the sole authority; expected version is the ORIGINAL proposal version. */
-  _restoreSnapshot(snapshotId: string, paths: string[], expectedWorkspaceVersion: number, authorize: () => void): Snapshot {
+  _restoreSnapshot(snapshotId: string, paths: string[], expectedWorkspaceVersion: number, authorize: () => void): Promise<Snapshot> {
+    return drainStepsAsync(this.restoreSnapshotSteps(snapshotId, paths, expectedWorkspaceVersion, authorize));
+  }
+
+  private *restoreSnapshotSteps(snapshotId: string, paths: string[], expectedWorkspaceVersion: number, authorize: () => void): Generator<void, Snapshot, void> {
     this._assertWritable();
     if (!Number.isSafeInteger(expectedWorkspaceVersion) || expectedWorkspaceVersion < 0) throw new AppError(400, 'INVALID_VERSION', 'A nonnegative expectedWorkspaceVersion is required.');
-    this.snapshotStore.paths(paths, false);
-    const source = this.snapshotStore.read(snapshotId);
+    yield* this.snapshotStore.pathSteps(paths, false);
+    const source = yield* this.snapshotStore.readSteps(snapshotId);
     const sourceFiles = new Map(source.files.map(f => [f.path, f]));
     if (paths.some(p => !sourceFiles.has(p))) throw new AppError(400, 'INVALID_SNAPSHOT_PATHS', 'Restore is limited to an explicit subset of the snapshot.');
-    this.scanExternal(); authorize();
+    yield* this.scanSteps(); authorize();
     if (this.workspaceVersion !== expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Proposal workspace version is stale.');
-    let backup: Snapshot, captured: ReturnType<WorkspaceService['captureSnapshot']>;
+    let backup: Snapshot, captured: ReturnType<WorkspaceService['captureSnapshotSteps']> extends Generator<void, infer T, void> ? T : never;
     try {
-      captured = this.captureSnapshot(paths);
-      backup = this.snapshotStore.put('Backup before restore ' + snapshotId, captured.version, captured.files, () => { captured.validate(); authorize(); });
+      captured = yield* this.captureSnapshotSteps(paths);
+      backup = yield* this.snapshotStore.putSteps('Backup before restore ' + snapshotId, captured.version, captured.files, function* () { yield* captured.validate(); authorize(); });
     } catch (error) {
       if (error instanceof AppError && ['DISK_CONFLICT', 'WORKSPACE_VERSION_CONFLICT', 'STALE_EPOCH', 'LEASE_REQUIRED', 'SESSION_MISMATCH', 'WRITE_OWNER_CONFLICT'].includes(error.code)) throw error;
       const failure = new AppError(503, 'SNAPSHOT_BACKUP_FAILED', 'Durable backup failed; task files were not modified.');
       failure.cause = error; throw failure;
     }
-    const preflight = () => {
-      captured.validate(); authorize();
-      if (this.workspaceVersion !== expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Proposal workspace version changed before restore.');
-    };
-    preflight();
+    const self = this;
+    function* preflight(): Generator<void, void, void> {
+      yield* captured.validate(); authorize();
+      if (self.workspaceVersion !== expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Proposal workspace version changed before restore.');
+    }
+    yield* preflight();
     try {
-      this.snapshotJournal.run(captured.files, paths.map(p => sourceFiles.get(p)!), backup.snapshotId, authorize, preflight);
+      yield* this.snapshotJournal.runSteps(captured.files, paths.map(p => sourceFiles.get(p)!), backup.snapshotId, authorize, preflight);
     } catch (error) {
-      try { this.recoveryRequired = this.snapshotJournal.hasPending(); } catch { this.recoveryRequired = true; }
-      if (!this.recoveryRequired) this.scanExternal();
+      try { this.recoveryRequired = yield* this.snapshotJournal.pendingSteps(); } catch { this.recoveryRequired = true; }
+      if (!this.recoveryRequired) yield* this.scanSteps();
       throw error;
     }
-    this.scanExternal(); // post-close stamps only; no historical document version is replayed
+    yield* this.scanSteps(); this.refreshWatchers(); // post-close stamps only; no historical document version is replayed
     return backup;
   }
 
