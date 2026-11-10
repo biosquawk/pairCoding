@@ -15,6 +15,11 @@ export interface LiveOptions {
 type Draft = { content: string; baseVersion: number };
 type Flight = { messageId: string; content: string; timer?: ReturnType<typeof setTimeout> };
 type Save = { draft: Draft; flight?: Flight; timer?: ReturnType<typeof setTimeout>; conflict: boolean };
+type ProposalDecision = {
+  messageId: string; sessionId: string; clientId: string; proposalId: string; accepted: boolean;
+  raw: string; wait: Promise<void>; done: () => void; timer?: ReturnType<typeof setTimeout>;
+  notice: string | null; disconnected: boolean; replayed: boolean;
+};
 const id = () => globalThis.crypto.randomUUID();
 
 // UTF-16 positions, exactly as Monaco and the wire contract. Reject clamped/invalid ranges.
@@ -63,7 +68,11 @@ export class LiveBackend {
   private vetoPending: string | null = null;
   private vetoCutoff: { sessionId: string; epoch: number } | null = null;
   private vetoTimer?: ReturnType<typeof setTimeout>;
-  private commandPending = new Map<string, { done: () => void; fail: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  // One unresolved user decision, including its ORIGINAL immutable wire bytes.
+  // A deadline stops waiting, not the remote effect or ACK correlation.
+  private proposalDecision: ProposalDecision | null = null;
+  private decisionResultError: string | null = null;
+  private helloSnapshot: { ws: Socket; sessionId: string; clientId: string } | null = null;
   private recoveryKey = '';
   private generation = 0;
 
@@ -144,12 +153,23 @@ export class LiveBackend {
       if (!this.token) throw new Error('Brak tokenu lokalnego serwera. Otwórz URL launchera lub uruchom backend.');
       const [project, session] = await Promise.all([this.http<Wire.Project>('/api/project'), this.http<Wire.Session>('/api/session')]);
       if (this.stopped) return;
-      if (this.session && this.session.sessionId !== session.sessionId) { this.lastSeq = 0; this.invalidInterventions.clear(); }
+      if (this.session && this.session.sessionId !== session.sessionId) {
+        this.lastSeq = 0; this.invalidInterventions.clear();
+        const decision = this.proposalDecision;
+        if (decision) {
+          clearTimeout(decision.timer); decision.done(); this.proposalDecision = null;
+          this.decisionResultError = 'SESSION_REPLACED: Sesja uległa zmianie lub serwer został uruchomiony ponownie; wynik nieznany dla poprzedniej decyzji. Nie ponowiono operacji. Sprawdź pliki i kopie odzyskiwania.';
+          this.fail(new Error(this.decisionResultError));
+        }
+      }
       this.project = project; this.session = session;
       const ws = this.socketFactory(`${this.baseUrl.replace(/^http/, 'ws')}/ws/session`);
       this.ws = ws;
       this.connectionTimer = setTimeout(() => { if (!this.synced) ws.close(); }, 5000);
-      ws.onopen = () => { if (ws === this.ws) { try { this.send('HELLO', { token: this.token!, lastServerSeq: this.lastSeq }); } catch (error) { this.fail(error); ws.close(); } } };
+      ws.onopen = () => { if (ws === this.ws) { try {
+        this.helloSnapshot = { ws, sessionId: this.session!.sessionId, clientId: this.clientId };
+        this.send('HELLO', { token: this.token!, lastServerSeq: this.lastSeq });
+      } catch (error) { this.helloSnapshot = null; this.fail(error); ws.close(); } } };
       ws.onmessage = event => {
         if (ws !== this.ws) return;
         try { this.receive(JSON.parse(String(event.data))); } catch (error) { this.fail(error); this.resync(); }
@@ -165,8 +185,11 @@ export class LiveBackend {
     this.synced = false; this.preparing = null; this.pendingSteps.clear(); this.generation++;
     clearTimeout(this.connectionTimer); clearInterval(this.tick);
     for (const save of this.saves.values()) { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; }
-    for (const cmd of this.commandPending.values()) { clearTimeout(cmd.timer); cmd.fail(new Error('Połączenie utracone; wynik komendy jest nieznany.')); }
-    this.commandPending.clear();
+    this.helloSnapshot = null;
+    if (this.proposalDecision) {
+      this.proposalDecision.disconnected = true;
+      this.unknownDecision(this.proposalDecision, 'Połączenie utracone; wynik nieznany dla decyzji. Połącz ponownie, aby odczytać wcześniejszy wynik.');
+    }
     this.persist(); this.publish();
     if (this.retries < 3) {
       const delay = [500, 1000, 2000][this.retries++];
@@ -181,7 +204,8 @@ export class LiveBackend {
     this.stopped = true; this.generation++;
     clearTimeout(this.reconnectTimer); clearTimeout(this.connectionTimer); clearTimeout(this.vetoTimer); clearInterval(this.tick);
     this.saves.forEach(s => { clearTimeout(s.timer); clearTimeout(s.flight?.timer); });
-    this.commandPending.forEach(cmd => { clearTimeout(cmd.timer); cmd.fail(new Error('Klient zamknięty.')); }); this.commandPending.clear();
+    if (this.proposalDecision) { clearTimeout(this.proposalDecision.timer); this.proposalDecision.done(); }
+    this.proposalDecision = null; this.helloSnapshot = null; this.decisionResultError = null;
     this.persist(); this.ws?.close(); this.ws = null;
   }
   private projectState(project: Wire.Project) {
@@ -242,6 +266,7 @@ export class LiveBackend {
   }
   private async snapshot(bundle: Wire.SessionBundle, seq: number) {
     const generation = ++this.generation;
+    const hello = this.helloSnapshot; this.helloSnapshot = null;
     this.synced = false; this.lastSeq = seq;
     this.saves.forEach(save => { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; save.timer = undefined; });
     this.documents.clear(); this.loadErrors.clear(); this.projectState(bundle.project); this.restoreDrafts();
@@ -280,7 +305,12 @@ export class LiveBackend {
         }
       }
       if (generation !== this.generation || this.stopped) return;
-      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer); this.state.connectionError = readErrors[0] ?? null;
+      // Keep UNKNOWN/terminal outcome visible even if a background task-file read
+      // failed; retain that independent failure for after the decision resolves.
+      if (this.proposalDecision && readErrors[0]) this.decisionResultError ??= readErrors[0];
+      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer);
+      this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError ?? readErrors[0] ?? null;
+      if (hello && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) this.reconcileDecision(bundle);
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -392,8 +422,22 @@ export class LiveBackend {
   }
   private ack(p: ServerPayloads['ACK']) {
     this.state.workspaceVersion = Math.max(this.state.workspaceVersion, p.workspaceVersion);
-    const cmd = this.commandPending.get(p.replyTo);
-    if (cmd) { clearTimeout(cmd.timer); this.commandPending.delete(p.replyTo); p.status === 'REJECTED' ? cmd.fail(new Error(`${p.error?.code}: ${p.error?.message}`)) : cmd.done(); }
+    const decision = this.proposalDecision;
+    if (decision?.messageId === p.replyTo && decision.sessionId === this.session?.sessionId && decision.clientId === this.clientId) {
+      clearTimeout(decision.timer); this.proposalDecision = null; decision.done();
+      this.proposals.delete(decision.proposalId);
+      if (this.state.activeProposal?.id === decision.proposalId) this.state.activeProposal = null;
+      this.state.chatEntries = this.state.chatEntries.map(c => c.proposal?.id === decision.proposalId ? { ...c, proposal: undefined } : c);
+      if (p.status === 'REJECTED') {
+        // Cached rejection is still rejection, including RECOVERY_REQUIRED.
+        this.decisionResultError = `${p.error?.code ?? 'PROPOSAL_REJECTED'}: ${p.error?.message ?? 'Decyzja odrzucona.'}`;
+        this.fail(new Error(this.decisionResultError));
+      } else {
+        if (decision.notice && this.state.connectionError === decision.notice) this.state.connectionError = this.decisionResultError;
+        else if (this.state.connectionError) this.decisionResultError = this.state.connectionError;
+        if (decision.accepted) this.resync();
+      }
+    }
     if (p.replyTo === this.vetoPending && p.status !== 'REJECTED') {
       this.vetoPending = null; this.vetoCutoff = null; clearTimeout(this.vetoTimer);
       if (this.session) { this.session.controlEpoch = p.controlEpoch; this.session.writeOwner = 'STUDENT'; }
@@ -544,21 +588,48 @@ export class LiveBackend {
     } catch (error) { this.fail(error); }
   }
   async respondToProposal(proposalId: string, accepted: boolean) {
+    // Repeated/opposite clicks cannot replace an unresolved envelope or consent.
+    if (this.proposalDecision) return this.proposalDecision.wait;
     const proposal = this.proposals.get(proposalId); if (!proposal) return;
-    try {
-      await this.wsCommand('PROPOSAL_RESPONSE', { proposalId, accepted, basedOnWorkspaceVersion: proposal.basedOnWorkspaceVersion });
-      this.proposals.delete(proposalId); this.state.activeProposal = null;
-      this.state.chatEntries = this.state.chatEntries.map(c => c.proposal?.id === proposalId ? { ...c, proposal: undefined } : c); this.publish();
-      if (accepted) { this.resync(); }
-    } catch (error) { this.fail(error); }
+    if (!this.synced || !this.session || this.ws?.readyState !== 1 || this.stopped) {
+      this.fail(new Error('Brak zsynchronizowanej sesji. Nie wysłano decyzji.')); return;
+    }
+    const messageId = id(), sessionId = this.session.sessionId;
+    const raw = JSON.stringify({ protocolVersion: '3.0', messageId, sessionId, clientId: this.clientId, type: 'PROPOSAL_RESPONSE',
+      payload: { proposalId, accepted, basedOnWorkspaceVersion: proposal.basedOnWorkspaceVersion } });
+    let done!: () => void;
+    const wait = new Promise<void>(resolve => { done = resolve; });
+    const decision: ProposalDecision = { messageId, sessionId, clientId: this.clientId, proposalId, accepted, raw, wait, done,
+      notice: null, disconnected: false, replayed: false };
+    this.proposalDecision = decision; this.decisionDeadline(decision);
+    try { this.ws.send(raw); }
+    catch { this.unknownDecision(decision, 'Nie potwierdzono wysłania decyzji; wynik nieznany. Połącz ponownie, aby sprawdzić stan.'); }
+    return wait;
   }
-  private wsCommand(type: string, payload: object) {
-    const messageId = id();
-    return new Promise<void>((done, fail) => {
-      const timer = setTimeout(() => { this.commandPending.delete(messageId); fail(new Error('Brak ACK decyzji; wynik nieznany. Połącz ponownie, aby sprawdzić stan.')); }, 5000);
-      this.commandPending.set(messageId, { done, fail, timer });
-      try { this.send(type, payload, messageId); } catch (error) { clearTimeout(timer); this.commandPending.delete(messageId); fail(error); }
-    });
+  private decisionDeadline(decision: ProposalDecision) {
+    clearTimeout(decision.timer);
+    decision.timer = setTimeout(() => this.unknownDecision(decision,
+      'Brak ACK decyzji; wynik nieznany. Nie ponawiaj zgody. Połącz ponownie, aby odczytać wcześniejszy wynik.'), 5000);
+  }
+  private unknownDecision(decision: ProposalDecision, notice: string) {
+    if (this.proposalDecision !== decision || this.stopped) return;
+    clearTimeout(decision.timer); decision.timer = undefined;
+    decision.notice = notice; decision.done(); this.fail(new Error(notice));
+  }
+  private reconcileDecision(bundle: Wire.SessionBundle) {
+    const decision = this.proposalDecision;
+    if (!decision?.disconnected || decision.replayed || decision.sessionId !== bundle.session.sessionId || decision.clientId !== this.clientId) return;
+    // ONLY a fresh authorized snapshot after our new HELLO is eligible. A live
+    // proposal might execute again after ledger loss: never replay while present.
+    if (bundle.proposals.some(proposal => proposal.proposalId === decision.proposalId)) {
+      this.unknownDecision(decision, 'Decyzja nadal ma widoczną propozycję; wynik nieznany. Nie ponowiono operacji. Sprawdź stan i kopie odzyskiwania.'); return;
+    }
+    // Absent proposal is NOT success. Identical bytes can only read the existing
+    // outcome ledger (or fail STALE if missing); no new ID/version/approval.
+    decision.replayed = true;
+    this.decisionDeadline(decision);
+    try { this.ws!.send(decision.raw); }
+    catch { this.unknownDecision(decision, 'Nie odczytano wcześniejszego wyniku decyzji; wynik nieznany. Nie ponowiono zgody.'); }
   }
   dismissHintBubble() { this.state.activeHintBubble = null; this.publish(); }
   updateBubblePos(x: number, y: number) { if (this.state.activeHintBubble) this.state.activeHintBubble = { ...this.state.activeHintBubble, posX: x, posY: y }; this.publish(); }
