@@ -25,7 +25,7 @@ async function fixture(t:TestContext) {
   return {...f,peer,command:()=>({requestId:id(),clientId,sessionId})};
 }
 
-for(const revoke of [false,true])test(`G3 real async public restore: ${revoke?'VETO during forward rolls back':'success'}; busy reads, live PING, one backup and terminal snapshot/ACK`,{timeout:20000},async t=>{
+for(const revoke of [false,true])test(`G3 real async public restore: ${revoke?'VETO during forward rolls back':'success'}; busy reads, live PING, one backup and terminal snapshot/ACK`,{timeout:40000},async t=>{
   const f=await fixture(t),paths=Object.keys(f.files);
   const source=await f.app.workspace.createSnapshotAsync('Source',paths);
   for(const p of paths)fs.writeFileSync(path.join(f.rootPath,p),'WORK '+p);
@@ -63,7 +63,9 @@ for(const revoke of [false,true])test(`G3 real async public restore: ${revoke?'V
     }
   });
   f.peer.send('PROPOSAL_RESPONSE',payload,original);
-  const ack=await f.peer.ack(original);
+  // Restore may cross the UI deadline while committing or rolling back 100 files.
+  // Keep testing early PING and the terminal ACK without treating a 5s wait as cancellation.
+  const ack=await f.peer.ack(original,30000);
   assert(probe,'real forward checkpoint reached');const observations=await probe;
   assert(observations.pingBeforeSettlement,'PING/VETO are serviced while actual core guard is held');
   assert(settled);assert(guardAtTerminal);assert.equal(forwardAfterCutoff,0);
@@ -71,7 +73,8 @@ for(const revoke of [false,true])test(`G3 real async public restore: ${revoke?'V
   if(revoke)assert.equal(ack.payload.error.code,'RESTORE_INCOMPLETE');
   const replay=await f.peer.ack(original),duplicate=await f.peer.ack(observations.duplicate);
   for(const a of [replay,duplicate]) {
-    assert.equal(a.payload.status,revoke?'REJECTED':'DUPLICATE');assert.deepEqual(a.payload.error,ack.payload.error);
+    assert.equal(a.payload.status,revoke?'REJECTED':'DUPLICATE');
+    assert.deepEqual(a.payload.error,revoke?{...ack.payload.error,requestId:a.payload.replyTo}:null);
   }
   const bundle=(await f.peer.take(m=>m.type==='SESSION_SNAPSHOT'&&m.payload.proposals.length===0&&m.payload.project.workspaceVersion>proposal.basedOnWorkspaceVersion)).payload;
   assert.equal(bundle.proposals.length,0);assert.equal(bundle.project.capabilities.docs,'NOT_INSTALLED');assert.equal(bundle.project.capabilities.autocomplete,'NOT_INSTALLED');

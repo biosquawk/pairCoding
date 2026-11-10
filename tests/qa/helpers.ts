@@ -163,9 +163,9 @@ export class Peer {
       sessionId: this.fixture.sessionId, clientId: this.clientId, type, payload }));
     return messageId;
   }
-  async take(match: Match): Promise<Frame> {
+  async take(match: Match, timeoutMs = DEADLINE): Promise<Frame> {
     return new Promise<Frame>((resolve, reject) => {
-      const timer = setTimeout(() => { this.waits.delete(check); reject(new Error('WS matching-frame timeout')); }, DEADLINE);
+      const timer = setTimeout(() => { this.waits.delete(check); reject(new Error('WS matching-frame timeout')); }, timeoutMs);
       const check = () => {
         const index = this.frames.findIndex(match);
         if (index >= 0) {
@@ -178,7 +178,7 @@ export class Peer {
       this.waits.add(check); check();
     });
   }
-  ack(messageId: string) { return this.take(frame => frame.type === 'ACK' && frame.payload.replyTo === messageId); }
+  ack(messageId: string, timeoutMs = DEADLINE) { return this.take(frame => frame.type === 'ACK' && frame.payload.replyTo === messageId, timeoutMs); }
   close() { this.socket.terminate(); }
   assertProtocol() { assert.deepEqual(this.violations, []); }
 }
