@@ -15,6 +15,17 @@ export interface LiveOptions {
 type Draft = { content: string; baseVersion: number };
 type Flight = { messageId: string; content: string; timer?: ReturnType<typeof setTimeout> };
 type Save = { draft: Draft; flight?: Flight; timer?: ReturnType<typeof setTimeout>; conflict: boolean };
+type ProposalDecision = {
+  messageId: string; sessionId: string; clientId: string; proposalId: string; accepted: boolean;
+  raw: string; wait: Promise<void>; done: () => void; timer?: ReturnType<typeof setTimeout>;
+  notice: string | null; disconnected: boolean; replayed: boolean;
+};
+type FinishAttempt = {
+  requestId: string; clientId: string; sessionId: string; expectedWorkspaceVersion: number; reason: EndReason;
+  unknown: boolean; replaced: boolean; notice: string | null; previousError: string | null;
+  observedReport: Wire.Report | null; reading: boolean; readAgain: boolean;
+};
+class HttpDeadlineError extends Error {}
 const id = () => globalThis.crypto.randomUUID();
 
 // UTF-16 positions, exactly as Monaco and the wire contract. Reject clamped/invalid ranges.
@@ -63,7 +74,13 @@ export class LiveBackend {
   private vetoPending: string | null = null;
   private vetoCutoff: { sessionId: string; epoch: number } | null = null;
   private vetoTimer?: ReturnType<typeof setTimeout>;
-  private commandPending = new Map<string, { done: () => void; fail: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  // One unresolved user decision, including its ORIGINAL immutable wire bytes.
+  // A deadline stops waiting, not the remote effect or ACK correlation.
+  private proposalDecision: ProposalDecision | null = null;
+  private decisionResultError: string | null = null;
+  private helloSnapshot: { ws: Socket; sessionId: string; clientId: string } | null = null;
+  private finishAttempt: FinishAttempt | null = null;
+  private finishStarting = false;
   private recoveryKey = '';
   private generation = 0;
 
@@ -89,7 +106,9 @@ export class LiveBackend {
     this.emit('state', this.state);
   }
   private fail(error: unknown) {
-    this.state.connectionError = error instanceof Error ? error.message : String(error); this.publish();
+    const message = error instanceof Error ? error.message : String(error);
+    if (this.finishAttempt && message !== this.finishAttempt.notice && message !== this.proposalDecision?.notice) this.finishAttempt.previousError = message;
+    this.state.connectionError = message; this.publish();
   }
   private key() { return `paircoach:draft:v3:${this.baseUrl}:${this.project?.rootPath}`; }
   private persist() {
@@ -123,7 +142,7 @@ export class LiveBackend {
       if (!response.ok) throw new Error(`${data.code ?? response.status}: ${data.message ?? 'Żądanie odrzucone'}`);
       return data as T;
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
+      if (controller.signal.aborted) throw new HttpDeadlineError('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
       throw error;
     } finally { clearTimeout(timer); }
   }
@@ -144,12 +163,24 @@ export class LiveBackend {
       if (!this.token) throw new Error('Brak tokenu lokalnego serwera. Otwórz URL launchera lub uruchom backend.');
       const [project, session] = await Promise.all([this.http<Wire.Project>('/api/project'), this.http<Wire.Session>('/api/session')]);
       if (this.stopped) return;
-      if (this.session && this.session.sessionId !== session.sessionId) { this.lastSeq = 0; this.invalidInterventions.clear(); }
+      if (this.session && this.session.sessionId !== session.sessionId) {
+        this.lastSeq = 0; this.invalidInterventions.clear();
+        const decision = this.proposalDecision;
+        if (decision) {
+          clearTimeout(decision.timer); decision.done(); this.proposalDecision = null;
+          this.decisionResultError = 'SESSION_REPLACED: Sesja uległa zmianie lub serwer został uruchomiony ponownie; wynik nieznany dla poprzedniej decyzji. Nie ponowiono operacji. Sprawdź pliki i kopie odzyskiwania.';
+          this.fail(new Error(this.decisionResultError));
+        }
+      }
+      this.replaceFinishSession(session.sessionId);
       this.project = project; this.session = session;
       const ws = this.socketFactory(`${this.baseUrl.replace(/^http/, 'ws')}/ws/session`);
       this.ws = ws;
       this.connectionTimer = setTimeout(() => { if (!this.synced) ws.close(); }, 5000);
-      ws.onopen = () => { if (ws === this.ws) { try { this.send('HELLO', { token: this.token!, lastServerSeq: this.lastSeq }); } catch (error) { this.fail(error); ws.close(); } } };
+      ws.onopen = () => { if (ws === this.ws) { try {
+        this.helloSnapshot = { ws, sessionId: this.session!.sessionId, clientId: this.clientId };
+        this.send('HELLO', { token: this.token!, lastServerSeq: this.lastSeq });
+      } catch (error) { this.helloSnapshot = null; this.fail(error); ws.close(); } } };
       ws.onmessage = event => {
         if (ws !== this.ws) return;
         try { this.receive(JSON.parse(String(event.data))); } catch (error) { this.fail(error); this.resync(); }
@@ -165,13 +196,19 @@ export class LiveBackend {
     this.synced = false; this.preparing = null; this.pendingSteps.clear(); this.generation++;
     clearTimeout(this.connectionTimer); clearInterval(this.tick);
     for (const save of this.saves.values()) { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; }
-    for (const cmd of this.commandPending.values()) { clearTimeout(cmd.timer); cmd.fail(new Error('Połączenie utracone; wynik komendy jest nieznany.')); }
-    this.commandPending.clear();
+    this.helloSnapshot = null;
+    if (this.proposalDecision) {
+      this.proposalDecision.disconnected = true;
+      this.unknownDecision(this.proposalDecision, 'Połączenie utracone; wynik nieznany dla decyzji. Połącz ponownie, aby odczytać wcześniejszy wynik.');
+    }
     this.persist(); this.publish();
     if (this.retries < 3) {
       const delay = [500, 1000, 2000][this.retries++];
       clearTimeout(this.reconnectTimer); this.reconnectTimer = setTimeout(() => void this.connect(), delay);
-    } else { this.state.connectionError = 'Offline. Draft jest lokalny, nie na dysku. Wybierz „Połącz ponownie”.'; this.publish(); }
+    } else {
+      this.state.connectionError = this.proposalDecision?.notice ?? this.finishAttempt?.notice ?? this.decisionResultError
+        ?? 'Offline. Draft jest lokalny, nie na dysku. Wybierz „Połącz ponownie”.'; this.publish();
+    }
   }
   private resync() {
     this.synced = false; this.pendingSteps.clear(); this.publish();
@@ -181,7 +218,9 @@ export class LiveBackend {
     this.stopped = true; this.generation++;
     clearTimeout(this.reconnectTimer); clearTimeout(this.connectionTimer); clearTimeout(this.vetoTimer); clearInterval(this.tick);
     this.saves.forEach(s => { clearTimeout(s.timer); clearTimeout(s.flight?.timer); });
-    this.commandPending.forEach(cmd => { clearTimeout(cmd.timer); cmd.fail(new Error('Klient zamknięty.')); }); this.commandPending.clear();
+    if (this.proposalDecision) { clearTimeout(this.proposalDecision.timer); this.proposalDecision.done(); }
+    this.proposalDecision = null; this.helloSnapshot = null; this.decisionResultError = null;
+    this.finishAttempt = null;
     this.persist(); this.ws?.close(); this.ws = null;
   }
   private projectState(project: Wire.Project) {
@@ -198,6 +237,7 @@ export class LiveBackend {
       content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path) || this.saves.has(f.path), loadError: this.loadErrors.get(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
   }
   private sessionState(session: Wire.Session) {
+    this.replaceFinishSession(session.sessionId);
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
     this.session = session;
     this.state.controlEpoch = session.controlEpoch; this.state.workspaceVersion = session.workspaceVersion;
@@ -242,6 +282,7 @@ export class LiveBackend {
   }
   private async snapshot(bundle: Wire.SessionBundle, seq: number) {
     const generation = ++this.generation;
+    const hello = this.helloSnapshot;
     this.synced = false; this.lastSeq = seq;
     this.saves.forEach(save => { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; save.timer = undefined; });
     this.documents.clear(); this.loadErrors.clear(); this.projectState(bundle.project); this.restoreDrafts();
@@ -280,7 +321,20 @@ export class LiveBackend {
         }
       }
       if (generation !== this.generation || this.stopped) return;
-      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer); this.state.connectionError = readErrors[0] ?? null;
+      // Keep UNKNOWN/terminal outcome visible even if a background task-file read
+      // failed; retain that independent failure for after the decision resolves.
+      if (this.proposalDecision && readErrors[0]) this.decisionResultError ??= readErrors[0];
+      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer);
+      if (this.finishAttempt && readErrors[0]) this.finishAttempt.previousError = readErrors[0];
+      this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError
+        ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readErrors[0] ?? null;
+      // Only the latest successfully installed generation consumes HELLO. An
+      // overlapping broadcast can supersede an earlier async task-file read.
+      if (hello && hello === this.helloSnapshot && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) {
+        this.helloSnapshot = null; this.reconcileDecision(bundle);
+      }
+      if (bundle.report) this.observeFinishReport(bundle.report);
+      else void this.reconcileFinish();
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -314,7 +368,7 @@ export class LiveBackend {
         break;
       }
       case 'COACH_STEP_EDIT': void this.coachStep(message.payload); break;
-      case 'SESSION_STATE': this.sessionState(message.payload); break;
+      case 'SESSION_STATE': this.sessionState(message.payload); void this.reconcileFinish(); break;
       case 'EXTERNAL_FILE_SYNC': {
         const p = message.payload; this.state.workspaceVersion = p.workspaceVersion;
         if (this.project) {
@@ -352,7 +406,9 @@ export class LiveBackend {
           logs: this.appendLogs(p) };
         break;
       }
-      case 'SESSION_REPORT': this.state.report = mapReport(message.payload); break;
+      case 'SESSION_REPORT':
+        if (message.payload.sessionId !== this.session?.sessionId) break;
+        this.state.report = mapReport(message.payload); this.observeFinishReport(message.payload); break;
       case 'ERROR': this.fail(new Error(`${message.payload.code}: ${message.payload.message}`)); break;
     }
     this.publish();
@@ -392,8 +448,22 @@ export class LiveBackend {
   }
   private ack(p: ServerPayloads['ACK']) {
     this.state.workspaceVersion = Math.max(this.state.workspaceVersion, p.workspaceVersion);
-    const cmd = this.commandPending.get(p.replyTo);
-    if (cmd) { clearTimeout(cmd.timer); this.commandPending.delete(p.replyTo); p.status === 'REJECTED' ? cmd.fail(new Error(`${p.error?.code}: ${p.error?.message}`)) : cmd.done(); }
+    const decision = this.proposalDecision;
+    if (decision?.messageId === p.replyTo && decision.sessionId === this.session?.sessionId && decision.clientId === this.clientId) {
+      clearTimeout(decision.timer); this.proposalDecision = null; decision.done();
+      this.proposals.delete(decision.proposalId);
+      if (this.state.activeProposal?.id === decision.proposalId) this.state.activeProposal = null;
+      this.state.chatEntries = this.state.chatEntries.map(c => c.proposal?.id === decision.proposalId ? { ...c, proposal: undefined } : c);
+      if (p.status === 'REJECTED') {
+        // Cached rejection is still rejection, including RECOVERY_REQUIRED.
+        this.decisionResultError = `${p.error?.code ?? 'PROPOSAL_REJECTED'}: ${p.error?.message ?? 'Decyzja odrzucona.'}`;
+        this.fail(new Error(this.decisionResultError));
+      } else {
+        if (decision.notice && this.state.connectionError === decision.notice) this.state.connectionError = this.decisionResultError;
+        else if (this.state.connectionError) this.decisionResultError = this.state.connectionError;
+        if (decision.accepted) this.resync();
+      }
+    }
     if (p.replyTo === this.vetoPending && p.status !== 'REJECTED') {
       this.vetoPending = null; this.vetoCutoff = null; clearTimeout(this.vetoTimer);
       if (this.session) { this.session.controlEpoch = p.controlEpoch; this.session.writeOwner = 'STUDENT'; }
@@ -544,28 +614,138 @@ export class LiveBackend {
     } catch (error) { this.fail(error); }
   }
   async respondToProposal(proposalId: string, accepted: boolean) {
+    // Repeated/opposite clicks cannot replace an unresolved envelope or consent.
+    if (this.proposalDecision) return this.proposalDecision.wait;
     const proposal = this.proposals.get(proposalId); if (!proposal) return;
-    try {
-      await this.wsCommand('PROPOSAL_RESPONSE', { proposalId, accepted, basedOnWorkspaceVersion: proposal.basedOnWorkspaceVersion });
-      this.proposals.delete(proposalId); this.state.activeProposal = null;
-      this.state.chatEntries = this.state.chatEntries.map(c => c.proposal?.id === proposalId ? { ...c, proposal: undefined } : c); this.publish();
-      if (accepted) { this.resync(); }
-    } catch (error) { this.fail(error); }
+    if (!this.synced || !this.session || this.ws?.readyState !== 1 || this.stopped) {
+      this.fail(new Error('Brak zsynchronizowanej sesji. Nie wysłano decyzji.')); return;
+    }
+    const messageId = id(), sessionId = this.session.sessionId;
+    const raw = JSON.stringify({ protocolVersion: '3.0', messageId, sessionId, clientId: this.clientId, type: 'PROPOSAL_RESPONSE',
+      payload: { proposalId, accepted, basedOnWorkspaceVersion: proposal.basedOnWorkspaceVersion } });
+    let done!: () => void;
+    const wait = new Promise<void>(resolve => { done = resolve; });
+    const decision: ProposalDecision = { messageId, sessionId, clientId: this.clientId, proposalId, accepted, raw, wait, done,
+      notice: null, disconnected: false, replayed: false };
+    this.proposalDecision = decision; this.decisionDeadline(decision);
+    try { this.ws.send(raw); }
+    catch { this.unknownDecision(decision, 'Nie potwierdzono wysłania decyzji; wynik nieznany. Połącz ponownie, aby sprawdzić stan.'); }
+    return wait;
   }
-  private wsCommand(type: string, payload: object) {
-    const messageId = id();
-    return new Promise<void>((done, fail) => {
-      const timer = setTimeout(() => { this.commandPending.delete(messageId); fail(new Error('Brak ACK decyzji; wynik nieznany. Połącz ponownie, aby sprawdzić stan.')); }, 5000);
-      this.commandPending.set(messageId, { done, fail, timer });
-      try { this.send(type, payload, messageId); } catch (error) { clearTimeout(timer); this.commandPending.delete(messageId); fail(error); }
-    });
+  private decisionDeadline(decision: ProposalDecision) {
+    clearTimeout(decision.timer);
+    decision.timer = setTimeout(() => this.unknownDecision(decision,
+      'Brak ACK decyzji; wynik nieznany. Nie ponawiaj zgody. Połącz ponownie, aby odczytać wcześniejszy wynik.'), 5000);
+  }
+  private unknownDecision(decision: ProposalDecision, notice: string) {
+    if (this.proposalDecision !== decision || this.stopped) return;
+    clearTimeout(decision.timer); decision.timer = undefined;
+    decision.notice = notice; decision.done(); this.fail(new Error(notice));
+  }
+  private reconcileDecision(bundle: Wire.SessionBundle) {
+    const decision = this.proposalDecision;
+    if (!decision?.disconnected || decision.replayed || decision.sessionId !== bundle.session.sessionId || decision.clientId !== this.clientId) return;
+    // ONLY a fresh authorized snapshot after our new HELLO is eligible. A live
+    // proposal might execute again after ledger loss: never replay while present.
+    if (bundle.proposals.some(proposal => proposal.proposalId === decision.proposalId)) {
+      this.unknownDecision(decision, 'Decyzja nadal ma widoczną propozycję; wynik nieznany. Nie ponowiono operacji. Sprawdź stan i kopie odzyskiwania.'); return;
+    }
+    // Absent proposal is NOT success. Identical bytes can only read the existing
+    // outcome ledger (or fail STALE if missing); no new ID/version/approval.
+    decision.replayed = true;
+    this.decisionDeadline(decision);
+    try { this.ws!.send(decision.raw); }
+    catch { this.unknownDecision(decision, 'Nie odczytano wcześniejszego wyniku decyzji; wynik nieznany. Nie ponowiono zgody.'); }
   }
   dismissHintBubble() { this.state.activeHintBubble = null; this.publish(); }
   updateBubblePos(x: number, y: number) { if (this.state.activeHintBubble) this.state.activeHintBubble = { ...this.state.activeHintBubble, posX: x, posY: y }; this.publish(); }
   clearCoachPointer() { this.state.activePointer = null; this.publish(); }
   async run(isTest: boolean) { try { await this.flushAll(); this.state.activeRun = mapRun(await this.http<Wire.Run>('/api/run', 'POST', this.commandBody({ mode: isTest ? 'RUN_TESTS' : 'RUN_MAIN', expectedWorkspaceVersion: this.state.workspaceVersion })), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
   async stopExecution() { if (!this.state.activeRun) return; try { this.state.activeRun = mapRun(await this.http<Wire.Run>(`/api/run/${encodeURIComponent(this.state.activeRun.runId)}/stop`, 'POST', this.commandBody()), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
-  async finishSession(reason: EndReason) { try { await this.flushAll(); this.state.report = mapReport(await this.http<Wire.Report>('/api/session/finish', 'POST', this.commandBody({ reason, expectedWorkspaceVersion: this.state.workspaceVersion }))); this.publish(); } catch (error) { this.fail(error); } }
+  async finishSession(reason: EndReason) {
+    // A second click is NOT permission to repeat an unresolved HTTP mutation.
+    if (this.finishStarting || this.finishAttempt || this.stopped) return;
+    this.finishStarting = true;
+    let attempt: FinishAttempt | null = null;
+    try {
+      await this.flushAll();
+      if (this.stopped) return;
+      const body = this.commandBody({ reason, expectedWorkspaceVersion: this.state.workspaceVersion });
+      attempt = { ...body, reason, expectedWorkspaceVersion: this.state.workspaceVersion,
+        unknown: false, replaced: false, notice: null,
+        previousError: this.state.connectionError === this.proposalDecision?.notice ? null : this.state.connectionError,
+        observedReport: null, reading: false, readAgain: false };
+      this.finishAttempt = attempt;
+      const report = await this.http<Wire.Report>('/api/session/finish', 'POST', body);
+      if (this.finishAttempt !== attempt || this.stopped) return;
+      if (attempt.replaced || !this.finishReportMatches(attempt, report)) { this.unknownFinish(attempt); return; }
+      this.state.report = mapReport(this.latestFinishReport(attempt, report)); this.finishAttempt = null; this.publish();
+    } catch (error) {
+      if ((attempt && this.finishAttempt !== attempt) || this.stopped) return;
+      if (attempt && error instanceof HttpDeadlineError) this.unknownFinish(attempt);
+      else { if (attempt) this.finishAttempt = null; this.fail(error); }
+    } finally { this.finishStarting = false; }
+  }
+  private unknownFinish(attempt: FinishAttempt) {
+    attempt.unknown = true;
+    attempt.notice = attempt.replaced
+      ? `SESSION_REPLACED: Wynik zakończenia poprzedniej sesji ${attempt.sessionId} jest nieznany. Nie ponowiono operacji.`
+      : `Brak odpowiedzi serwera (5 s). Wynik zakończenia jest nieznany; trwa sprawdzanie stanu, bez ponawiania operacji (${attempt.requestId}).`;
+    if (!this.proposalDecision?.notice && !this.decisionResultError && this.state.connectionError === attempt.previousError) this.fail(new Error(attempt.notice));
+    else this.publish();
+    void this.reconcileFinish();
+  }
+  private replaceFinishSession(sessionId: string) {
+    const attempt = this.finishAttempt;
+    if (!attempt || attempt.sessionId === sessionId || attempt.replaced) return;
+    attempt.replaced = true;
+    if (attempt.unknown) {
+      const ownNotice = this.state.connectionError === attempt.notice;
+      attempt.notice = `SESSION_REPLACED: Wynik zakończenia poprzedniej sesji ${attempt.sessionId} jest nieznany. Nie ponowiono operacji.`;
+      if (ownNotice) this.fail(new Error(attempt.notice));
+    }
+  }
+  private finishReportMatches(attempt: FinishAttempt, report: Wire.Report) {
+    return report.sessionId === attempt.sessionId && report.sourceWorkspaceVersion === attempt.expectedWorkspaceVersion
+      && report.reason === attempt.reason && !!report.reportId && !!report.snapshotId;
+  }
+  private latestFinishReport(attempt: FinishAttempt, report: Wire.Report) {
+    const observed = attempt.observedReport;
+    // Generation can complete while an older PENDING HTTP response is in flight.
+    return report.status === 'PENDING' && observed?.reportId === report.reportId
+      && observed.snapshotId === report.snapshotId && observed.status !== 'PENDING' ? observed : report;
+  }
+  private observeFinishReport(report: Wire.Report) {
+    const attempt = this.finishAttempt;
+    if (!attempt || attempt.replaced || !this.finishReportMatches(attempt, report)) return;
+    attempt.observedReport = report; void this.reconcileFinish();
+  }
+  private async reconcileFinish() {
+    const attempt = this.finishAttempt;
+    if (!attempt?.unknown || attempt.replaced || this.stopped || !this.synced || attempt.sessionId !== this.session?.sessionId) return;
+    if (attempt.reading) { attempt.readAgain = true; return; }
+    attempt.reading = true;
+    try {
+      // Read-only, authenticated reconciliation. 404 before durable capture is
+      // absence of evidence, NOT proof of failure and never permission to POST.
+      const report = await this.http<Wire.Report>(`/api/session/report?sessionId=${encodeURIComponent(attempt.sessionId)}`);
+      const session = await this.http<Wire.Session>('/api/session');
+      const observed = attempt.observedReport;
+      if (this.finishAttempt !== attempt || this.stopped || !this.synced || attempt.replaced
+        || this.session?.sessionId !== attempt.sessionId || session.sessionId !== attempt.sessionId
+        || session.lifecycle !== 'FINISHED' || session.workspaceVersion !== report.sourceWorkspaceVersion
+        || !observed || !this.finishReportMatches(attempt, report)
+        || report.reportId !== observed.reportId || report.snapshotId !== observed.snapshotId) return;
+      this.state.report = mapReport(this.latestFinishReport(attempt, report)); this.sessionState(session); this.finishAttempt = null;
+      if (this.decisionResultError === attempt.notice) this.decisionResultError = null;
+      if (this.state.connectionError === attempt.notice) this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError ?? attempt.previousError;
+      this.publish();
+    } catch { /* Keep UNKNOWN; a later report/state/authorized snapshot may retry GET only. */ }
+    finally {
+      attempt.reading = false;
+      if (attempt.readAgain) { attempt.readAgain = false; void this.reconcileFinish(); }
+    }
+  }
   async retryReport() { try { this.state.report = mapReport(await this.http<Wire.Report>('/api/session/report/retry', 'POST', this.commandBody())); this.publish(); } catch (error) { this.fail(error); } }
   async updateProjectSettings(settings: ProjectSettings) {
     if (!this.project) return false;
