@@ -36,12 +36,12 @@ test('RENAME real REST/WS: partial failure is 409 + external sync; replay repeat
   await wait(m => m.type === 'SESSION_SNAPSHOT');
   const request = { requestId: 'rename-partial', clientId: 'tab-1', sessionId: app.session.state.sessionId,
     controlEpoch: 0, operation: 'RENAME', path: 'main.ts', newPath: 'target.ts', baseVersion: 1, content: null };
-  const realUnlink = fs.unlinkSync; let removeCalls = 0;
-  t.mock.method(fs, 'unlinkSync', (file: fs.PathLike) => {
+  const realRename = fs.renameSync; let removeCalls = 0;
+  t.mock.method(fs, 'renameSync', (file: fs.PathLike, to: fs.PathLike) => {
     if (String(file) === source) {
       removeCalls++; throw Object.assign(new Error('injected sharing violation'), { code: 'EACCES' });
     }
-    return realUnlink(file);
+    return realRename(file, to);
   });
   syncBuiltinESMExports();
   async function post(body = request) {
@@ -63,6 +63,6 @@ test('RENAME real REST/WS: partial failure is 409 + external sync; replay repeat
   assert.equal(project.workspaceVersion, 1);
   assert.deepEqual(project.files.filter((f: any) => f.kind === 'FILE').map((f: any) => f.path).sort(), ['main.ts', 'target.ts']);
   const actual = { http: first.status, code: first.body.code, sourceRetained: true, targetRetained: true,
-    externalSync: sync.payload.operation, workspaceVersion: project.workspaceVersion, sourceUnlinkAttempts: removeCalls };
+    externalSync: sync.payload.operation, workspaceVersion: project.workspaceVersion, sourceCaptureAttempts: removeCalls };
   console.log('RENAME_PARTIAL_OBSERVED ' + JSON.stringify(actual));
 });
