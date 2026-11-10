@@ -4,7 +4,8 @@ import { parseContextPatterns, parseRunProfiles } from '../../src/services/setti
 const profile = { kind: 'RUN_MAIN', executable: 'node', args: ['main.js'], cwd: '.', timeoutMs: 1000, testReportFormat: 'NONE', testReportGlob: null };
 test('structured profiles preserve separate executable/args and explicit no-profile choice', () => {
   assert.deepEqual(parseRunProfiles(JSON.stringify([profile])), [profile]);
-  assert.doesNotThrow(() => parseRunProfiles(JSON.stringify([{ ...profile, testReportFormat: 'JUNIT_XML', testReportGlob: null }]))); // nullable in wire; runner determines outcome assert.deepEqual(parseRunProfiles('[]'), []);
+  assert.doesNotThrow(() => parseRunProfiles(JSON.stringify([{ ...profile, testReportFormat: 'JUNIT_XML', testReportGlob: null }]))); // nullable in wire; runner determines outcome
+  assert.deepEqual(parseRunProfiles('[]'), []);
   assert.deepEqual(parseContextPatterns('["**/*.ts","**/*.md"]'), ['**/*.ts', '**/*.md']); assert.deepEqual(parseContextPatterns('[]'), []);
 });
 test('settings validation rejects malformed/shell-string profiles, duplicates, bad timeouts and report formats', () => {
