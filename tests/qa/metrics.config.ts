@@ -2,7 +2,8 @@
 import { defineConfig } from '@playwright/test';
 import base from '../../playwright.config';
 
-export default defineConfig(base, {
+export default defineConfig({
+  ...base,
   testDir: './metrics', testMatch: 'reference.spec.ts', timeout: 180000,
   webServer: { ...base.webServer as object,
     command: 'npm run build && node --import tsx tests/qa/e2e/launch.ts',
