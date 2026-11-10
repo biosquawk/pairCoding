@@ -5,6 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { assertLauncherCanPublish, cdpBrowserPid, ownedEdgeSnapshot, cleanupOwnedEdge, selectOwnedEdge, type EdgeProcess } from './edge-ownership';
 
 export const edgeArguments = (profile: string) => [
   '--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1', '--user-data-dir=' + profile,
@@ -29,7 +30,8 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
   let child: ReturnType<typeof spawn> | undefined, browser: Browser | undefined, context: BrowserContext | undefined, page: Page | undefined;
   let setupFailed = false;
   let tracing = false, requestTracing = false, launchError: Error | undefined, endpoint: string | undefined;
-  let exited: Promise<unknown> = Promise.resolve();
+  let actual: EdgeProcess | undefined;
+  let verifiedCDP = false;
   const cleanupErrors: unknown[] = [];
   const provenance: Record<string, unknown> = { platform: process.platform, node: process.version, executable, profile,
     arguments: edgeArguments(profile), transport: 'ordinary Edge + connectOverCDP(noDefaults:true), default context; only TEST016/017',
@@ -37,16 +39,23 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
     recording: { owner: 'externalEdgePage', trace: 'on (browser + API requests)', screenshot: 'only-on-failure', runnerRecorder: 'off only for016/017 to prevent double-start' }, revision: process.env.PAIRCOACH_QA_REVISION ?? 'UNSPECIFIED' };
   try {
     child = spawn(executable, edgeArguments(profile), { shell: false, windowsHide: false, stdio: 'ignore' });
-    exited = new Promise(resolve => { child!.once('exit', resolve); child!.once('error', error => { launchError = error; resolve(error); }); });
-    provenance.pid = child.pid;
+    child.once('error', error => { launchError = error; });
+    provenance.pid = child.pid; provenance.launcherPid = child.pid;
     const portFile = path.join(profile, 'DevToolsActivePort');
     await expect.poll(() => {
       if (launchError) throw launchError;
-      if (child!.exitCode !== null || child!.signalCode !== null) throw new Error('Owned Edge exited during setup');
+      assertLauncherCanPublish(child!.exitCode, child!.signalCode);
       return fs.existsSync(portFile) && fs.readFileSync(portFile, 'utf8').length > 0;
     }, { message: 'Ordinary owned Edge publishes its loopback debugging port' }).toBe(true);
     endpoint = debugEndpoint(fs.readFileSync(portFile, 'utf8'));
     browser = await chromium.connectOverCDP(endpoint, { noDefaults: true, timeout: 5000 });
+    const identity = await browser.newBrowserCDPSession();
+    try {
+      const pid = cdpBrowserPid((await identity.send('SystemInfo.getProcessInfo')).processInfo);
+      actual = selectOwnedEdge(ownedEdgeSnapshot(profile, pid), profile, executable, child.pid!, pid);
+      if (!actual) throw new Error('No verified owned Edge browser');
+      verifiedCDP = true; provenance.browserPid = pid; provenance.browserProcess = actual;
+    } finally { await identity.detach(); }
     context = browser.contexts()[0]; if (!context) throw new Error('No ordinary Edge default context');
     await context.tracing.start({ screenshots: true, snapshots: true, sources: true }); tracing = true;
     await context.request.tracing.start({ sources: true }); requestTracing = true;
@@ -66,7 +75,7 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
       await expect.poll(() => page!.evaluate(() => document.hasFocus())).toBe(true);
     } finally { await window.detach(); }
     await use(page);
-  } catch (error) { setupFailed = true; throw error; } finally {
+  } catch (error) { setupFailed = true; provenance.setupOrTestError = String(error); throw error; } finally {
     // All paths, including partial setup failure, pass through owned-process cleanup.
     if (page && (setupFailed || info.status !== info.expectedStatus)) {
       try {
@@ -87,26 +96,31 @@ export async function externalEdgePage(use: (page: Page) => Promise<void>, info:
         await info.attach('request-trace', { path: trace, contentType: 'application/zip' });
       } catch (error) { cleanupErrors.push(error); }
     }
-    if (browser?.isConnected()) {
+    if (verifiedCDP && browser?.isConnected()) {
       try { await Promise.race([(async () => { const cdp = await browser!.newBrowserCDPSession(); await cdp.send('Browser.close'); })(), delay(1000)]); }
-      catch { /* Browser.close may disconnect before its reply; actual owned-process exit is checked below. */ }
+      catch { /* Browser.close can disconnect before its reply. CIM, not launcher exit, proves exit below. */ }
     }
-    if (child && child.pid && child.exitCode === null && child.signalCode === null) {
-      await Promise.race([exited, delay(1000)]);
-      if (child.exitCode === null && child.signalCode === null) {
-        // No process-name kill, no live8080/user profile: only the exact PID spawned above and its tree.
-        const taskkill = path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'taskkill.exe');
-        const killed = spawnSync(taskkill, ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, encoding: 'utf8', timeout: 5000 });
-        provenance.forcedTreeStop = { status: killed.status, error: killed.error?.message };
-        await Promise.race([exited, delay(1000)]);
-      }
-    }
-    if (child?.pid && child.exitCode === null && child.signalCode === null) cleanupErrors.push(new Error('Owned Edge is still running; profile retained for reconciliation'));
-    else {
-      try { fs.rmSync(profile, { recursive: true, force: true }); } catch (error) { cleanupErrors.push(error); }
-    }
-    if (browser) { try { await browser.close(); } catch (error) { cleanupErrors.push(error); } }
-    Object.assign(provenance, { exitCode: child?.exitCode, signal: child?.signalCode, profileRemoved: !fs.existsSync(profile), cleanupErrors: cleanupErrors.map(String) });
+    let released = false;
+    try {
+      if (child?.pid) {
+        actual = await cleanupOwnedEdge({
+          profile, executable, launcherPid: child.pid, actual, gracefulClose: verifiedCDP,
+          read: observedPid => ownedEdgeSnapshot(profile, observedPid),
+          launcherAlive: () => child!.exitCode === null && child!.signalCode === null && !launchError,
+          observed: process => { provenance.browserPid = process.pid; provenance.browserProcess = process; },
+          stop: ownedProcess => {
+            // Only the revalidated actual PID/tree, never a process-name kill or a de-elevation override.
+            const taskkill = path.join(process.env.SystemRoot ?? 'C:/Windows', 'System32', 'taskkill.exe');
+            const killed = spawnSync(taskkill, ['/PID', String(ownedProcess.pid), '/T', '/F'], { shell: false, windowsHide: true, encoding: 'utf8', timeout: 5000 });
+            provenance.forcedTreeStop = { pid: ownedProcess.pid, status: killed.status, error: killed.error?.message };
+          },
+          remove: () => fs.rmSync(profile, { recursive: true, force: true }),
+        });
+      } else { fs.rmSync(profile, { recursive: true, force: true }); } // spawn never created a process
+      released = true;
+    } catch (error) { cleanupErrors.push(error); }
+    if (verifiedCDP && browser) { try { await browser.close(); } catch (error) { cleanupErrors.push(error); } }
+    Object.assign(provenance, { exitCode: child?.exitCode, signal: child?.signalCode, launcherExitCode: child?.exitCode, launcherSignal: child?.signalCode, actualProcessReleased: released, profileRemoved: !fs.existsSync(profile), cleanupErrors: cleanupErrors.map(String) });
     await info.attach('owned-edge-environment-and-teardown', { body: Buffer.from(JSON.stringify(provenance, null, 2)), contentType: 'application/json' });
     if (cleanupErrors.length) throw new AggregateError(cleanupErrors, 'External Edge evidence/teardown failed');
   }
