@@ -40,8 +40,8 @@ test('already occupied capture slot before effect remains unchanged and blocks r
 
 test('real restore helper overhead is measured, not assumed Windows-equivalent', t => {
   const f = fixture(t), snap = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK');
-  let moves = 0; const real = childProcess.spawnSync;
-  t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => { moves++; return real(exe, args, options); }); syncBuiltinESMExports();
+  let moves = 0; const real = childProcess.spawn;
+  t.mock.method(childProcess, 'spawn', (exe: any, args: any, options: any) => { moves++; return real(exe, args, options); }); syncBuiltinESMExports();
   const start = performance.now(); f.restore(snap.snapshotId, ['a.ts']);
   console.log('NATIVE_RESTORE_OVERHEAD ' + JSON.stringify({platform: process.platform, files: 1, moves, elapsedMs: performance.now() - start}));
   assert.equal(moves, 1); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');

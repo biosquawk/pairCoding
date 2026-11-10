@@ -24,22 +24,18 @@ if (phase === 'FORWARD_LINKED' || phase === 'ROLLBACK_LINKED') {
   syncBuiltinESMExports();
 }
 if (phase === 'HELPER_LIVE' && process.platform === 'linux') {
-  const real = childProcess.spawnSync;
-  let injected = false;
-  childProcess.spawnSync = ((exe: any, args: any, options: any) => {
-    const move = JSON.parse(options.input);
-    if (!injected && move.from === path.join(root, 'a.ts') && move.to.endsWith('.captured')) {
-      injected = true;
+  const real = childProcess.spawn;
+  childProcess.spawn = ((exe: any, args: any, options: any) => {
+    const changed = [...args];
+    if (args[4] === 'serve') {
       const marker = JSON.stringify(path.join(root, '.paircoach', 'helper-live'));
-      const changed = [...args];
-      // Only scheduling around the REAL renameat2 is added. The orphan performs the
-      // actual syscall after its Node parent dies; it never receives new authorization.
-      changed[3] = `import os,time;open(${marker},'w').write(str(os.getpid()));time.sleep(1.5)\n` + changed[3] + `\nopen(${marker},'w').write('DONE')\n`;
+      const source = JSON.stringify(path.join(root, 'a.ts'));
+      changed[3] = changed[3].replace('    result = move(', `    if source == ${source} and target.endswith('.captured'):\n        with open(${marker},'w') as marker: marker.write(str(os.getpid()))\n        time.sleep(1.5)\n    result = move(`);
+      changed[3] = changed[3].replace("    code = 'OK'", `    if source == ${source} and target.endswith('.captured'):\n        with open(${marker},'w') as marker: marker.write('DONE')\n    code = 'OK'`);
       process.send?.({phase, index: 0, pid: process.pid});
-      return real(exe, changed, options);
     }
-    return real(exe, args, options);
-  }) as typeof childProcess.spawnSync;
+    return real(exe, changed, options);
+  }) as typeof childProcess.spawn;
   syncBuiltinESMExports();
 }
 let workspace: WorkspaceService | undefined, session: SessionController | undefined;

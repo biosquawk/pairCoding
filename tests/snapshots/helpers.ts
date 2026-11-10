@@ -26,3 +26,10 @@ export function fixture(t: any, files: Record<string, Buffer | string> = { 'a.ts
   const write = (p: string, content: string) => f.gate.write({ ...f.auth(), path: p, content, baseVersion: f.workspace.getDocument(p).version });
   return { ...f, parent, root, data, write, bytes: (p: string) => fs.readFileSync(path.join(root, p)), file: (p: string) => path.join(root, p) };
 }
+
+/** Scheduling hook for the real worker protocol; never performs/fakes a move. */
+export function moveRequest(from: fs.PathLike, to: fs.PathLike): {from: string; to: string} | undefined {
+  if (!/[/\\]request-\d+\.tmp$/.test(String(from)) || !/[/\\]request-\d+$/.test(String(to))) return;
+  const lines = fs.readFileSync(from, 'utf8').split('\n');
+  return {from: Buffer.from(lines[2], 'base64').toString(), to: Buffer.from(lines[3], 'base64').toString()};
+}

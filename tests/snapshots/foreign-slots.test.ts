@@ -1,3 +1,4 @@
+import {moveRequest} from './helpers';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -25,18 +26,12 @@ for (const phase of ['capture','rollback']) test(`K independent ${phase}: syscal
  if(phase==='rollback') f.w.on('snapshotCheckpoint',e=>{if(e.phase==='PUBLISHED'&&e.index===1)throw Error('force rollback');});
  t.after(()=>{t.mock.restoreAll();syncBuiltinESMExports();});
  t.mock.method(fs,'renameSync',(from:fs.PathLike,to:fs.PathLike)=>{
-   if(!slot&&String(from)===path.join(f.root,'a.ts')&&String(to).endsWith(phase==='capture'?'.captured':'.undone')){
-     slot=String(to);fs.writeFileSync(slot,'K UNIQUE FOREIGN '+phase,{flag:'wx'});
+   const request=moveRequest(from,to);
+   const source=request?.from??String(from),destination=request?.to??String(to);
+   if(!slot&&source===path.join(f.root,'a.ts')&&destination.endsWith(phase==='capture'?'.captured':'.undone')){
+     slot=destination;fs.writeFileSync(slot,'K UNIQUE FOREIGN '+phase,{flag:'wx'});
    }
    return real(from,to);
- });syncBuiltinESMExports();
- const realSpawn=childProcess.spawnSync;
- t.mock.method(childProcess,'spawnSync',(exe:any,args:any,options:any)=>{
-   const move=JSON.parse(options.input);
-   if(!slot&&move.from===path.join(f.root,'a.ts')&&move.to.endsWith(phase==='capture'?'.captured':'.undone')){
-     slot=move.to;fs.writeFileSync(slot,'K UNIQUE FOREIGN '+phase,{flag:'wx'});
-   }
-   return realSpawn(exe,args,options);
  });syncBuiltinESMExports();
  try{f.restore();}catch(e){error=e;}
  const found=slot&&fs.existsSync(slot)?fs.readFileSync(slot,'utf8'):null;

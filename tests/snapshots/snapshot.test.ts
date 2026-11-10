@@ -1,3 +1,4 @@
+import { moveRequest } from './helpers';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -247,10 +248,12 @@ for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${opera
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A'); f.write('b.ts', 'WORK B');
   let count = 0;
   if (operation === 'capture') {
-    const real = childProcess.spawnSync;
-    t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => {
-      const result = real(exe, args, options); // actual no-replace, child joined
-      if (JSON.parse(options.input).from === f.file('a.ts')) { count++; return { ...result, stdout: 'unknown result' }; }
+    const real = fs.lstatSync;
+    t.mock.method(fs, 'lstatSync', (file: any, options: any) => {
+      const result = real(file, options);
+      // Real worker has finished the real syscall and published a response, but
+      // the caller loses that response before observing its outcome.
+      if (!count && /[/\\]response-1$/.test(String(file))) { count++; throw Object.assign(Error('lost real response'), {code: 'EIO'}); }
       return result;
     });
   } else if (operation === 'publish') {
@@ -274,10 +277,11 @@ for (const operation of ['capture', 'publish', 'cleanup']) test(`unknown ${opera
 test('late foreign source replacement at actual capture syscall survives publicly and in retained material; no success', t => {
   const f = fixture(t), source = f.workspace.createSnapshot('Source'); f.write('a.ts', 'WORK A');
   let injected = false;
-  const real = childProcess.spawnSync;
-  t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => {
-    if (JSON.parse(options.input).from === f.file('a.ts') && !injected) { injected = true; fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'FOREIGN LATEST'); }
-    return real(exe, args, options);
+  const real = fs.renameSync;
+  t.mock.method(fs, 'renameSync', (from: fs.PathLike, to: fs.PathLike) => {
+    const request = moveRequest(from, to);
+    if (request?.from === f.file('a.ts') && !injected) { injected = true; fs.unlinkSync(f.file('a.ts')); fs.writeFileSync(f.file('a.ts'), 'FOREIGN LATEST'); }
+    return real(from, to);
   }); syncBuiltinESMExports();
   assert.throws(() => f.restore(source.snapshotId, ['a.ts']), code('RECOVERY_REQUIRED'));
   assert.equal(injected, true); assert.equal(f.bytes('a.ts').toString(), 'FOREIGN LATEST');

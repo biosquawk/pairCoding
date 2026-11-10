@@ -7,6 +7,7 @@ import type { MutationAuth } from './WriteGate';
 import { AppError } from './errors';
 import { SnapshotStorage, type FrozenSnapshot, snapshotAllowed, identity, snapshotFailure } from './SnapshotStorage';
 import { SnapshotJournal, type RestoreBefore } from './SnapshotJournal';
+import { LanguageFeatureRegistry } from './LanguageFeatureRegistry';
 
 const activeRoots = new Set<string>(); // synchronous guard shared by all instances in this server
 const MAX_BYTES = 1048576;
@@ -287,9 +288,7 @@ export class WorkspaceService extends EventEmitter {
 
   getProject(sessionId: string): Project {
     return { projectId: this.projectId, sessionId, rootPath: this.rootPath, workspaceVersion: this.workspaceVersion,
-      settings: structuredClone(this.settings), files: this.listFiles(), capabilities: {
-        canRunMain: this.settings.runProfiles.some(p => p.kind === 'RUN_MAIN'),
-        canRunTests: this.settings.runProfiles.some(p => p.kind === 'RUN_TESTS'), docs: 'NOT_INSTALLED', autocomplete: 'NOT_INSTALLED' } };
+      settings: structuredClone(this.settings), files: this.listFiles(), capabilities: new LanguageFeatureRegistry().getCapabilities(this.settings.runProfiles) };
   }
 
   updateSettings(settings: Settings): void {

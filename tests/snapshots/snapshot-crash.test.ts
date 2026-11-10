@@ -92,7 +92,7 @@ test('foreign public replacement between crash/restart is never overwritten/dele
   } finally { s.close(); w.close(); }
 });
 
-for (const tamper of ['manifest', 'captured', 'symlink-ancestor']) test(`untrusted journal ${tamper}: restart refuses effects and preserves outside/current bytes`, { timeout: 60000 }, async t => {
+for (const tamper of ['manifest', 'captured', 'symlink-ancestor', 'atomic-lock']) test(`untrusted journal ${tamper}: restart refuses effects and preserves outside/current bytes`, { timeout: 60000 }, async t => {
   const f = seed(t); await killAt(t, f, 'restore', 'PUBLISHED', '0');
   const base = f.file('.paircoach/snapshot-journal-v1');
   const operation = path.join(base, fs.readdirSync(base).find(n => n.startsWith('transaction-'))!);
@@ -101,6 +101,11 @@ for (const tamper of ['manifest', 'captured', 'symlink-ancestor']) test(`untrust
     const file = path.join(operation, 'intent.json'), envelope = JSON.parse(fs.readFileSync(file, 'utf8'));
     const payload = JSON.parse(envelope.payload); payload.entries[0].path = '../outside/a.ts'; envelope.payload = JSON.stringify(payload); fs.writeFileSync(file, JSON.stringify(envelope));
   } else if (tamper === 'captured') fs.writeFileSync(path.join(operation, '1.captured'), 'FOREIGN CAPTURED BYTES');
+  else if (tamper === 'atomic-lock') {
+    const session = path.join(operation, fs.readdirSync(operation).find(n => /^\.atomic-[a-f0-9-]{36}$/.test(n))!);
+    fs.renameSync(path.join(session, 'LOCK'), path.join(session, 'LOCK-ORIGINAL'));
+    fs.writeFileSync(path.join(session, 'LOCK'), 'FOREIGN LOCK IDENTITY');
+  }
   else { fs.renameSync(base, base + '-held'); fs.symlinkSync(outside, base, process.platform === 'win32' ? 'junction' : 'dir'); }
   const before = files(f);
   restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), before);
@@ -121,19 +126,14 @@ for (const action of ['restore', 'recover']) for (const boundary of ['ARMED', 'J
     if (action === 'recover') await killAt(t, f, 'restore', 'PUBLISHED', '0');
     const phase = `${action === 'restore' ? 'CAPTURE' : 'UNDO'}_MOVE_${boundary}`;
     await killAt(t, f, action, phase, '0');
-    if (boundary === 'ARMED') {
-      const before = files(f);
-      restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), before);
-      restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), before);
-      assert.ok(journalFiles(f).some(name => name.includes('.move-pending')));
-    } else {
-      restart(f); assert.deepEqual(files(f), expectedWork);
-      restart(f); assert.deepEqual(files(f), expectedWork);
-    }
+    // ARMED (request not sent) and JOINED (effect completed) both have
+    // deterministic metadata once STOP + lock barrier has quiesced the worker.
+    restart(f); assert.deepEqual(files(f), expectedWork);
+    restart(f); assert.deepEqual(files(f), expectedWork);
   });
 }
 
-test('live native helper survives parent hard kill: restart refuses concurrent rollback, all bytes retained', {timeout: 60000, skip: process.platform !== 'linux' && 'Linux real renameat2 orphan coordination; Windows separate native cases'}, async t => {
+test('live native helper survives parent hard kill: restart waits for real orphan then automatically restores all bytes', {timeout: 60000, skip: process.platform !== 'linux' && 'Linux real renameat2 orphan coordination; Windows separate native cases'}, async t => {
   const f = seed(t), marker = f.file('.paircoach/helper-live'); let helperPid = 0;
   await killAt(t, f, 'restore', 'HELPER_LIVE', '0', () => {
     const until = Date.now() + 10000;
@@ -142,15 +142,13 @@ test('live native helper survives parent hard kill: restart refuses concurrent r
     assert.ok(helperPid > 0); assert.doesNotThrow(() => process.kill(helperPid, 0));
   });
   assert.doesNotThrow(() => process.kill(helperPid, 0), 'actual helper is still alive after parent SIGKILL');
-  restart(f, 'RECOVERY_REQUIRED'); // must not roll back against a still-live helper
-  const until = Date.now() + 10000;
-  while (fs.readFileSync(marker, 'utf8') !== 'DONE' && Date.now() < until) await new Promise(r => setTimeout(r, 10));
+  restart(f); // STOP+lock barrier waits for in-flight real syscall, THEN rollback
   assert.equal(fs.readFileSync(marker, 'utf8'), 'DONE', 'orphan really executed original atomic syscall');
-  assert.deepEqual(files(f), {'a.ts': null, 'b.ts': expectedWork['b.ts']});
+  assert.deepEqual(files(f), expectedWork);
   const base = f.file('.paircoach/snapshot-journal-v1');
   const directory = path.join(base, fs.readdirSync(base).find(n => n.startsWith('transaction-'))!);
   assert.equal(fs.readFileSync(path.join(directory, '0.captured'), 'utf8'), expectedWork['a.ts']);
-  restart(f, 'RECOVERY_REQUIRED'); assert.deepEqual(files(f), {'a.ts': null, 'b.ts': expectedWork['b.ts']});
+  restart(f); assert.deepEqual(files(f), expectedWork);
   const readOnly = new WorkspaceService(f.root, f.data);
   try {
     const backup = readOnly.listSnapshots().find(s => s.snapshotId !== f.snapshot.snapshotId)!;
