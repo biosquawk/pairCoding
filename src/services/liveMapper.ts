@@ -3,7 +3,7 @@ import type { ActionProposal, ExecutionRun, ProjectFile, ProjectSettings, Sessio
 import type { ClientState } from './liveTypes';
 
 export function mapSettings(settings: Wire.Settings): ProjectSettings {
-  return { ...settings, taskFilePath: settings.taskFilePath ?? '', runProfiles: settings.runProfiles.map(p => ({
+  return { ...settings, wireRunProfiles: settings.runProfiles, contextPatterns: settings.contextPatterns, taskFilePath: settings.taskFilePath ?? '', runProfiles: settings.runProfiles.map(p => ({
     id: p.kind, name: p.kind === 'RUN_MAIN' ? 'Run Main' : 'Run Tests', command: [p.executable, ...p.args].join(' '), isTest: p.kind === 'RUN_TESTS'
   })) };
 }

@@ -5,6 +5,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { ProjectSettings, SnapshotItem, TaskMode } from '../types/paircoach';
+import { parseRunProfiles, parseContextPatterns } from '../services/settingsValidation';
 import { Bot, Code2, FileCheck, RotateCcw, Settings, X } from 'lucide-react';
 
 interface ProjectSettingsModalProps {
@@ -14,7 +15,7 @@ interface ProjectSettingsModalProps {
   rootPath?: string;
   onOpenProject?: (rootPath: string) => Promise<boolean>;
   onClose: () => void;
-  onSave: (updated: ProjectSettings) => void;
+  onSave: (updated: ProjectSettings) => void | Promise<boolean>;
   onRestoreSnapshot?: (id: string) => void;
 }
 
@@ -32,6 +33,10 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   const [folderPath, setFolderPath] = useState(rootPath ?? '');
   const [opening, setOpening] = useState(false);
   const [folderError, setFolderError] = useState('');
+  const [profilesJson, setProfilesJson] = useState('[]');
+  const [patternsJson, setPatternsJson] = useState('[]');
+  const [settingsError, setSettingsError] = useState('');
+  const [saving, setSaving] = useState(false);
   useEffect(() => { if (isOpen) { setFolderPath(rootPath ?? ''); setFolderError(''); } }, [isOpen, rootPath]);
   useEffect(() => {
     if (!isOpen) return;
@@ -62,22 +67,26 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
       setTaskMode(settings.taskMode);
       setTaskFilePath(settings.taskFilePath);
       setReviewNotesPath(settings.reviewNotesPath);
+      setProfilesJson(JSON.stringify(settings.wireRunProfiles ?? [], null, 2));
+      setPatternsJson(JSON.stringify(settings.contextPatterns ?? [], null, 2));
+      setSettingsError('');
 
     }
   }, [isOpen, settings]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    onSave({
-      ...settings,
-      aiConsent,
-      taskMode,
-      taskFilePath,
-      reviewNotesPath,
-    });
-    onClose();
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault(); setSettingsError('');
+    try {
+      const wireRunProfiles = parseRunProfiles(profilesJson);
+      const contextPatterns = parseContextPatterns(patternsJson);
+      setSaving(true);
+      const accepted = await onSave({ ...settings, aiConsent, taskMode, taskFilePath, reviewNotesPath, wireRunProfiles, contextPatterns });
+      if (accepted === false) setSettingsError('Serwer nie potwierdził ustawień. Sprawdź błąd połączenia u góry; formularz pozostaje otwarty.');
+      else onClose();
+    } catch (error) { setSettingsError(error instanceof Error ? error.message : 'Niepoprawne ustawienia.'); }
+    finally { setSaving(false); }
   };
 
   return (
@@ -94,7 +103,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="py-4 space-y-4 text-xs">
-          {onOpenProject && <fieldset disabled={opening} className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
+          {onOpenProject && <fieldset disabled={opening || saving} className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
             <label htmlFor="project-folder" className="block font-semibold">Lokalny folder zadania</label>
             <input id="project-folder" value={folderPath} onChange={event => setFolderPath(event.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1" placeholder="C:/Zadania/kata" />
             <p className="text-zinc-400">Pełna ścieżka na komputerze serwera. Nowy folder: plik challenge.md, zgoda AI wyłączona, bez odziedziczonych poleceń uruchamiania. Najpierw potwierdzimy autosave; konflikt blokuje otwarcie.</p>
@@ -194,6 +203,19 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             {settings.runProfiles.map((p) => p.name).join(', ')}
           </div>
 
+          <details className="p-3 rounded bg-zinc-950 border border-zinc-800">
+            <summary className="cursor-pointer font-semibold">Konfiguracja Run/Test i kontekstu AI</summary>
+            <p className="my-2 text-zinc-400">Zapisując ustawienia jawnie zatwierdzasz program i argumenty dla lokalnego folderu. Polecenia NIE są powłoką. Nie wklejaj sekretów. Brak raportu testów oznacza UNKNOWN, nie PASSED.</p>
+            <label htmlFor="run-profiles" className="block mb-1">Profile uruchamiania (JSON, [] = brak)</label>
+            <textarea id="run-profiles" value={profilesJson} onChange={event => setProfilesJson(event.target.value)} spellCheck={false} className="w-full h-48 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" />
+            <p className="text-zinc-500">Przykład (dostosuj executable i args do komputera):</p>
+            <pre className="whitespace-pre-wrap break-words text-[10px] text-zinc-400">{'[{"kind":"RUN_MAIN","executable":"node","args":["main.js"],"cwd":".","timeoutMs":10000,"testReportFormat":"NONE","testReportGlob":null}]'}</pre>
+            <label htmlFor="context-patterns" className="block mb-1 mt-3">Wzorce plików kontekstu AI (JSON)</label>
+            <textarea id="context-patterns" value={patternsJson} onChange={event => setPatternsJson(event.target.value)} spellCheck={false} className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" />
+            <p className="text-zinc-500">Np. ["**/*.ts", "**/*.md"]. Bez zgody AI nic nie jest wysyłane. Sekrety są wykluczone niezależnie od wzorców.</p>
+          </details>
+          {settingsError && <p role="alert" className="text-amber-300">{settingsError}</p>}
+
           {/* Kopie odzyskiwania (Snapshots) */}
           <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="flex items-center justify-between">
@@ -248,9 +270,10 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             </button>
             <button
               type="submit"
+              disabled={opening || saving}
               className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-sm"
             >
-              Zapisz Ustawienia
+              {saving ? 'Zapisywanie…' : 'Zapisz Ustawienia'}
             </button>
           </div>
         </form>

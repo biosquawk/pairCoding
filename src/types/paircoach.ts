@@ -40,6 +40,8 @@ export interface RunProfile {
 }
 
 export interface ProjectSettings {
+  wireRunProfiles?: import('../shared/protocol').RunProfile[];
+  contextPatterns?: string[];
   aiConsent: boolean;
   taskMode: TaskMode;
   taskFilePath: string;

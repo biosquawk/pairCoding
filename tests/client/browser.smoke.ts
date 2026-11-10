@@ -46,6 +46,23 @@ try {
   await page.reload(); await page.getByText('solution.ts', { exact: true }).first().click();
   await until(async () => (await page.locator('.monaco-editor .view-lines').innerText()).includes('browser smoke'), 'reload persisted disk');
   observations.push('reload shows confirmed disk content PASS');
+  await page.getByTitle('Ustawienia projektu (AI Consent, Task Mode, Profile)').click();
+  await page.getByText('Konfiguracja Run/Test i kontekstu AI', { exact: true }).click();
+  await page.getByLabel('Profile uruchamiania (JSON, [] = brak)').fill('["node main.js"]');
+  await page.getByRole('button', { name: 'Zapisz Ustawienia', exact: true }).click();
+  await until(() => page.getByRole('alert').filter({ hasText: /Profil 1:/ }).isVisible(), 'invalid profiles validation');
+  assert.deepEqual(app.workspace.settings.runProfiles, []);
+  const approved = [{ kind: 'RUN_MAIN', executable: 'node', args: ['main.js'], cwd: '.', timeoutMs: 1000, testReportFormat: 'NONE', testReportGlob: null }];
+  await page.getByLabel('Profile uruchamiania (JSON, [] = brak)').fill(JSON.stringify(approved));
+  await page.getByLabel('Wzorce plików kontekstu AI (JSON)').fill('["**/*.ts"]');
+  await page.getByRole('button', { name: 'Zapisz Ustawienia', exact: true }).click();
+  await until(() => app.workspace.settings.runProfiles.length === 1, 'real settings PUT');
+  await until(async () => !await page.getByRole('dialog').isVisible(), 'settings confirmed and closed');
+  assert.deepEqual(app.workspace.settings.runProfiles, approved);
+  observations.push('settings invalid profile blocked; valid structured executable/args saved to real backend PASS');
+  await page.getByTitle('Ustawienia projektu (AI Consent, Task Mode, Profile)').click();
+  assert.match(await page.getByLabel('Profile uruchamiania (JSON, [] = brak)').inputValue(), /main.js/);
+  await page.getByLabel('Zamknij ustawienia').click();
   await page.screenshot({ path: path.join(output, 'live-desktop.png') });
   // Explicitly delay the real CODE_CHANGED network send, not a fake service.
   let held = false;
