@@ -329,7 +329,8 @@ export class WorkspaceService extends EventEmitter {
   private temp(absolute: string, bytes: Buffer, mode: number): string {
     const temporary = path.join(path.dirname(absolute), TEMP_PREFIX + randomUUID() + '.tmp');
     const fd = fs.openSync(temporary, 'wx', mode);
-    try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); }
+    // open(mode) is filtered by umask; replacement/rename must retain source mode.
+    try { fs.fchmodSync(fd, mode); fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); }
     catch (error) { fs.closeSync(fd); fs.unlinkSync(temporary); throw error; }
     fs.closeSync(fd);
     return temporary;
@@ -390,12 +391,61 @@ export class WorkspaceService extends EventEmitter {
   }
 
   _rename(relative: string, newPath: string, baseVersion: number, actor: string, authorize: () => void): void {
-    this._fresh(relative, baseVersion);
+    const before = this._fresh(relative, baseVersion);
     const from = this._safePath(relative), to = this._safePath(newPath, true);
     if (fs.existsSync(to)) throw new AppError(409, 'FILE_EXISTS', 'Destination already exists.');
     if (!fs.existsSync(path.dirname(to))) throw new AppError(404, 'PARENT_NOT_FOUND', 'Create destination directory first.');
-    this._fresh(relative, baseVersion); this._safePath(newPath, true); authorize();
-    fs.renameSync(from, to);
+    // Publish an independent, fsynced copy: linking the source itself would leave
+    // dangerous aliases if removing the source failed (and change its ctime).
+    const temporary = this.temp(to, before.raw!, fs.statSync(from).mode & 0o777);
+    // Pin the published inode until the final check: without an open descriptor,
+    // unlink+create can immediately reuse its inode number, even with equal bytes.
+    let pin: number | undefined;
+    let published = false;
+    try {
+      let identity: fs.BigIntStats;
+      try {
+        pin = fs.openSync(temporary, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+        identity = fs.fstatSync(pin, { bigint: true });
+        this._fresh(relative, baseVersion); this._safePath(newPath, true); authorize();
+        // This is the no-clobber linearization point, not an existsSync check.
+        // renameSync would overwrite a destination created by an external IDE.
+        try { fs.linkSync(temporary, to); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+            throw new AppError(409, 'FILE_EXISTS', 'Destination appeared before rename.');
+          }
+          throw error;
+        }
+        published = true;
+      } finally {
+        fs.unlinkSync(temporary); // Drop only the private publication link.
+      }
+      // Publication and removal are two filesystem effects. Source freshness and
+      // authority must still hold after publication; a copy is not a fresh source.
+      this._safePath(relative); this._fresh(relative, baseVersion); authorize();
+      const destination = this.disk(newPath);
+      if (!destination?.stamp.startsWith(`${identity.dev}:${identity.ino}:`) ||
+          !destination.raw?.equals(before.raw!)) {
+        throw new AppError(409, 'DISK_CONFLICT', 'Rename destination changed after publication.');
+      }
+      fs.unlinkSync(from);
+    } catch (error) {
+      if (!published) throw error;
+      // No unlink(to), even after an inode check: Node has no atomic conditional
+      // unlink, and a foreign replacement could appear between check and cleanup.
+      // Preserve both paths, reconcile observable state, and never ACK success.
+      for (const relativePath of [relative, newPath]) {
+        try { this.external(relativePath, this.disk(relativePath)); }
+        catch (reconcileError) { this.emit('watcherError', reconcileError); }
+      }
+      try { this.refreshDirectories(); }
+      catch (reconcileError) { this.emit('watcherError', reconcileError); }
+      const incomplete = new AppError(409, 'RENAME_INCOMPLETE',
+        'Rename was partially published. No destination was rolled back. Reload both paths and preserve their contents before retrying.');
+      incomplete.cause = error;
+      throw incomplete;
+    } finally { if (pin !== undefined) fs.closeSync(pin); }
     this.records.delete(relative); this.nextVersion(relative);
     // A rename is one workspace mutation, but both path identities advance monotonically.
     this.committed(newPath, actor);
