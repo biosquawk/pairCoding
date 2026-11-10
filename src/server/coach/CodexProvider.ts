@@ -80,11 +80,14 @@ export class CodexCoachProvider implements CoachProvider {
         shell:false,windowsHide:true,detached:process.platform!=='win32',stdio:['pipe','pipe','pipe']});
       const running=child;
       return await new Promise<unknown>((resolve,reject)=>{
-        let bytes=0,errorBytes=0,pending='',answer:unknown,answers=0,completed=false,failure:string|undefined,kill:Promise<void>|undefined;
+        let bytes=0,errorBytes=0,pending='',answer:unknown,answers=0,completed=false,settled=false,failure:string|undefined,kill:Promise<void>|undefined;
         const stop=(code:string)=>{
           failure??=code;
-          if(kill||!running.pid||running.exitCode!==null||running.signalCode!==null)return;
-          if(process.platform==='win32') {
+          if(kill||settled)return;
+          // exit is not close: POSIX descendants can retain this group's pipes.
+          // On Windows an exited PID is no longer a safe taskkill tree root.
+          if(!running.pid||(process.platform==='win32'&&(running.exitCode!==null||running.signalCode!==null)))kill=Promise.resolve();
+          else if(process.platform==='win32') {
             kill=new Promise<void>(done=>{
               const exe=path.join(process.env.SystemRoot||'C:\\Windows','System32','taskkill.exe');
               const killer=spawn(exe,['/PID',String(running.pid),'/T','/F'],{shell:false,windowsHide:true,stdio:'ignore'});
@@ -96,6 +99,12 @@ export class CodexCoachProvider implements CoachProvider {
             try{process.kill(-running.pid,'SIGKILL');}catch{running.kill('SIGKILL');}
             kill=Promise.resolve();
           }
+          // A retained pipe must not keep decide pending after the kill budget.
+          // Windows taskkill cannot guarantee descendants after their leader exits.
+          void kill.then(()=>{
+            running.stdin.destroy();running.stdout.destroy();running.stderr.destroy();
+            void finish(null,null);
+          });
         };
         const abort=()=>stop('COACH_CODEX_ABORTED');
         const timer=setTimeout(()=>stop('COACH_CODEX_TIMEOUT'),Math.max(1,Math.min(28000,this.timeoutMs)));
@@ -122,6 +131,7 @@ export class CodexCoachProvider implements CoachProvider {
         };
         running.stdout.setEncoding('utf8');
         running.stdout.on('data',(chunk:string)=>{
+          if(failure)return;
           bytes+=Buffer.byteLength(chunk);
           if(bytes>524288){stop('COACH_CODEX_OUTPUT_LIMIT');return;}
           pending+=chunk;let i:number;
@@ -131,17 +141,20 @@ export class CodexCoachProvider implements CoachProvider {
         running.stderr.on('data',(chunk:Buffer)=>{errorBytes+=chunk.length;if(errorBytes>65536)stop('COACH_CODEX_OUTPUT_LIMIT');});
         running.stdin.on('error',()=>stop('COACH_CODEX_STDIN_FAILED'));
         running.once('error',()=>{failure??='COACH_CODEX_START_FAILED';});
-        running.once('close',async(code,exitSignal)=>{
-          clearTimeout(timer);signal.removeEventListener('abort',abort);
+        const finish=async(code:number|null,exitSignal:NodeJS.Signals|null)=>{
+          if(settled)return;
           if(pending)line(pending);
+          settled=true;clearTimeout(timer);signal.removeEventListener('abort',abort);
           await kill;
           if(failure||code!==0||exitSignal||!completed||answers!==1||signal.aborted)reject(new Error(failure||'COACH_CODEX_INCOMPLETE'));
           else resolve(answer);
-        });
+        };
+        running.once('close',finish);
         running.stdin.end(input);
       });
     } finally {
-      // Completion/abort waits for the OWNED child's close and tree kill before deleting.
+      // Normal completion waits for close; failure waits for the bounded own-tree kill
+      // attempt and detaches retained pipes. This is not Windows Job Object containment.
       await fs.rm(scratch,{recursive:true,force:true});
     }
   }
