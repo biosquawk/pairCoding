@@ -29,10 +29,14 @@ test('G3 separate-process finish capture exceeds real client deadline: UNKNOWN t
   client.subscribe('state',s=>{if(s.connectionError)errors.push(s.connectionError);});
   await client.connect();await until(()=>client!.getState().isOffline,v=>!v);
   const started=performance.now();await client.finishSession('COMPLETED');const elapsed=performance.now()-started;
-  assert(errors.some(e=>e.includes('Wynik operacji jest nieznany')),'existing client must say UNKNOWN, not false FAIL/success');
+  const finishRequest=requests.find(r=>r.url.endsWith('/api/session/finish'));
+  assert(finishRequest);
+  const unknown='Wynik zakończenia jest nieznany';
+  assert(errors.some(e=>e.includes(unknown)&&e.includes(finishRequest.body.requestId)),
+    'finish timeout must identify its original unresolved mutation');
   assert.equal(client.getState().report,null);assert.equal(frames.some(m=>m.type==='SESSION_REPORT'),false);
   const checkpoint=messages.find(m=>m.phase==='CAPTURE_PENDING');assert(checkpoint);assert.equal(checkpoint.lifecycle,'READY');assert.equal(checkpoint.captureReadCode,'WORKSPACE_BUSY');
-  await until(()=>client!.getState().report,r=>r?.status==='READY');
+  await until(()=>client!.getState(),s=>s.report?.status==='READY'&&!s.connectionError?.includes(unknown));
   const headers={Authorization:`Bearer ${token}`};
   const report=await fetch(baseUrl+`/api/session/report?sessionId=${ready.sessionId}`,{headers}).then(r=>r.json());
   const session=await fetch(baseUrl+'/api/session',{headers}).then(r=>r.json());

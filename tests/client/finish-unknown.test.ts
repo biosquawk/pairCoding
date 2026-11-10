@@ -132,7 +132,9 @@ test('REAL FINISH separate process: 6500ms capture, original 5s UNKNOWN, durable
   const script=`import {createPairCoachServer} from ${JSON.stringify(pathToFileURL(path.join(serverRoot,'src/server/http.ts')).href)};
     const app=createPairCoachServer({rootPath:${JSON.stringify(root)},dataDir:${JSON.stringify(data)},token:${JSON.stringify(token)},port:0,enableCoach:false,enableExecution:true});
     let delayed=false;app.workspace.on('snapshotCheckpoint',e=>{if(e.phase!=='SNAPSHOT_FILE_CAPTURED'||delayed)return;delayed=true;
-      process.send({phase:'CAPTURE_PENDING',lifecycle:app.session.state.lifecycle,snapshots:app.workspace.listSnapshots().length});
+      let captureReadCode='NO_GUARD';
+      try{app.workspace.listSnapshots();}catch(error){captureReadCode=error.code;}
+      process.send({phase:'CAPTURE_PENDING',lifecycle:app.session.state.lifecycle,captureReadCode});
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500);});
     const port=await app.listen();process.send({port,sessionId:app.session.state.sessionId});`;
   const child=spawn(process.execPath,['--import','tsx','--input-type=module','--eval',script],{cwd:serverRoot,stdio:['ignore','pipe','pipe','ipc']});
@@ -152,7 +154,7 @@ test('REAL FINISH separate process: 6500ms capture, original 5s UNKNOWN, durable
   client.subscribe('state',s=>{if(s.connectionError)errors.push(s.connectionError);});await client.connect();await until(()=>client!.getState().isOffline,v=>!v,'sync');
   const started=performance.now();await client.finishSession('COMPLETED');const deadline=performance.now()-started;
   assert.match(client.getState().connectionError!,/nieznany/i);assert.equal(client.getState().report,null);assert.equal(frames.some(m=>m.type==='SESSION_REPORT'),false);
-  const pending=messages.find(m=>m.phase==='CAPTURE_PENDING');assert.equal(pending.lifecycle,'READY');assert.equal(pending.snapshots,0);
+  const pending=messages.find(m=>m.phase==='CAPTURE_PENDING');assert.equal(pending.lifecycle,'READY');assert.equal(pending.captureReadCode,'WORKSPACE_BUSY');
   await client.finishSession('ABANDONED');
   await until(()=>client!.getState().report,r=>r?.status==='READY','report READY');await until(()=>client!.getState().connectionError,e=>e===null,'UNKNOWN reconciled');
   const headers={Authorization:`Bearer ${token}`},session=await fetch(baseUrl+'/api/session',{headers}).then(r=>r.json()),durable=await fetch(baseUrl+`/api/session/report?sessionId=${ready.sessionId}`,{headers}).then(r=>r.json()),snapshots=await fetch(baseUrl+'/api/snapshots',{headers}).then(r=>r.json());
