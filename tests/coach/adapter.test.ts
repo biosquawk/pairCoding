@@ -470,3 +470,141 @@ test('regression: Unicode-aware explicit mute accepts end/space/punctuation, rej
   await until(() => f.events.some(event => event.type === 'ERROR'));
   assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
 });
+
+test('R1: newest CHAT invalidates old MUTE/REPLY immediately without editing, bounded despite ignored abort', async t => {
+  for (const staleKind of ['MUTE', 'REPLY'] as const) {
+    let settle!: () => void; let signal!: AbortSignal;
+    const contexts: Readonly<CoachContext>[] = [];
+    let inflight = 0; let maximum = 0;
+    const f = fixture(t, { name: 'ignores-abort', decide: async (ctx, value) => {
+      contexts.push(ctx); inflight++; maximum = Math.max(maximum, inflight);
+      try {
+        if (contexts.length === 1) {
+          signal = value;
+          return await new Promise<CoachDecision>(done => { settle = () => done(staleKind === 'MUTE' ?
+            { kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'old-mute' } :
+            { kind: 'REPLY', text: 'obsolete answer' }); });
+        }
+        return { kind: 'REPLY', text: 'latest answer' };
+      } finally { inflight--; }
+    } });
+    f.adapter.trigger('CHAT', chat('old-mute', 'zrób przerwę')); await until(() => !!settle);
+    f.adapter.trigger('CHAT', chat('middle', 'help instead'));
+    f.adapter.trigger('CHAT', chat('latest', 'help instead')); // Same text, distinct accepted message ID.
+    assert.equal(signal.aborted, true);
+    await delay(30); assert.equal(contexts.length, 1); assert.equal(inflight, 1);
+    settle();
+    await until(() => f.events.some(event => event.type === 'CHAT_REPLY'));
+    assert.equal(contexts.length, 2); assert.equal(maximum, 1);
+    assert.equal(contexts[1].messages.at(-1)!.messageId, 'latest');
+    assert.deepEqual(f.events.filter(event => event.type === 'CHAT_REPLY').map(event => event.payload),
+      [{ replyTo: 'latest', text: 'latest answer' }]);
+    assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
+    assert.equal(f.events.some(event => event.type === 'ERROR' || event.type === 'CONTROL_PREPARE'), false);
+    assert.equal(readFileSync(join(f.root, 'main.py'), 'utf8'), 'a\n');
+    f.adapter.close();
+  }
+});
+
+test('R1: newest pending CHAT survives RUN and student edits while old provider ignores abort', async t => {
+  let settle!: () => void;
+  const contexts: Readonly<CoachContext>[] = [];
+  let inflight = 0; let maximum = 0;
+  const f = fixture(t, { name: 'ignores-abort', decide: async ctx => {
+    contexts.push(ctx); inflight++; maximum = Math.max(maximum, inflight);
+    try {
+      if (contexts.length === 1) return await new Promise<CoachDecision>(done => {
+        settle = () => done({ kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'old' });
+      });
+      return { kind: 'REPLY', text: 'fresh code and run' };
+    } finally { inflight--; }
+  } });
+  f.adapter.trigger('CHAT', chat('old', 'zrób przerwę')); await until(() => !!settle);
+  f.adapter.trigger('CHAT', chat('middle')); f.adapter.trigger('CHAT', chat('latest'));
+  f.adapter.updateRun({ runId: 'r1-completed-run', mode: 'RUN_MAIN', status: 'SUCCEEDED',
+    finishedAt: new Date().toISOString(), outputTail: 'run fact', testOutcome: 'NOT_APPLICABLE' } as Run);
+  f.studentWrite('value = 2\n'); f.studentWrite('value = 3\n');
+  await delay(400); assert.equal(contexts.length, 1);
+  settle(); await until(() => f.events.some(event => event.type === 'CHAT_REPLY'));
+  assert.equal(contexts.length, 2); assert.equal(maximum, 1);
+  assert.equal(contexts[1].messages.at(-1)!.messageId, 'latest');
+  assert.equal(contexts[1].lastRun!.runId, 'r1-completed-run');
+  assert.equal(contexts[1].documents.find(doc => doc.path === 'main.py')!.content, 'value = 3\n');
+  assert.deepEqual(f.events.filter(event => event.type === 'CHAT_REPLY').map(event => event.payload),
+    [{ replyTo: 'latest', text: 'fresh code and run' }]);
+  assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
+});
+
+test('R1: CHAT supersession cancels old edit at either handshake boundary without losing new question', async t => {
+  for (const boundary of ['ready', 'rendered'] as const) {
+    let calls = 0;
+    const f = fixture(t, { name: 'injected', decide: async ctx => {
+      if (++calls === 1) return plan(ctx);
+      return { kind: 'REPLY', text: 'new question answered' };
+    } });
+    if (boundary === 'ready') f.controls.autoReady = false;
+    else f.controls.autoRender = false;
+    f.adapter.trigger('CHAT', chat('old-edit'));
+    const awaited = boundary === 'ready' ? 'CONTROL_PREPARE' : 'COACH_STEP_EDIT';
+    await until(() => f.events.some(event => event.type === awaited));
+    const prior = f.events.find(event => event.type === awaited)!.payload;
+    f.adapter.trigger('CHAT', chat('new-question'));
+    if (boundary === 'ready') f.adapter.controlReady({ requestId: prior.requestId,
+      workspaceVersion: prior.basedOnWorkspaceVersion, ready: true });
+    else f.adapter.stepRendered({ stepId: prior.stepId, interventionId: prior.interventionId, documentVersion: prior.version });
+    await until(() => f.events.some(event => event.type === 'CHAT_REPLY'));
+    assert.equal(calls, 2);
+    assert.deepEqual(f.events.filter(event => event.type === 'CHAT_REPLY').map(event => event.payload),
+      [{ replyTo: 'new-question', text: 'new question answered' }]);
+    assert.equal(f.events.filter(event => event.type === 'COACH_STEP_EDIT').length, boundary === 'ready' ? 0 : 1);
+    assert.equal(readFileSync(join(f.root, 'main.py'), 'utf8'), boundary === 'ready' ? 'a\n' : 'xa\n');
+    assert.equal(f.session.getSession().writeOwner, 'STUDENT');
+    assert.equal(f.events.some(event => event.type === 'ERROR'), false);
+    f.adapter.close();
+  }
+});
+
+test('R1 control: veto, consent revoke and close still discard latest CHAT after supersession', async t => {
+  for (const invalidation of ['veto', 'consent', 'close']) {
+    let settle!: () => void; let calls = 0;
+    const f = fixture(t, { name: 'ignores-abort', decide: async () => {
+      if (++calls === 1) return await new Promise<CoachDecision>(done => {
+        settle = () => done({ kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'old' });
+      });
+      return { kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'latest' };
+    } });
+    f.adapter.trigger('CHAT', chat('old', 'zrób przerwę')); await until(() => !!settle);
+    f.adapter.trigger('CHAT', chat('latest', 'zrób przerwę'));
+    if (invalidation === 'veto') f.session.veto();
+    if (invalidation === 'consent') f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: false });
+    if (invalidation === 'close') f.adapter.close();
+    f.studentWrite('after invalidation\n'); settle(); await delay(30);
+    assert.equal(calls, 1);
+    if (invalidation !== 'close') {
+      if (invalidation === 'consent') f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: true });
+      else f.session.noteNewFact('RUN');
+      f.adapter.trigger('START');
+      await until(() => f.events.some(event => event.type === 'ERROR'));
+      assert.equal(calls, 2); // Generic START cannot reuse the revoked latest CHAT authorization.
+    }
+    assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
+    assert.equal(f.events.some(event => event.type === 'CHAT_REPLY' || event.type === 'CONTROL_PREPARE'), false);
+    f.adapter.close();
+  }
+});
+
+test('R1 control: rejected superseded provider is silent and latest request still runs', async t => {
+  let reject!: (error: Error) => void; let calls = 0;
+  const f = fixture(t, { name: 'ignores-abort', decide: async () => {
+    if (++calls === 1) return await new Promise<CoachDecision>((_done, fail) => { reject = fail; });
+    return { kind: 'REPLY', text: 'latest survives rejection' };
+  } });
+  f.adapter.trigger('CHAT', chat('old')); await until(() => !!reject);
+  f.adapter.trigger('CHAT', chat('latest'));
+  reject(new Error('discard this obsolete provider error'));
+  await until(() => f.events.some(event => event.type === 'CHAT_REPLY'));
+  assert.equal(calls, 2);
+  assert.deepEqual(f.events.filter(event => event.type === 'CHAT_REPLY').map(event => event.payload),
+    [{ replyTo: 'latest', text: 'latest survives rejection' }]);
+  assert.equal(f.events.some(event => event.type === 'ERROR'), false);
+});

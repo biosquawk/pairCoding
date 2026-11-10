@@ -73,7 +73,13 @@ export class CoachAdapter {
       this.messages.push(structuredClone(message));
       if (this.messages.length > 20) this.messages.shift();
     }
-    if (reason === 'CHAT' && message?.author === 'STUDENT') this.options.session.noteNewFact('CHAT');
+    if (reason === 'CHAT' && message?.author === 'STUDENT') {
+      // A newer explicit request revokes the old decision even when no file version changed.
+      // Advance freshness generation and abort its waits, but keep active single-flight until
+      // the actual provider settles; enqueue below retains only this latest message ID.
+      this.abort();
+      this.options.session.noteNewFact('CHAT');
+    }
     if (this.editTimer) { clearTimeout(this.editTimer); this.editTimer = null; }
     if (!this.options.workspace.settings.aiConsent) { this.abort(); this.setStatus('OFF'); return; }
     if (this.provider.mode === 'LOCAL_FALLBACK') {
