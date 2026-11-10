@@ -355,6 +355,9 @@ test('RENAME retains ctime-only external change detection after successful final
   // inode/bytes/mtime/mode/nlink are unchanged. No stat or clock is fabricated.
   const before = fs.statSync(f.target, { bigint: true });
   const alias = path.join(f.root, '.paircoach-write-external-metadata');
+  // Cross a real kernel timestamp tick before the external syscall. Without
+  // this scheduling gap, a metadata-only syscall may retain the same ctime.
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
   fs.linkSync(f.target, alias); fs.unlinkSync(alias);
   const after = fs.statSync(f.target, { bigint: true });
   assert.equal(after.ino, before.ino); assert.equal(after.mtimeNs, before.mtimeNs);
