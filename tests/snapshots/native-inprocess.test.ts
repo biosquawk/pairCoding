@@ -14,10 +14,10 @@ test('1000 real in-process atomic no-replace moves have complete public readback
   console.log('INPROCESS_1000_REAL ' + JSON.stringify({platform: process.platform, node: process.version, count:1000, moveMs, readback: 'all SOURCE'}));
 });
 
-test('gate reauthorizes after ARMED checkpoint; revoked lease never executes native effect', t => {
+test('gate reauthorizes after ARMED checkpoint; revoked lease never executes native effect', async t => {
   const f = fixture(t), snapshot = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK');
   f.workspace.on('snapshotCheckpoint', e => { if(e.phase === 'CAPTURE_MOVE_ARMED') f.session.releaseLease('tab'); });
-  assert.throws(() => f.restore(snapshot.snapshotId, ['a.ts']), code('RESTORE_INCOMPLETE'));
+  await assert.rejects(() => f.restore(snapshot.snapshotId, ['a.ts']), code('RESTORE_INCOMPLETE'));
   assert.equal(f.bytes('a.ts').toString(), 'WORK');
   const base = f.file('.paircoach/snapshot-journal-v1'), directory = path.join(base,fs.readdirSync(base).find(n=>n.startsWith('transaction-'))!);
   assert.equal(fs.existsSync(path.join(directory, '0.captured')), false);

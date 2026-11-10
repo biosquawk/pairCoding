@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { Snapshot } from '../shared/protocol';
+import { drainSteps } from './SnapshotSteps';
 import { AppError } from './errors';
 
 export const SNAPSHOT_MAX_BYTES = 1048576;
@@ -161,6 +162,10 @@ export class SnapshotStorage {
   }
 
   paths(paths: string[], allowEmpty = true, inspectDisk = true): void {
+    drainSteps(this.pathSteps(paths, allowEmpty, inspectDisk));
+  }
+
+  *pathSteps(paths: string[], allowEmpty = true, inspectDisk = true): Generator<void, void, void> {
     if (!Array.isArray(paths) || paths.length > SNAPSHOT_MAX_FILES || (!allowEmpty && !paths.length) ||
         new Set(paths.map(p => typeof p === 'string' ? p.toLowerCase() : p)).size !== paths.length) throw new AppError(400, 'INVALID_SNAPSHOT_PATHS', 'Use unique explicit snapshot paths, at most 1000.');
     for (const p of paths) {
@@ -172,6 +177,7 @@ export class SnapshotStorage {
       }
       if (inspectDisk) this.safePath(p, true);
       if (!snapshotAllowed(p)) throw new AppError(403, 'SNAPSHOT_PATH_FORBIDDEN', 'Secrets are excluded from snapshots.');
+      yield;
     }
     // A tombstone may not be an ancestor of another entry.
     const ordered = [...paths].sort();
@@ -179,8 +185,12 @@ export class SnapshotStorage {
   }
 
   put(label: string, workspaceVersion: number, files: FrozenFile[], validate: () => void): Snapshot {
+    return drainSteps(this.putSteps(label, workspaceVersion, files, function* () { validate(); }));
+  }
+
+  *putSteps(label: string, workspaceVersion: number, files: FrozenFile[], validate: () => Generator<void, void, void>): Generator<void, Snapshot, void> {
     if (typeof label !== 'string' || !label.trim() || label.length > 200) throw new AppError(400, 'INVALID_SNAPSHOT_LABEL', 'Snapshot label must have 1..200 characters.');
-    this.paths(files.map(f => f.path));
+    yield* this.pathSteps(files.map(f => f.path));
     this.ensureIdentity();
     const base = privateDirectory(path.join(this.dataDir, 'snapshots-v1'), true);
     const storeBinding = path.join(base, 'store-v1.json');
@@ -195,23 +205,27 @@ export class SnapshotStorage {
     const id = randomUUID();
     const staging = privateDirectory(path.join(base, '.pending-' + id), true);
     const snapshot: Snapshot = { snapshotId: id, projectId: this.projectId, label, createdAt: new Date().toISOString(), workspaceVersion, paths: files.map(f => f.path) };
-    const entries = files.map((f, i) => {
-      if (f.rawBase64 === null) return { path: f.path, mode: null, hash: null, size: 0 };
+    const entries: { path: string; mode: number | null; hash: string | null; size: number }[] = [];
+    for (const [i, f] of files.entries()) {
+      if (f.rawBase64 === null) { entries.push({ path: f.path, mode: null, hash: null, size: 0 }); yield; continue; }
       const bytes = Buffer.from(f.rawBase64, 'base64');
       if (bytes.length > SNAPSHOT_MAX_BYTES) throw new AppError(413, 'FILE_TOO_LARGE', 'Snapshot file exceeds 1 MiB.');
       privateWrite(path.join(staging, `${i}.bin`), bytes);
-      return { path: f.path, mode: f.mode, hash: sha256(bytes), size: bytes.length };
-    });
+      entries.push({ path: f.path, mode: f.mode, hash: sha256(bytes), size: bytes.length });
+      yield;
+    }
     this.writeSigned(path.join(staging, 'manifest.json'), { format: 1, binding: this.binding, snapshot, entries });
     // Entire capture is checked AFTER every byte has reached the private store.
-    validate();
+    yield* validate();
     privateDirectory(base); privateDirectory(staging);
     fs.renameSync(staging, path.join(base, id));
     syncDirectory(base);
     return structuredClone(snapshot);
   }
 
-  read(id: string): FrozenSnapshot {
+  read(id: string): FrozenSnapshot { return drainSteps(this.readSteps(id)); }
+
+  *readSteps(id: string): Generator<void, FrozenSnapshot, void> {
     if (typeof id !== 'string' || !uuid.test(id)) throw new AppError(400, 'INVALID_SNAPSHOT_ID', 'Invalid snapshot ID.');
     const directory = path.join(this.dataDir, 'snapshots-v1', id);
     try { privateDirectory(directory); }
@@ -222,17 +236,19 @@ export class SnapshotStorage {
     if (value.format !== 1 || !s || s.snapshotId !== id || s.projectId !== this.projectId ||
         typeof s.label !== 'string' || !s.label.trim() || s.label.length > 200 || !Number.isSafeInteger(s.workspaceVersion) || s.workspaceVersion < 0 ||
         typeof s.createdAt !== 'string' || !Number.isFinite(Date.parse(s.createdAt)) || !Array.isArray(value.entries)) throw snapshotFailure('Invalid snapshot manifest.');
-    this.paths(s.paths, true, false);
+    yield* this.pathSteps(s.paths, true, false);
     if (value.entries.length !== s.paths.length) throw snapshotFailure('Snapshot entry count mismatch.');
-    const files = value.entries.map((f, i): FrozenFile => {
+    const files: FrozenFile[] = [];
+    for (const [i, f] of value.entries.entries()) {
       if (f.path !== s.paths[i]) throw snapshotFailure('Snapshot paths mismatch.');
-      if (f.hash === null && f.mode === null && f.size === 0) return { path: f.path, rawBase64: null, mode: null };
+      if (f.hash === null && f.mode === null && f.size === 0) { files.push({ path: f.path, rawBase64: null, mode: null }); yield; continue; }
       if (!/^[a-f0-9]{64}$/.test(f.hash ?? '') || !Number.isInteger(f.mode) || f.mode! < 0 || f.mode! > 0o777 ||
           !Number.isInteger(f.size) || f.size < 0 || f.size > SNAPSHOT_MAX_BYTES) throw snapshotFailure('Invalid snapshot entry.');
       const bytes = privateRead(path.join(directory, `${i}.bin`), SNAPSHOT_MAX_BYTES);
       if (bytes.length !== f.size || sha256(bytes) !== f.hash) throw snapshotFailure('Snapshot bytes do not match their manifest.');
-      return { path: f.path, rawBase64: bytes.toString('base64'), mode: f.mode };
-    });
+      files.push({ path: f.path, rawBase64: bytes.toString('base64'), mode: f.mode });
+      yield;
+    }
     return { snapshot: structuredClone(s), files };
   }
 

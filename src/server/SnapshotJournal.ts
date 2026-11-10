@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { drainSteps } from './SnapshotSteps';
 import { AppError } from './errors';
 import { atomicNoReplace, prepareAtomicNoReplace } from './AtomicNoReplace';
 import { SnapshotStorage, type FrozenFile, type Identity, identity, sameIdentity, validIdentity, privateDirectory,
@@ -22,7 +23,9 @@ export class SnapshotJournal {
     this.base = path.join(store.privateRoot, 'snapshot-journal-v1');
   }
 
-  private operations(): string[] {
+  private operations(): string[] { return drainSteps(this.operationSteps()); }
+
+  private *operationSteps(): Generator<void, string[], void> {
     try { privateDirectory(this.base); } catch (e) { if (missing(e)) return []; throw e; }
     const names = fs.readdirSync(this.base);
     if (names.some(n => !operationName.test(n) && !/^\.prepare-[0-9a-f-]{36}$/.test(n))) throw snapshotFailure(`Unknown journal material in ${this.base}.`);
@@ -31,17 +34,21 @@ export class SnapshotJournal {
       if (fs.readdirSync(preparing).some(n => /\.(captured|undone)$|\.foreign-|^(COMMITTED|ROLLED_BACK)$/.test(n))) {
         throw snapshotFailure('A preparation directory contains mutation evidence; preserve and inspect it before writing.');
       }
+      yield;
     }
     return names.filter(n => operationName.test(n)).sort().map(n => path.join(this.base, n));
   }
 
-  hasPending(): boolean {
-    for (const directory of this.operations()) {
+  hasPending(): boolean { return drainSteps(this.pendingSteps()); }
+
+  *pendingSteps(): Generator<void, boolean, void> {
+    for (const directory of yield* this.operationSteps()) {
       const stamp = this.terminalStamp(directory);
-      if (this.settled.get(directory) === stamp) continue;
+      if (this.settled.get(directory) === stamp) { yield; continue; }
       const intent = this.header(directory);
-      if (!this.terminal(directory, intent)) return true;
+      if (!(yield* this.terminalSteps(directory, intent))) return true;
       this.settled.set(directory, stamp);
+      yield;
     }
     return false;
   }
@@ -61,8 +68,10 @@ export class SnapshotJournal {
     try { fs.lstatSync(file); return true; } catch (e) { if (missing(e)) return false; throw e; }
   }
 
-  private terminal(directory: string, intent: Intent): boolean {
-    this.assertNoActiveMove(directory, false);
+  private terminal(directory: string, intent: Intent): boolean { return drainSteps(this.terminalSteps(directory, intent)); }
+
+  private *terminalSteps(directory: string, intent: Intent): Generator<void, boolean, void> {
+    yield* this.activeMoveSteps(directory, false);
     let terminal = false;
     for (const state of ['COMMITTED', 'ROLLED_BACK']) if (this.exists(path.join(directory, state))) {
       const marker = this.store.readSigned<{ id: string; state: string; binding: unknown }>(path.join(directory, state), 8192);
@@ -80,6 +89,7 @@ export class SnapshotJournal {
     fs.linkSync(temp, path.join(directory, state));
     fs.unlinkSync(temp);
     syncDirectory(directory);
+    this.settled.set(directory, this.terminalStamp(directory));
   }
 
   private header(directory: string): Intent {
@@ -91,10 +101,10 @@ export class SnapshotJournal {
     return intent;
   }
 
-  private load(directory: string): Intent {
+  private *loadSteps(directory: string): Generator<void, Intent, void> {
     const intent = this.header(directory);
     // Backup is independently authenticated and is a complete before-image of this transaction.
-    const backup = this.store.read(intent.backupId);
+    const backup = yield* this.store.readSteps(intent.backupId);
     if (backup.files.length !== intent.entries.length) throw snapshotFailure('Journal backup mismatch.');
     for (const [i, e] of intent.entries.entries()) {
       this.checkImages(directory, i, e);
@@ -105,6 +115,7 @@ export class SnapshotJournal {
       const b = backup.files[i];
       if (b.path !== e.path || b.mode !== (e.before?.mode ?? null) ||
           (b.rawBase64 === null ? e.before !== null : sha256(Buffer.from(b.rawBase64, 'base64')) !== e.before?.hash)) throw snapshotFailure('Before-image does not match durable backup.');
+      yield;
     }
     return intent;
   }
@@ -135,11 +146,12 @@ export class SnapshotJournal {
     if (!this.matches(file, id, image, links, mtime)) throw snapshotFailure(`Unexpected inode/bytes at ${file}; preserve public paths and all captures.`);
   }
 
-  private prepare(before: RestoreBefore[], after: FrozenFile[], backupId: string): { directory: string; intent: Intent } {
+  private *prepareSteps(before: RestoreBefore[], after: FrozenFile[], backupId: string): Generator<void, { directory: string; intent: Intent }, void> {
     privateDirectory(this.base, true);
     const id = randomUUID();
     const staging = privateDirectory(path.join(this.base, '.prepare-' + id), true);
-    const entries = before.map((b, i): Entry => {
+    const entries: Entry[] = [];
+    for (const [i, b] of before.entries()) {
       const a = after[i];
       const image = (f: FrozenFile, name: string): Image | null => {
         if (f.rawBase64 === null) return null;
@@ -150,8 +162,9 @@ export class SnapshotJournal {
       const beforeImage = image(b, `${i}.before`), afterImage = image(a, `${i}.after`);
       const forward = afterImage ? privateWrite(path.join(staging, `${i}.forward`), Buffer.from(a.rawBase64!, 'base64'), a.mode!) : null;
       const rollback = beforeImage ? privateWrite(path.join(staging, `${i}.rollback`), Buffer.from(b.rawBase64!, 'base64'), b.mode!) : null;
-      return { path: b.path, before: beforeImage, after: afterImage, original: b.identity, originalMtime: b.mtimeNs, forward, rollback };
-    });
+      entries.push({ path: b.path, before: beforeImage, after: afterImage, original: b.identity, originalMtime: b.mtimeNs, forward, rollback });
+      yield;
+    }
     const intent: Intent = { format: 1, id, binding: this.store.binding, backupId, ownerPid: process.pid, entries };
     this.store.writeSigned(path.join(staging, 'intent.json'), intent);
     const directory = path.join(this.base, 'transaction-' + id);
@@ -159,7 +172,7 @@ export class SnapshotJournal {
     return { directory, intent };
   }
 
-  private assertNoActiveMove(directory: string, reconcile: boolean): void {
+  private *activeMoveSteps(directory: string, reconcile: boolean): Generator<void, void, void> {
     privateDirectory(directory);
     // New in-process calls cannot outlive their backend. Legacy child-helper records
     // without JOINED remain genuinely ambiguous and must never be guessed/replayed.
@@ -180,6 +193,7 @@ export class SnapshotJournal {
         joined = pending;
       }
       if (JSON.stringify(joined) !== JSON.stringify(pending)) throw snapshotFailure('Native move completion does not match its durable intent.');
+      yield;
     }
   }
 
@@ -250,16 +264,16 @@ export class SnapshotJournal {
     this.cleanAlias(stage, e, id, image);
   }
 
-  run(before: RestoreBefore[], after: FrozenFile[], backupId: string, authorize: () => void, preflight: () => void): void {
+  *runSteps(before: RestoreBefore[], after: FrozenFile[], backupId: string, authorize: () => void, preflight: () => Generator<void, void, void>): Generator<void, void, void> {
     authorize();
     prepareAtomicNoReplace(); // before any journal/public effect; addon/library/symbol failure is fail-closed
     authorize();
-    const { directory, intent } = this.prepare(before, after, backupId);
+    const { directory, intent } = yield* this.prepareSteps(before, after, backupId);
     let started = false;
     let captureAttempt = -1;
     try {
       this.checkpoint('PREPARED', -1);
-      preflight(); authorize();
+      yield* preflight(); authorize();
       for (const [i, e] of intent.entries.entries()) {
         authorize();
         const absolute = this.file(e.path);
@@ -275,11 +289,13 @@ export class SnapshotJournal {
           captureAttempt = -1;
         } else if (fs.existsSync(absolute)) throw new AppError(409, 'DISK_CONFLICT', 'A tombstone path appeared before capture.');
         this.checkpoint('CAPTURED', i);
+        yield;
       }
       // Recheck every captured original and every public vacancy, not just the last file.
       for (const [i, e] of intent.entries.entries()) {
         if (e.before) this.assertFile(path.join(directory, `${i}.captured`), e.original, e.before, 1, e.originalMtime!);
         if (fs.existsSync(this.file(e.path))) throw snapshotFailure('Public path appeared after capture.');
+        yield;
       }
       authorize();
       this.checkpoint('BEFORE_PUBLICATION', -1);
@@ -287,11 +303,13 @@ export class SnapshotJournal {
         authorize();
         if (e.after) { started = true; this.parents(e.path, authorize); this.publish(directory, i, e, false); }
         this.checkpoint('PUBLISHED', i);
+        yield;
       }
       for (const [i, e] of intent.entries.entries()) {
         if (e.before) this.assertFile(path.join(directory, `${i}.captured`), e.original, e.before, 1, e.originalMtime!);
         if (e.after) this.assertFile(this.file(e.path), e.forward, e.after);
         else if (fs.existsSync(this.file(e.path))) throw snapshotFailure('Deleted path reappeared.');
+        yield;
       }
       authorize();
       this.marker(directory, intent, 'COMMITTED');
@@ -303,9 +321,9 @@ export class SnapshotJournal {
       }
       // A durable commit is NEVER rolled back, even if an observer subsequently throws.
       try {
-        if (!this.terminal(directory, intent)) {
+        if (!(yield* this.terminalSteps(directory, intent))) {
           if (!started) this.marker(directory, intent, 'ROLLED_BACK'); // known zero task effects in this live invocation
-          else this.rollback(directory, this.load(directory));
+          else yield* this.rollbackSteps(directory, yield* this.loadSteps(directory));
         }
       } catch (recoveryError) {
         const failure = snapshotFailure(`Restore requires recovery in ${directory}. Copy material to NEW names before manual resolution; do not delete markers/captures.`);
@@ -319,8 +337,8 @@ export class SnapshotJournal {
     }
   }
 
-  private rollback(directory: string, intent: Intent): void {
-    this.assertNoActiveMove(directory, true);
+  private *rollbackSteps(directory: string, intent: Intent): Generator<void, void, void> {
+    yield* this.activeMoveSteps(directory, true);
     this.checkpoint('ROLLBACK_BEGIN', -1);
     for (let i = intent.entries.length - 1; i >= 0; i--) {
       // Treat the journal as untrusted before each effect, including resumed recovery.
@@ -336,13 +354,13 @@ export class SnapshotJournal {
       if (e.before && !captured) {
         // This entry never crossed its capture boundary. Absence/foreign identity is ambiguous.
         this.assertFile(absolute, e.original, e.before, 1, e.originalMtime!);
-        this.checkpoint('ROLLED_BACK_FILE', i); continue;
+        this.checkpoint('ROLLED_BACK_FILE', i); yield; continue;
       }
       if (fs.existsSync(absolute)) {
         // Already restored before a crash; clean up a surviving OWN publication alias.
         if (e.before && this.matches(absolute, e.rollback, e.before, 2)) {
           this.cleanAlias(path.join(directory, `${i}.rollback`), e, e.rollback, e.before);
-          this.checkpoint('ROLLED_BACK_FILE', i); continue;
+          this.checkpoint('ROLLED_BACK_FILE', i); yield; continue;
         }
         this.assertFile(absolute, e.forward, e.after, 2);
         this.cleanAlias(path.join(directory, `${i}.forward`), e, e.forward, e.after);
@@ -361,6 +379,7 @@ export class SnapshotJournal {
         this.publish(directory, i, e, true);
       }
       this.checkpoint('ROLLED_BACK_FILE', i);
+      yield;
     }
     this.checkpoint('ROLLBACK_BEFORE_DONE', -1);
     const final = this.header(directory);
@@ -370,6 +389,7 @@ export class SnapshotJournal {
       if (captured) this.assertFile(path.join(directory, `${i}.captured`), e.original, e.before, 1, e.originalMtime!);
       if (e.before) this.assertFile(this.file(e.path), captured ? e.rollback : e.original, e.before, 1, captured ? undefined : e.originalMtime!);
       else if (fs.existsSync(this.file(e.path))) throw snapshotFailure('A rolled-back tombstone path reappeared.');
+      yield;
     }
     this.marker(directory, intent, 'ROLLED_BACK');
     this.checkpoint('ROLLED_BACK', -1);
@@ -385,7 +405,7 @@ export class SnapshotJournal {
         catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ESRCH') live = true; }
         if (live) throw snapshotFailure('Another process may still own this restore; never roll back a live writer.');
       }
-      this.rollback(directory, this.load(directory));
+      drainSteps(this.rollbackSteps(directory, drainSteps(this.loadSteps(directory))));
     }
   }
 }

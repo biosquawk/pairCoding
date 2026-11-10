@@ -7,7 +7,7 @@ import { atomicNoReplace, prepareAtomicNoReplace } from '../../src/server/Atomic
 import { fixture, code } from './helpers';
 const require = createRequire(import.meta.url);
 
-for (const failure of ['library', 'symbol']) test(`unavailable native ${failure} fails closed without any fallback or public effects`, t => {
+for (const failure of ['library', 'symbol']) test(`unavailable native ${failure} fails closed without any fallback or public effects`, async t => {
   const f = fixture(t), snapshot = f.workspace.createSnapshot('Original'), koffi = require('koffi'), target = path.join(f.parent, 'target');
   f.write('a.ts', 'WORK');
   t.mock.method(koffi, 'load', () => {
@@ -17,7 +17,7 @@ for (const failure of ['library', 'symbol']) test(`unavailable native ${failure}
   assert.throws(() => prepareAtomicNoReplace(), code('ATOMIC_MOVE_UNAVAILABLE'));
   assert.throws(() => atomicNoReplace(f.file('a.ts'), target), code('ATOMIC_MOVE_UNAVAILABLE'));
   assert.equal(f.bytes('a.ts').toString(), 'WORK'); assert.equal(fs.existsSync(target), false);
-  assert.throws(() => f.restore(snapshot.snapshotId, ['a.ts']), code('ATOMIC_MOVE_UNAVAILABLE'));
+  await assert.rejects(() => f.restore(snapshot.snapshotId, ['a.ts']), code('ATOMIC_MOVE_UNAVAILABLE'));
   assert.equal(f.bytes('a.ts').toString(), 'WORK');
   assert.equal(fs.existsSync(f.file('.paircoach/snapshot-journal-v1')), false, 'unavailable runtime fails before journal/public effects');
 });

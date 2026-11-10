@@ -20,7 +20,7 @@ function fixture(t:any){
  return {root,data,w,s,g,auth,write,snap,read:(p:string)=>fs.readFileSync(path.join(root,p),'utf8'),restore:()=>g.restoreSnapshot({...auth(),snapshotId:snap.snapshotId,paths:['a.ts','b.ts'],expectedWorkspaceVersion:w.workspaceVersion})};
 }
 
-for (const phase of ['capture','rollback']) test(`K independent ${phase}: syscall destination retains late foreign bytes`, t=>{
+for (const phase of ['capture','rollback']) test(`K independent ${phase}: syscall destination retains late foreign bytes`, async t =>{
  const f=fixture(t); let slot='',error:any=null;
  if(phase==='rollback') f.w.on('snapshotCheckpoint',e=>{if(e.phase==='PUBLISHED'&&e.index===1)throw Error('force rollback');});
  f.w.on('snapshotCheckpoint',e=>{
@@ -31,7 +31,7 @@ for (const phase of ['capture','rollback']) test(`K independent ${phase}: syscal
      fs.writeFileSync(slot,'K UNIQUE FOREIGN '+phase,{flag:'wx'});
    }
  });
- try{f.restore();}catch(e){error=e;}
+ try{await f.restore();}catch(e){error=e;}
  const found=slot&&fs.existsSync(slot)?fs.readFileSync(slot,'utf8'):null;
  console.log(JSON.stringify({phase,slot,found,publicA:f.read('a.ts'),error:error?.code??null}));
  assert.ok(slot);assert.equal(found,'K UNIQUE FOREIGN '+phase);

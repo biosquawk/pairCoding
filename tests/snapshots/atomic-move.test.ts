@@ -16,7 +16,7 @@ test('native atomic move: absent/occupied slots, spaces/Unicode, no shell path i
   assert.equal(fs.readFileSync(from, 'utf8'), 'TWO'); assert.equal(fs.readFileSync(to, 'utf8'), 'ONE');
 });
 
-test('already occupied capture slot before effect remains unchanged and blocks restore', t => {
+test('already occupied capture slot before effect remains unchanged and blocks restore', async t => {
   const f = fixture(t), snap = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK'); let slot = '';
   f.workspace.on('snapshotCheckpoint', e => {
     if (e.phase === 'PREPARED') {
@@ -25,16 +25,16 @@ test('already occupied capture slot before effect remains unchanged and blocks r
       slot = path.join(base, op, '0.captured'); fs.writeFileSync(slot, 'FOREIGN PREEXISTING', {flag: 'wx'});
     }
   });
-  assert.throws(() => f.restore(snap.snapshotId, ['a.ts']));
+  await assert.rejects(() => f.restore(snap.snapshotId, ['a.ts']));
   assert.equal(fs.readFileSync(slot, 'utf8'), 'FOREIGN PREEXISTING'); assert.equal(f.bytes('a.ts').toString(), 'WORK');
 });
 
-test('in-process restore spawns no helper or shell', t => {
+test('in-process restore spawns no helper or shell', async t => {
   const f = fixture(t), snap = f.workspace.createSnapshot('Original'); f.write('a.ts', 'WORK');
   let moves = 0; const real = childProcess.spawn, realSync = childProcess.spawnSync;
   t.mock.method(childProcess, 'spawn', (exe: any, args: any, options: any) => { moves++; return real(exe, args, options); }); syncBuiltinESMExports();
   t.mock.method(childProcess, 'spawnSync', (exe: any, args: any, options: any) => { moves++; return realSync(exe, args, options); }); syncBuiltinESMExports();
-  const start = performance.now(); f.restore(snap.snapshotId, ['a.ts']);
+  const start = performance.now(); await f.restore(snap.snapshotId, ['a.ts']);
   console.log('NATIVE_RESTORE_OVERHEAD ' + JSON.stringify({platform: process.platform, files: 1, moves, elapsedMs: performance.now() - start}));
   assert.equal(moves, 0); assert.equal(f.bytes('a.ts').toString(), 'SNAP A\n');
 });

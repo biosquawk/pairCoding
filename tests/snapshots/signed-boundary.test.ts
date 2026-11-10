@@ -9,7 +9,7 @@ import { fixture, open, code } from './helpers';
 function longPaths(length: number) {
   return Array.from({length: 1000}, (_, i) => `${'a'.repeat(200)}/${'b'.repeat(200)}/${'c'.repeat(200)}/${'d'.repeat(200)}/${String(i).padStart(4, '0')}${'e'.repeat(length - 808)}`);
 }
-for (const length of [985, 992, 1024]) test(`signed material round-trip at 1000 paths / ${length} characters, including backup and journal`, t => {
+for (const length of [985, 992, 1024]) test(`signed material round-trip at 1000 paths / ${length} characters, including backup and journal`, async t => {
   const f = fixture(t, {}), paths = longPaths(length);
   assert.ok(paths.every(p => p.length === length));
   fs.mkdirSync(path.dirname(f.file(paths[0])), {recursive: true});
@@ -17,7 +17,7 @@ for (const length of [985, 992, 1024]) test(`signed material round-trip at 1000 
   f.workspace.scanExternal();
   const snapshot = f.workspace.createSnapshot('Boundary', paths);
   assert.deepEqual(f.workspace.readSnapshot(snapshot.snapshotId).snapshot.paths, paths);
-  const backup = f.restore(snapshot.snapshotId, paths);
+  const backup = await f.restore(snapshot.snapshotId, paths);
   assert.deepEqual(f.workspace.readSnapshot(backup.snapshotId).snapshot.paths, paths);
   assert.equal(f.workspace.listSnapshots().length, 2);
   f.close(); const again = open(f.root, f.data);
