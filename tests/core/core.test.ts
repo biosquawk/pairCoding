@@ -425,8 +425,14 @@ test('Mutation validation never clobbers existing destinations or permits UPDATE
     assert.throws(() => f.gate.mutate({ ...f.auth(), operation: 'UPDATE' as 'CREATE', path: 'main.ts', content: 'bypass', newPath: null, baseVersion: null }), error('INVALID_MUTATION', 400));
     assert.equal(fs.readFileSync(path.join(f.root, 'main.ts'), 'utf8'), 'let x = 1;\n');
     assert.equal(f.workspace.workspaceVersion, 0);
-    assert.throws(() => f.workspace.createSnapshot('not implemented'), error('SNAPSHOTS_NOT_READY', 503));
-    assert.throws(() => f.workspace.restoreSnapshot('id', ['main.ts'], f.auth()), error('SNAPSHOTS_NOT_READY', 503));
+    // G3 implements frozen capture; it must not grant a workspace-level restore bypass.
+    const snapshot = f.workspace.createSnapshot('Gate validation snapshot');
+    assert.equal(snapshot.workspaceVersion, 0);
+    const frozen = f.workspace.readSnapshot(snapshot.snapshotId).files.find(file => file.path === 'main.ts');
+    assert.equal(Buffer.from(frozen!.rawBase64!, 'base64').toString(), 'let x = 1;\n');
+    assert.throws(() => f.workspace.restoreSnapshot(snapshot.snapshotId, ['main.ts'], f.auth()), error('WRITE_GATE_REQUIRED', 403));
+    assert.equal(fs.readFileSync(path.join(f.root, 'main.ts'), 'utf8'), 'let x = 1;\n');
+    assert.equal(f.workspace.workspaceVersion, 0);
   } finally { f.close(); }
 });
 
