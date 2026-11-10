@@ -299,3 +299,174 @@ test('HIDDEN aborts a pending rendered step and preserves already committed code
   assert.equal(f.events.filter(event => event.type === 'COACH_STEP_EDIT').length, 1);
   assert.equal(readFileSync(join(f.root, 'main.py'), 'utf8'), 'xa\n');
 });
+
+test('regression: redacted EDIT coordinates fail closed before control, including equal-length masks', async t => {
+  for (const original of [
+    'password="abcdefghijklmnopqrstuvwx"; result = 1\n',
+    '"LOCAL-SESSION-TOKEN-FIXTURE"; result = 1\n',
+    'password=1234567890; result = 1\n', // [REDACTED] is also ten UTF16 units: length alone is insufficient.
+    '# -----BEGIN PRIVATE KEY-----\n# FIXTURE\n# -----END PRIVATE KEY-----\nresult = 1\n',
+  ]) {
+    let sent = '';
+    const f = fixture(t, { name: 'injected', decide: async ctx => {
+      sent = ctx.documents.find(doc => doc.path === 'main.py')!.content;
+      const lines = sent.split('\n');
+      const line = lines.findIndex(value => value.includes('result = 1'));
+      const column = lines[line].indexOf('result = 1') + 'result = '.length + 1;
+      return plan(ctx, [{ range: { startLine: line + 1, endLine: line + 1, startColumn: column, endColumn: column + 1 }, textBlock: '2' }]);
+    } });
+    f.studentWrite(original);
+    f.adapter.trigger('START');
+    await until(() => f.events.some(event => event.type === 'ERROR'));
+    assert.notEqual(sent, original);
+    assert.equal(sent.includes('abcdefghijklmnopqrstuvwx'), false);
+    assert.equal(sent.includes('LOCAL-SESSION-TOKEN-FIXTURE'), false);
+    assert.equal(readFileSync(join(f.root, 'main.py'), 'utf8'), original);
+    assert.equal(f.events.some(event => event.type === 'CONTROL_PREPARE' || event.type === 'COACH_STEP_EDIT'), false);
+    assert.equal(f.session.getSession().writeOwner, 'STUDENT');
+    f.adapter.close();
+  }
+});
+
+test('regression: redacted multiline HINT cannot emit an unmapped pointer or anchored bubble', async t => {
+  const original = '# -----BEGIN PRIVATE KEY-----\n# FIXTURE\n# -----END PRIVATE KEY-----\nvalue = 1\n';
+  const f = fixture(t, { name: 'injected', decide: async ctx => {
+    const doc = ctx.documents.find(doc => doc.path === 'main.py')!;
+    assert.equal(doc.content.includes('FIXTURE'), false);
+    const line = doc.content.split('\n').findIndex(value => value.includes('value = 1')) + 1;
+    assert.equal(line, 2);
+    return { kind: 'HINT', severity: 'WARNING', text: 'check value', path: doc.path, documentVersion: doc.version,
+      range: { startLine: line, endLine: line, startColumn: 1, endColumn: 6 }, showPointer: true, evidenceIds: [] };
+  } });
+  f.studentWrite(original); f.adapter.trigger('START');
+  await until(() => f.events.some(event => event.type === 'ERROR'));
+  assert.equal(f.events.some(event => event.type === 'COACH_POINTER' || event.type === 'COACH_HINT_BUBBLE'), false);
+  assert.equal(readFileSync(join(f.root, 'main.py'), 'utf8'), original);
+});
+
+test('control: redacted documents still allow unanchored hints without disclosing raw content', async t => {
+  const f = fixture(t, { name: 'injected', decide: async ctx => {
+    assert.equal(JSON.stringify(ctx).includes('synthetic-password-value'), false);
+    return { kind: 'HINT', severity: 'NEUTRAL', text: 'review the calculation', path: null,
+      documentVersion: null, range: null, showPointer: false, evidenceIds: [] };
+  } });
+  f.studentWrite('password="synthetic-password-value"; value = 1\n'); f.adapter.trigger('START');
+  await until(() => f.events.some(event => event.type === 'COACH_HINT_BUBBLE'));
+  assert.equal(f.events.some(event => event.type === 'COACH_POINTER' || event.type === 'CONTROL_PREPARE'), false);
+});
+
+test('regression: both active and queued explicit CHAT survive coalesced student edits with latest context', async t => {
+  for (const activeChat of [false, true]) {
+    let settle!: () => void;
+    const contexts: Readonly<CoachContext>[] = [];
+    let inflight = 0; let maximum = 0;
+    const f = fixture(t, { name: 'injected', decide: async ctx => {
+      contexts.push(ctx); inflight++; maximum = Math.max(maximum, inflight);
+      try {
+        if (contexts.length === 1) return await new Promise<CoachDecision>(done => {
+          settle = () => done({ kind: 'REPLY', text: 'obsolete reply' });
+        });
+        return { kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: ctx.messages.at(-1)!.messageId };
+      } finally { inflight--; }
+    } });
+    f.adapter.trigger(activeChat ? 'CHAT' : 'START', activeChat ? chat('current-mute', 'zrób przerwę') : undefined);
+    await until(() => !!settle);
+    if (!activeChat) f.adapter.trigger('CHAT', chat('current-mute', 'zrób przerwę'));
+    f.studentWrite('value = 2\n'); f.studentWrite('value = 3\n');
+    await delay(400); assert.equal(contexts.length, 1);
+    settle();
+    await until(() => f.session.getSession().coachMode === 'MUTED_MANUAL');
+    assert.equal(contexts.length, 2);
+    assert.equal(contexts[1].documents.find(doc => doc.path === 'main.py')!.content, 'value = 3\n');
+    assert.equal(f.events.some(event => event.type === 'ERROR' || event.type === 'CHAT_REPLY'), false);
+    assert.equal(maximum, 1);
+    f.adapter.close();
+  }
+});
+
+test('regression: current CHAT replyTo survives edit; completed request is not reused', async t => {
+  let settle!: () => void;
+  let calls = 0;
+  const f = fixture(t, { name: 'injected', decide: async () => {
+    calls++;
+    if (calls === 1) return new Promise(done => { settle = () => done({ kind: 'REPLY', text: 'stale' }); });
+    return { kind: 'REPLY', text: 'current answer' };
+  } });
+  f.adapter.trigger('CHAT', chat('reply-current', 'help with code')); await until(() => !!settle);
+  f.studentWrite('value = 2\n'); settle();
+  await until(() => f.events.some(event => event.type === 'CHAT_REPLY'));
+  assert.deepEqual(f.events.filter(event => event.type === 'CHAT_REPLY').map(event => event.payload),
+    [{ replyTo: 'reply-current', text: 'current answer' }]);
+  f.studentWrite('value = 3\n');
+  await until(() => f.events.filter(event => event.type === 'CHAT_REPLY').length === 2);
+  assert.equal(f.events.filter(event => event.type === 'CHAT_REPLY')[1].payload.replyTo, null);
+});
+
+test('regression: a newer CHAT supersedes old authorization even across an edit', async t => {
+  let settle!: () => void; let calls = 0;
+  const f = fixture(t, { name: 'injected', decide: async () => {
+    if (++calls === 1) return new Promise(done => { settle = () => done({ kind: 'SILENT', reason: 'obsolete' }); });
+    return { kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'old-mute' };
+  } });
+  f.adapter.trigger('CHAT', chat('old-mute', 'wycisz trenera')); await until(() => !!settle);
+  f.adapter.trigger('CHAT', chat('new-request', 'help instead'));
+  f.studentWrite('new code\n'); settle();
+  await until(() => f.events.some(event => event.type === 'ERROR'));
+  assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
+});
+
+test('regression: veto, consent revoke and close invalidate active or queued CHAT despite later edits', async t => {
+  for (const invalidation of ['veto', 'consent', 'close']) {
+    for (const activeChat of [false, true]) {
+      let settle!: () => void; let calls = 0; let signal!: AbortSignal;
+      const f = fixture(t, { name: 'injected', decide: async (_ctx, value) => {
+        calls++; signal = value;
+        if (calls === 1) return new Promise(done => { settle = () => done({ kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'invalidated-mute' }); });
+        return { kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'invalidated-mute' };
+      } });
+      f.adapter.trigger(activeChat ? 'CHAT' : 'START', activeChat ? chat('invalidated-mute', 'wycisz trenera') : undefined);
+      await until(() => !!settle);
+      if (!activeChat) f.adapter.trigger('CHAT', chat('invalidated-mute', 'wycisz trenera'));
+      f.studentWrite('changed before invalidation\n');
+      if (invalidation === 'veto') f.session.veto();
+      if (invalidation === 'consent') f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: false });
+      if (invalidation === 'close') f.adapter.close();
+      assert.equal(signal.aborted, true);
+      f.studentWrite('changed after invalidation\n');
+      settle(); await delay(30);
+      assert.equal(calls, 1);
+      if (invalidation !== 'close') {
+        if (invalidation === 'consent') f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: true });
+        if (invalidation === 'veto') f.session.noteNewFact('RUN');
+        f.adapter.trigger('START');
+        await until(() => f.events.some(event => event.type === 'ERROR'));
+        assert.equal(calls, 2);
+      }
+      assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
+      assert.equal(f.events.some(event => event.type === 'CONTROL_PREPARE'), false);
+      f.adapter.close();
+    }
+  }
+});
+
+test('regression: Unicode-aware explicit mute accepts end/space/punctuation, rejects prefixes, quotes and file instructions', async t => {
+  for (const [authorized, inputs] of [
+    [true, ['zrób przerwę', 'zrób przerwę na minutę', 'zrób przerwę.', 'Zrób przerwę!', 'proszę, zrób przerwę']],
+    [false, ['zrób przerwętest', 'zrób przerwęć', 'zrób przerwę1', 'zrób przerwę_extra', 'zrób przerwę\u0301',
+      '„zrób przerwę”', '"zrób przerwę"', 'W pliku napisano: zrób przerwę', 'proszę, „zrób przerwę”', 'wyciszanie', 'przerwany']],
+  ] as const) {
+    for (const text of inputs) {
+      const f = fixture(t, { name: 'injected', decide: async ctx => ({ kind: 'MUTE', durationSeconds: 60,
+        sourceUserMessageId: ctx.messages.at(-1)!.messageId }) });
+      f.adapter.trigger('CHAT', chat('unicode-mute', text));
+      await until(() => f.events.some(event => event.type === 'ERROR') || f.session.getSession().coachMode === 'MUTED_MANUAL');
+      assert.equal(f.session.getSession().coachMode === 'MUTED_MANUAL', authorized, text);
+      assert.equal(f.events.some(event => event.type === 'ERROR'), !authorized, text);
+      f.adapter.close();
+    }
+  }
+  const f = fixture(t, { name: 'injected', decide: async () => ({ kind: 'MUTE', durationSeconds: 60, sourceUserMessageId: 'file-instruction' }) });
+  f.studentWrite('# zrób przerwę\n'); f.adapter.trigger('START');
+  await until(() => f.events.some(event => event.type === 'ERROR'));
+  assert.notEqual(f.session.getSession().coachMode, 'MUTED_MANUAL');
+});

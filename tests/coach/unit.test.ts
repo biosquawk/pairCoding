@@ -109,3 +109,27 @@ test('TEST-025 exact token redaction also covers metadata (path/message ID), not
   const context = buildContext(workspace, session, [{ messageId: 'TOKENFIXTURE', author: 'STUDENT', text: 'safe', createdAt: '2026-11-10T00:00:00Z' }], null, [], ['TOKENFIXTURE']);
   assert.equal(JSON.stringify(context).includes('TOKENFIXTURE'), false);
 });
+
+test('regression: Docker/Kube stores are excluded before getDocument, even explicit allowlists and case variants', () => {
+  const denied = ['.docker/config.json', '.DOCKER/CONFIG.JSON', 'nested/.DoCkEr/auth.json',
+    '.kube/config', '.KUBE/CONFIG', 'nested/.KuBe/cache/data'];
+  for (const patterns of [['**/*'], denied]) {
+    const reads: string[] = [];
+    const workspace = { workspaceVersion: 1, settings: { ...settings, contextPatterns: patterns },
+      listFiles: () => [...denied, 'main.py'].map(path => ({ path, kind: 'FILE' })),
+      getDocument: (path: string) => {
+        reads.push(path);
+        assert.equal(denied.includes(path), false, 'credential store must never be read');
+        return { path, version: 1, content: 'safe' } as Document;
+      } };
+    const session = { controlEpoch: 1, activeFilePath: '.DOCKER/CONFIG.JSON',
+      timer: { status: 'RUNNING', elapsedMs: 0, limitMs: null } } as Session;
+    const context = buildContext(workspace, session, [], null, []);
+    denied.forEach(path => assert.equal(isContextPathAllowed(path), false, path));
+    assert.deepEqual(reads, patterns[0] === '**/*' ? ['main.py'] : []);
+    assert.equal(context.activeFilePath, null);
+    assert.equal(context.documents.some(doc => denied.includes(doc.path)), false);
+  }
+  assert.equal(isContextPathAllowed('docker-example.py'), true);
+  assert.equal(isContextPathAllowed('kube-example.py'), true);
+});
