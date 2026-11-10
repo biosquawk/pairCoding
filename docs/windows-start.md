@@ -52,13 +52,17 @@ nie stosuj `--omit=dev`. Instalacja, build i start to osobne wyniki.
 W **tym samym oknie** odszukaj natywny EXE, nie `codex.cmd` ani WSL:
 
 ```powershell
-$codex = (Get-Command codex.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+$codex = Join-Path $env:APPDATA 'npm\node_modules\@openai\codex\node_modules\@openai\codex-win32-x64\vendor\x86_64-pc-windows-msvc\bin\codex.exe'
+if (-not (Test-Path -LiteralPath $codex -PathType Leaf)) {
+    $codex = (Get-Command codex.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
+}
 & $codex --version
 & $codex login status
 if ($LASTEXITCODE -ne 0) { throw 'Zaloguj własny Codex przed startem aplikacji' }
 ```
 
-Jeżeli EXE nie jest w PATH, zamiast pierwszego wiersza ustaw `$codex` na pełną
+Pierwsza ścieżka to potwierdzona przez ROOT instalacja npm na Windows. Jeżeli
+masz inną instalację i EXE nie jest w PATH, ustaw `$codex` na pełną
 ścieżkę do **istniejącego natywnego codex.exe** znalezionego na swoim komputerze.
 Przy braku logowania uruchom lokalnie `& $codex login` i wybierz własne konto
 ChatGPT, potem powtórz `login status`. Nie przesyłaj plików logowania ani tokenów.
