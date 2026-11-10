@@ -101,31 +101,49 @@ export function parseJUnit(xml: string): { count: number; failures: number; skip
     parseAttributeValue: false, processEntities: false, isArray: name => name === 'testsuite' || name === 'testcase' });
   try {
     const parsed = parser.parse(xml);
-    const suites = parsed.testsuite ?? parsed.testsuites?.testsuite;
-    if (!Array.isArray(suites) || !suites.length) return null;
-    const integer = (value: unknown, optional = false): number => {
-      if (value === undefined && optional) return 0;
+    if ((parsed.testsuite !== undefined) === (parsed.testsuites !== undefined)) return null;
+    const integer = (value: unknown): number => {
       if (typeof value !== 'string' || !/^\d+$/.test(value) || !Number.isSafeInteger(Number(value))) throw new Error('Invalid count');
       return Number(value);
     };
-    let count = 0, failures = 0, skipped = 0;
-    const visit = (suite: any) => {
-      if (suite.testsuite) {
-        if (suite.testcase) throw new Error('Mixed nested suite');
-        for (const child of suite.testsuite) visit(child);
-        return; // do not double-count aggregate counters
+    type Counts = { tests: number; failures: number; errors: number; skipped: number };
+    const visit = (suite: any, aggregateRoot = false): Counts => {
+      if (!suite || typeof suite !== 'object' || Array.isArray(suite) || suite.testsuites !== undefined) throw new Error('Invalid suite');
+      let totals: Counts = { tests: 0, failures: 0, errors: 0, skipped: 0 };
+      const aggregate = aggregateRoot || suite.testsuite !== undefined;
+      if (aggregate) {
+        if (suite.testcase !== undefined || !Array.isArray(suite.testsuite) || !suite.testsuite.length) throw new Error('Invalid aggregate suite');
+        for (const child of suite.testsuite) {
+          const counts = visit(child);
+          for (const key of Object.keys(totals) as (keyof Counts)[]) {
+            totals[key] += counts[key];
+            if (!Number.isSafeInteger(totals[key])) throw new Error('Count overflow');
+          }
+        }
+      } else {
+        const cases = suite.testcase ?? [];
+        totals.tests = cases.length;
+        for (const testcase of cases) {
+          const failed = testcase.failure !== undefined;
+          const error = testcase.error !== undefined;
+          const skipped = testcase.skipped !== undefined;
+          if (Number(failed) + Number(error) + Number(skipped) > 1) throw new Error('Conflicting testcase outcomes');
+          totals.failures += Number(failed); totals.errors += Number(error); totals.skipped += Number(skipped);
+        }
       }
-      const n = integer(suite['@_tests']);
-      const cases = suite.testcase ?? [];
-      if (cases.length !== n) throw new Error('Missing/inconsistent testcases');
-      const failed = cases.filter((c: any) => c.failure !== undefined || c.error !== undefined).length;
-      const skip = cases.filter((c: any) => c.skipped !== undefined).length;
-      const declared = integer(suite['@_failures'], true) + integer(suite['@_errors'], true);
-      if (declared !== failed || integer(suite['@_skipped'], true) !== skip) throw new Error('Inconsistent outcome');
-      count += n; failures += failed; skipped += skip;
+      for (const key of Object.keys(totals) as (keyof Counts)[]) {
+        const declared = suite['@_' + key];
+        // Leaves keep the conservative dialect: tests required, missing outcomes mean zero.
+        // Aggregates may omit counters, but every declared counter must match all descendants.
+        if (aggregate && declared === undefined) continue;
+        const expected = declared === undefined && key !== 'tests' ? 0 : integer(declared);
+        if (expected !== totals[key]) throw new Error('Inconsistent ' + key);
+      }
+      return totals; // Only leaf cases contribute, never add declared aggregate totals.
     };
-    suites.forEach(visit);
-    return { count, failures, skipped };
+    const totals = parsed.testsuites !== undefined ? visit(parsed.testsuites, true) :
+      visit({ testsuite: parsed.testsuite }, true);
+    return { count: totals.tests, failures: totals.failures + totals.errors, skipped: totals.skipped };
   } catch { return null; }
 }
 
