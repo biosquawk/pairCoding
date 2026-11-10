@@ -36,7 +36,7 @@ test('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 
           if (frame.type === 'COACH_HINT_BUBBLE') output.hints.push({ id: frame.payload.id, text: frame.payload.text, receivedAt: now, renderMs: null });
         });
       }
-      send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
+      send(data: Parameters<WebSocket['send']>[0]) {
         if (typeof data === 'string') {
           try {
             const frame = JSON.parse(data), entry = output.vetoes.at(-1);

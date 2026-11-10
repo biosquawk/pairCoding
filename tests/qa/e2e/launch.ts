@@ -30,6 +30,7 @@ let hintCounter = 0;
 
 function fixtureCoach(ctx: ServiceContext): CoachService {
   ctx.workspace.updateSettings({ ...ctx.workspace.settings, aiConsent: true });
+  ctx.session.setAiStatus('READY'); // deterministic fixture provider; NOT real Gemini readiness
   // Upper-bound timing of the actual synchronous cutoff path, no replacement implementation.
   const veto = ctx.session.veto.bind(ctx.session);
   ctx.session.veto = () => {

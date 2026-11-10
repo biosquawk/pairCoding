@@ -12,8 +12,9 @@ test('AC-026 TEST-026: HTTP bearer, Host and Origin are enforced on the actual l
     const reply = await f.http('GET', '/api/project', undefined, { Authorization: auth });
     assert.equal(reply.status, 401); assertApiError(reply.body);
   }
-  for (const headers of [{ Origin: 'https://untrusted.example' }, { Host: 'untrusted.example' }]) {
-    const reply = await f.http('GET', '/api/project', undefined, headers);
+  const forbiddenHeaders: Record<string, string>[] = [{ Origin: 'https://untrusted.example' }, { Host: 'untrusted.example' }];
+  for (const headers of forbiddenHeaders) {
+    const reply = await f.rawHttp('/api/project', headers);
     assert.equal(reply.status, 403); assertApiError(reply.body);
   }
   const good = await f.http('GET', '/api/project'); assert.equal(good.status, 200);

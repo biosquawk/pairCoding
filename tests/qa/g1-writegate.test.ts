@@ -49,6 +49,7 @@ test('AC-010 TEST-010: veto cutoff <50ms and no old coach epoch write after cuto
   const f = await coreFixture(t, { 'main.py': 'before\n' });
   f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: true });
   f.session.start(null, true);
+  f.session.setAiStatus('READY'); // explicit local fixture provider, not a Gemini availability claim
   const epoch = f.session.acquireCoach(id());
   const before = f.workspace.getDocument('main.py');
   const coach = { clientId: f.clientId, sessionId: f.sessionId, actor: 'COACH' as const, controlEpoch: epoch };
@@ -82,6 +83,7 @@ test('AC-026 TEST-026: AI cannot mutate task/tests/config even with current coac
   const protectedFiles = { 'main.py': 'original\n', 'test_main.py': 'assert True\n', 'package.json': '{}\n' };
   const f = await coreFixture(t, protectedFiles);
   f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: true }); f.session.start(null, true);
+  f.session.setAiStatus('READY'); // explicit local fixture provider, not a Gemini availability claim
   const epoch = f.session.acquireCoach(id());
   for (const p of ['challenge.md', 'test_main.py', 'package.json']) {
     const doc = f.workspace.getDocument(p);
@@ -89,4 +91,16 @@ test('AC-026 TEST-026: AI cannot mutate task/tests/config even with current coac
       actor: 'COACH', controlEpoch: epoch, path: p, baseVersion: doc.version, content: 'tampered\n' }));
     assert.equal(f.workspace.getDocument(p).content, doc.content);
   }
+});
+
+// Negative/control for the corrected readiness fixture: OFF is genuinely ineligible.
+test('AC-010 TEST-010 control: unavailable provider cannot acquire, READY fixture can', async t => {
+  const f = await coreFixture(t, { 'main.py': 'unchanged\n' });
+  f.workspace.updateSettings({ ...f.workspace.settings, aiConsent: true }); f.session.start(null, true);
+  assert.equal(f.session.getSession().aiStatus, 'OFF');
+  assert.throws(() => f.session.acquireCoach(id()));
+  assert.equal(readFileSync(path.join(f.rootPath, 'main.py'), 'utf8'), 'unchanged\n');
+  f.session.setAiStatus('READY');
+  f.session.acquireCoach(id()); assert.equal(f.session.getSession().writeOwner, 'COACH');
+  f.session.releaseCoach(); assert.equal(f.session.getSession().writeOwner, 'STUDENT');
 });

@@ -1,5 +1,6 @@
 /** Real product fixtures. This module never substitutes a server or WriteGate. */
 import assert from 'node:assert/strict';
+import httpRequest from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -99,10 +100,25 @@ export async function serverFixture(t: TestContext, files: Record<string, string
     const body = await response.json();
     return { status: response.status, body, headers: response.headers };
   }
+  async function rawHttp(target: string, headers: Record<string, string>) {
+    // Native fetch rewrites Host in Node22; raw http.request preserves the actual attack header.
+    return new Promise<{ status: number; body: any }>((resolve, reject) => {
+      const req = httpRequest.get(baseURL + target, { headers: { Authorization: `Bearer ${token}`, ...headers } }, res => {
+        const chunks: Buffer[] = [];
+        res.on('data', chunk => chunks.push(Buffer.from(chunk)));
+        res.once('end', () => {
+          try { resolve({ status: res.statusCode!, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }); }
+          catch (error) { reject(error); }
+        });
+        res.once('error', reject);
+      });
+      req.once('error', reject); req.setTimeout(DEADLINE, () => req.destroy(new Error('raw HTTP timeout')));
+    });
+  }
   const sessionReply = await http('GET', '/api/session');
   assert.equal(sessionReply.status, 200);
   const state = sessionReply.body as Session;
-  return { ...dirs, app, peers, token, port, baseURL, http, clientId, sessionId: state.sessionId, state };
+  return { ...dirs, app, peers, token, port, baseURL, http, rawHttp, clientId, sessionId: state.sessionId, state };
 }
 
 type Frame = { protocolVersion: string; messageId: string; sessionId: string; seq: number; type: string; payload: any };
