@@ -1,0 +1,83 @@
+import type { Document } from '../shared/protocol';
+import { WorkspaceService } from './WorkspaceService';
+import { SessionController } from './SessionController';
+import { AppError } from './errors';
+
+export type MutationAuth = { clientId: string; sessionId: string; controlEpoch: number; actor: 'STUDENT' | 'COACH' };
+export type FileMutation = MutationAuth & { operation: 'CREATE' | 'RENAME' | 'DELETE'; path: string;
+  newPath: string | null; content: string | null; baseVersion: number | null };
+
+export class WriteGate {
+  constructor(private readonly workspace: WorkspaceService, private readonly session: SessionController) {}
+
+  private authorize(input: MutationAuth): void {
+    this.session.assertClient(input.clientId, input.sessionId);
+    const state = this.session.state;
+    if (!Number.isSafeInteger(input.controlEpoch) || input.controlEpoch !== state.controlEpoch) {
+      throw new AppError(409, 'STALE_EPOCH', 'Control epoch is no longer current.');
+    }
+    if (input.actor !== 'STUDENT' && input.actor !== 'COACH') throw new AppError(400, 'INVALID_ACTOR', 'Invalid mutation actor.');
+    if (input.actor !== state.writeOwner) throw new AppError(409, 'WRITE_OWNER_CONFLICT', 'Another actor currently owns the editor.');
+    // Manual editing remains possible after finish; coach never gets that exception.
+    if (input.actor === 'COACH' && !this.session.canCoach()) throw new AppError(403, 'COACH_FORBIDDEN', 'Coach authority is unavailable.');
+  }
+
+  private coachPath(relative: string): void {
+    const settings = this.workspace.settings;
+    const parts = relative.toLowerCase().split('/');
+    const name = parts[parts.length - 1];
+    // Hard exclusions precede the review-notes exception and never trust model instructions.
+    if (parts.some(p => /^(tests?|__tests__|specs?|fixtures?|goldens?|\.git|\.paircoach|\.aws|\.ssh|credentials?)$/.test(p)) ||
+        /^\.env/i.test(name) || /\.(pem|key|pfx|p12|keystore)$/i.test(name) ||
+        /(?:^|[._-])(test|spec|golden|fixture)(?:[._-]|$)/i.test(name) || /(?:test|tests|spec)\.[^.]+$/i.test(name) ||
+        relative.toLowerCase() === settings.taskFilePath?.toLowerCase()) {
+      throw new AppError(403, 'COACH_PATH_FORBIDDEN', 'Coach cannot modify task, tests, secrets, or protected files.');
+    }
+    if (settings.taskMode === 'CODE_REVIEW') {
+      if (relative !== settings.reviewNotesPath) throw new AppError(403, 'COACH_REVIEW_ONLY', 'Coach may write only the configured review notes.');
+      return;
+    }
+    // Allow actual code, not arbitrary configuration/scripts disguised as source.
+    if (!/\.(java|py|js|jsx|ts|tsx)$/i.test(name) ||
+        /^(package(?:-lock)?\.json|.*config\.[^.]+|vite\..*|setup\.py|conftest\.py|.*\.d\.ts)$/i.test(name) ||
+        parts.some(p => /^(config|configs|scripts|build|\.github|\.idea)$/.test(p))) {
+      throw new AppError(403, 'COACH_PATH_FORBIDDEN', 'Coach edits are limited to task source code.');
+    }
+  }
+
+  write(input: MutationAuth & { path: string; baseVersion: number; content: string }): Document {
+    this.authorize(input);
+    this.workspace._safePath(input.path);
+    if (input.actor === 'COACH') this.coachPath(input.path);
+    const result = this.workspace._replace(input.path, input.baseVersion, input.content, input.actor, () => this.authorize(input));
+    if (input.actor === 'STUDENT') this.session.noteStudentEdit(input.path, result.content);
+    return result;
+  }
+
+  mutate(input: FileMutation): void {
+    this.authorize(input);
+    this.workspace._safePath(input.path, true);
+    // AI plans propose edits to existing documents, never arbitrary filesystem mutations.
+    if (input.actor === 'COACH') throw new AppError(403, 'COACH_MUTATION_FORBIDDEN', 'Coach cannot create, rename, or delete files.');
+    const authorize = () => this.authorize(input);
+    if (input.operation === 'CREATE') {
+      if (input.baseVersion !== null || input.newPath !== null || typeof input.content !== 'string') {
+        throw new AppError(400, 'INVALID_MUTATION', 'CREATE requires content, null baseVersion and null newPath.');
+      }
+      const doc = this.workspace._create(input.path, input.content, input.actor, authorize);
+      this.session.noteStudentEdit(input.path, doc.content);
+    } else if (input.operation === 'RENAME') {
+      if (typeof input.newPath !== 'string' || input.content !== null || !Number.isSafeInteger(input.baseVersion)) {
+        throw new AppError(400, 'INVALID_MUTATION', 'RENAME requires newPath, baseVersion and null content.');
+      }
+      this.workspace._safePath(input.newPath, true);
+      this.workspace._rename(input.path, input.newPath, input.baseVersion!, input.actor, authorize);
+    } else if (input.operation === 'DELETE') {
+      if (input.newPath !== null || input.content !== null || !Number.isSafeInteger(input.baseVersion)) {
+        throw new AppError(400, 'INVALID_MUTATION', 'DELETE requires baseVersion and null newPath/content.');
+      }
+      this.workspace._delete(input.path, input.baseVersion!, input.actor, authorize);
+      this.session.noteStudentEdit(input.path, '');
+    } else throw new AppError(400, 'INVALID_MUTATION', 'Only CREATE, RENAME, and DELETE are supported.');
+  }
+}
