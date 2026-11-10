@@ -13,13 +13,19 @@ import { Runner } from './Runner';
 import { ReportService, REPORT_SYSTEM_PROMPT, type FrozenFacts } from './ReportService';
 import { isContextPathAllowed, matchesContextPattern, redactSecrets } from './coach/context';
 import type { Settings } from '../shared/protocol';
+import {projectRunFacts, type RunFacts} from './coach/runFacts';
 import type { ChatEntry, CoachDecision, Proposal, Report, Run, SessionBundle } from '../shared/protocol';
 import { apiError, CommandLedger, TransportError, validateMessage, validateRequest, type ClientMessage } from './transport';
 
+/** Network AI receives structural Run facts, never local stdout/stderr or future Run fields. */
+export type ReportAIFacts = Pick<FrozenFacts, 'session'|'snapshot'|'chat'|'events'> & {
+  runs: RunFacts[];
+  [key:string]: unknown;
+};
 export interface ServerOptions {
   rootPath?: string; dataDir?: string; token?: string; port?: number;
   devBootstrap?: boolean; staticDir?: string; enableCoach?: boolean; enableExecution?: boolean;
-  reportGenerate?: (facts: FrozenFacts, signal: AbortSignal) => Promise<string>;
+  reportGenerate?: (facts: ReportAIFacts, signal: AbortSignal) => Promise<string>;
   coachProvider?: CoachProvider;
   coachFactory?: (context: ServiceContext) => CoachService;
   executionFactory?: (context: ServiceContext) => ExecutionServices;
@@ -113,26 +119,52 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     const proposal:Proposal = {proposalId:randomUUID(),kind:decision.proposalKind,questionText:decision.questionText,yesLabel:'Tak, wykonaj',noLabel:'Nie, pracuję dalej',basedOnWorkspaceVersion:workspace.workspaceVersion,expiresAt:new Date(Date.now()+60000).toISOString(),paths:decision.paths,snapshotId:decision.snapshotId,resetTimer:false};
     proposals=proposals.filter(p=>Date.parse(p.expiresAt)>Date.now()).slice(-9); proposals.push(proposal); emit('ACTION_PROPOSAL',proposal);
   }
-  function context():ServiceContext { return {workspace,session,gate,emit,onProposal:postProposal}; }
-  function bind() {
-    workspace.on('external',(payload:unknown) => { coach?.abort(); emit('EXTERNAL_FILE_SYNC',payload); emit('SESSION_STATE',session.getSession()); });
-    session.on('state',()=>emit('SESSION_STATE',session.getSession()));
-    session.on('overtime',()=>{emit('CHAT_REPLY',{replyTo:null,text:'Limit czasu minął. Możesz dalej pisać i samodzielnie zakończyć próbę.'});coach?.trigger('OVERTIME');});
-    workspace.on('watcherError',(error:unknown)=>emit('ERROR',apiError(error)));
-    session.on('control',(payload:unknown)=>emit('CONTROL_STATE',payload));
-    session.on('veto',()=>coach?.abort());
-    coach=options.enableCoach ? (options.coachFactory?.(context()) ??
-      new CoachAdapter({...context(), provider:options.coachProvider, sensitiveValues:[token]})) : undefined;
-    execution=options.executionFactory?.(context()) ?? (options.enableExecution ? {
-      runner:new Runner({rootPath:workspace.rootPath,getWorkspaceVersion:()=>workspace.workspaceVersion,emit}),
-      reports:new ReportService({dataDir:workspace.dataDir,emit:(type,payload)=>{
-        // finish() persists before publishing FINISHED/PENDING. Async generations emit normally.
-        if(!persistingFinish) emit(type,payload);
-      },generate:reportGenerator()}),
-    } : undefined);
+  type Core = ReturnType<typeof makeCore>;
+  // Preparation owns its core, listeners and services. Nothing may publish to the old binding.
+  function prepareBinding(core:Core) {
+    const {workspace:boundWorkspace,session:boundSession}=core;
+    let active=false, disposed=false;
+    let boundCoach:CoachService|undefined, boundExecution:ExecutionServices|undefined;
+    const listeners:{source:WorkspaceService|SessionController;event:string;handler:(...args:any[])=>void}[]=[];
+    const publish=(type:string,payload:unknown)=>{if(active)emit(type,payload);};
+    const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);}};
+    const on=(source:WorkspaceService|SessionController,event:string,handler:(...args:any[])=>void)=>{
+      source.on(event,handler);listeners.push({source,event,handler});
+    };
+    function dispose() {
+      if(disposed)return;disposed=true;active=false;
+      // Continue cleanup even if a closing report cannot persist INTERRUPTED on a failed disk.
+      for(const {source,event,handler} of listeners)source.off(event,handler);
+      try {boundCoach?.close();} finally {
+        try {boundExecution?.reports.close();} finally {boundSession.close();boundWorkspace.close();}
+      }
+    }
+    try {
+      if(options.executionFactory)boundExecution=options.executionFactory(boundContext);
+      else if(options.enableExecution) {
+        // Prepare fallible persistent storage before creating other execution resources.
+        const reports=new ReportService({dataDir:boundWorkspace.dataDir,emit:(type,payload)=>{
+          if(!persistingFinish)publish(type,payload);
+        },generate:reportGenerator()});
+        try {boundExecution={reports,runner:new Runner({rootPath:boundWorkspace.rootPath,
+          getWorkspaceVersion:()=>boundWorkspace.workspaceVersion,emit:publish})};}
+        catch(error){reports.close();throw error;}
+      }
+      boundCoach=options.enableCoach ? (options.coachFactory?.(boundContext) ??
+        new CoachAdapter({...boundContext,provider:options.coachProvider,sensitiveValues:[token,process.env.GEMINI_API_KEY||'']})) : undefined;
+      on(boundWorkspace,'external',(payload:unknown)=>{boundCoach?.abort();publish('EXTERNAL_FILE_SYNC',payload);publish('SESSION_STATE',boundSession.getSession());});
+      on(boundSession,'state',()=>publish('SESSION_STATE',boundSession.getSession()));
+      on(boundSession,'overtime',()=>{publish('CHAT_REPLY',{replyTo:null,text:'Limit czasu minął. Możesz dalej pisać i samodzielnie zakończyć próbę.'});if(active)boundCoach?.trigger('OVERTIME');});
+      on(boundWorkspace,'watcherError',(error:unknown)=>publish('ERROR',apiError(error)));
+      on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
+      on(boundSession,'veto',()=>boundCoach?.abort());
+      return {execution:boundExecution,activate(){active=true;coach=boundCoach;execution=boundExecution;},dispose};
+    } catch(error) {dispose();throw error;}
   }
-  try { bind(); } catch(error) { coach?.close();execution?.reports.close();session.close();workspace.close();wss.close();throw error; }
-  function reportGenerator():ServerOptions['reportGenerate'] {
+  let binding:ReturnType<typeof prepareBinding>;
+  try {binding=prepareBinding({workspace,session,gate});binding.activate();}
+  catch(error) {wss.close();throw error;}
+  function reportGenerator():((facts:FrozenFacts,signal:AbortSignal)=>Promise<string>)|undefined {
     const configured=options.reportGenerate;
     const apiKey=process.env.GEMINI_API_KEY;
     if(!configured && !apiKey) return undefined; // ReportService's explicit local-facts fallback.
@@ -158,11 +190,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           version:e.payload.version,workspaceVersion:e.payload.workspaceVersion}}];
         return [];
       });
-      const safe:FrozenFacts={session:clone(frozen.session),snapshot:{...clone(frozen.snapshot),paths:frozen.snapshot.paths.filter(allowed)},
-        runs:clone(frozen.runs),chat:clone(frozen.chat),events,aiConsent:true,
+      const safe:ReportAIFacts={session:clone(frozen.session),snapshot:{...clone(frozen.snapshot),paths:frozen.snapshot.paths.filter(allowed)},
+        runs:frozen.runs.map(projectRunFacts),
+        chat:clone(frozen.chat),events,aiConsent:true,
         taskMode:settings.taskMode,documents,omittedPaths,systemPrompt:REPORT_SYSTEM_PROMPT};
-      // Metadata, pasted chat and process output can contain the API token too.
-      const projected=JSON.parse(JSON.stringify(safe,(_key,value)=>typeof value==='string'?redactSecrets(value,[token,apiKey||'']):value)) as FrozenFacts;
+      // Metadata and pasted chat can contain the API token too. Raw process output is never projected.
+      const projected=JSON.parse(JSON.stringify(safe,(_key,value)=>typeof value==='string'?redactSecrets(value,[token,apiKey||'']):value)) as ReportAIFacts;
       signal.throwIfAborted();
       if(configured) return configured(projected,signal);
       const {GoogleGenAI}=await import('@google/genai');
@@ -226,7 +259,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     try {
       coach?.abort(); session.releaseCoach();
       await execution.runner.stopAll();
-      const finalSnapshot=workspace.createSnapshot('Stan końcowy próby');
+      const finalSnapshot=await workspace.createSnapshot('Stan końcowy próby');
       const finalMaterial=workspace.readSnapshot(finalSnapshot.snapshotId);
       const finalSession=session.getSession();
       // Persist the prospective closed state first; a storage error must not announce FINISHED.
@@ -293,16 +326,34 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(url.pathname==='/api/project/open') {
           if(session.leaseClientId && session.leaseClientId!==body.clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
           const next=makeCore(body.rootPath);
-          try { next.workspace.updateSettings(body.settings); } catch(error) { next.session.close();next.workspace.close();throw error; }
+          let prepared:ReturnType<typeof prepareBinding>|undefined;
+          let project:ReturnType<WorkspaceService['getProject']>;
+          try {
+            next.workspace.updateSettings(body.settings);
+            next.session.claimLease(body.clientId);
+            prepared=prepareBinding(next);
+            project=next.workspace.getProject(next.session.state.sessionId);
+          } catch(error) {
+            if(prepared)prepared.dispose();else {next.session.close();next.workspace.close();}
+            throw error;
+          }
           transitioning=true;
           let adopted=false;
           try {
-          coach?.abort(); await execution?.runner.stopAll(); coach?.close();execution?.reports.close();
-          session.close();workspace.close();({workspace,session,gate}=next);adopted=true;session.claimLease(body.clientId);
-          chat=[];proposals=[];report=null;lastRun=null;facts.length=0;seq=0;
-          for(const [ws,p] of peers) { p.authenticated=false;ws.close(1012,'Project changed; reconnect'); }
-          bind();return workspace.getProject(session.state.sessionId);
-          } finally { if(!adopted) {next.session.close();next.workspace.close();} transitioning=false; }
+            // Every fallible new-binding preparation completed before touching the current session.
+            await execution?.runner.stopAll();
+            const previous=binding;
+            ({workspace,session,gate}=next);binding=prepared;adopted=true;
+            chat=[];proposals=[];report=null;lastRun=null;facts.length=0;seq=0;
+            // Old close/abort callbacks cannot publish against the new core or revoke its lease.
+            try {previous.dispose();} catch { /* cleanup continued through core close; do not undo adoption */ }
+            binding.activate();
+            for(const [ws,p] of peers) {p.authenticated=false;ws.close(1012,'Project changed; reconnect');}
+            return project;
+          } finally {
+            try {if(!adopted){await prepared.execution?.runner.stopAll();prepared.dispose();}}
+            finally {transitioning=false;}
+          }
         }
         if(url.pathname==='/api/project/settings') { assertVersion(body.expectedWorkspaceVersion);coach?.abort();session.releaseCoach();workspace.updateSettings(body.settings);snapshot();return workspace.getProject(session.state.sessionId); }
         if(url.pathname==='/api/file') { gate.mutate({...body,actor:'STUDENT'});snapshot();return workspace.getProject(session.state.sessionId); }
@@ -385,7 +436,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }
       const command=message;
       const op=ledger.run(`WS:${message.messageId}`,message,async()=>{
-        if(transitioning && !['PING','PROPOSAL_RESPONSE'].includes(command.type)) fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
+        if(transitioning && !['PING','PROPOSAL_RESPONSE','WINDOW_STATE','TIMER_ACTION'].includes(command.type)) fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
         switch(command.type) {
           case 'CODE_CHANGED': {
             const doc=gate.write({...authInput(command.clientId,command.sessionId,p.controlEpoch),path:p.path,baseVersion:p.baseVersion,content:p.content});
@@ -419,16 +470,17 @@ export function createPairCoachServer(options: ServerOptions = {}) {
                 if(p.accepted) {
                   if(Date.parse(proposal.expiresAt)<=Date.now() || proposal.basedOnWorkspaceVersion!==p.basedOnWorkspaceVersion || proposal.basedOnWorkspaceVersion!==workspace.workspaceVersion) fail(409,'STALE_PROPOSAL','Projekt zmienił się lub propozycja wygasła.');
                   if(proposal.kind==='RESTORE_SNAPSHOT'||proposal.kind==='RETRY_FROM_SNAPSHOT') {
-                    coach?.abort();session.releaseCoach();
+                    transitioning=true;
                     try {
-                      gate.restoreSnapshot({...authInput(command.clientId,command.sessionId,session.state.controlEpoch),
+                      coach?.abort();session.releaseCoach();
+                      await gate.restoreSnapshot({...authInput(command.clientId,command.sessionId,session.state.controlEpoch),
                         snapshotId:proposal.snapshotId!,paths:proposal.paths,expectedWorkspaceVersion:proposal.basedOnWorkspaceVersion});
                     } catch(error) {
                       // Only documented pre-effect failures map to stale. Ambiguous recovery stays visible.
                       if(['SNAPSHOT_BACKUP_FAILED','DISK_CONFLICT','WORKSPACE_VERSION_CONFLICT'].includes((error as {code?:string}).code||''))
                         fail(409,'STALE_PROPOSAL','Nie można bezpiecznie wykonać kopii lub projekt zmienił się. Pliki nie zostały przywrócone.');
                       throw error;
-                    }
+                    } finally {transitioning=false;}
                   } else if(proposal.kind==='FINISH_EXERCISE') await finish('COMPLETED');
                   else fail(503,'GENERATION_UNAVAILABLE','Generowanie testów wymaga aktualnego, zwalidowanego planu AI; istniejące asercje pozostają chronione.');
                 }
@@ -455,9 +507,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     server, get workspace(){return workspace;},get session(){return session;},get gate(){return gate;},
     async listen():Promise<number> { await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{server.off('error',reject);resolve();});});return currentPort(); },
     async close():Promise<void> {
-      closing=true;clearInterval(heartbeat);coach?.close();await execution?.runner.stopAll();execution?.reports.close();
-      for(const ws of peers.keys()) ws.terminate();wss.close();session.close();workspace.close();
-      if(server.listening) await new Promise<void>((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
+      closing=true;clearInterval(heartbeat);
+      try {await execution?.runner.stopAll();} finally {
+        try {binding.dispose();} finally {
+          for(const ws of peers.keys())ws.terminate();wss.close();
+          if(server.listening)await new Promise<void>((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
+        }
+      }
     },
   };
 }

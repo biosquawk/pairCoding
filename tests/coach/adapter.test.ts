@@ -224,7 +224,11 @@ test('TEST-025 real provider boundary excludes .env and scrubs token in document
   assert.equal(contexts[0].documents.some(doc => doc.path.startsWith('.env')), false);
   f.adapter.updateRun({ runId: 'real-completed-fixture', mode: 'RUN_MAIN', status: 'SUCCEEDED', finishedAt: new Date().toISOString(), outputTail: 'LOCAL-SESSION-TOKEN-FIXTURE', testOutcome: 'NOT_APPLICABLE' } as Run);
   await until(() => contexts.length === 2);
-  assert.equal(contexts[1].lastRun!.outputTail, '[REDACTED]');
+  assert.equal(Object.hasOwn(contexts[1].lastRun!, 'outputTail'), false);
+  assert.equal(JSON.stringify(contexts[1].lastRun).includes('LOCAL-SESSION-TOKEN-FIXTURE'), false);
+  assert.equal(contexts[1].lastRun!.runId, 'real-completed-fixture');
+  assert.equal(contexts[1].lastRun!.status, 'SUCCEEDED');
+  assert.equal(contexts[1].lastRun!.testOutcome, 'NOT_APPLICABLE');
 });
 
 test('TEST-012 scroll/time not a new fact; nonwhitespace confirmed edit +2s re-enables analysis', async t => {

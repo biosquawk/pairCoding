@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ChatEntry, Document, Run, Session, Settings } from '../../shared/protocol';
+import {projectRunFacts, type RunFacts} from './runFacts';
 
 export interface ContextWorkspace {
   workspaceVersion: number;
@@ -18,7 +19,7 @@ export interface CoachContext {
   documents: { path: string; version: number; content: string }[];
   omittedPaths: string[];
   messages: ChatEntry[];
-  lastRun: Run | null;
+  lastRun: RunFacts | null;
   previousInterventions: { kind: string; path: string | null; workspaceVersion: number }[];
 }
 
@@ -91,7 +92,7 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
     timer: { status: session.timer.status, elapsedMs: session.timer.elapsedMs, limitMs: session.timer.limitMs },
     documents, omittedPaths,
     messages: messages.slice(-20).map(message => ({ ...message, text: redact(message.text) })),
-    lastRun: lastRun ? { ...lastRun, outputTail: redact(lastRun.outputTail) } : null,
+    lastRun: lastRun ? projectRunFacts(lastRun) : null,
     previousInterventions: previousInterventions.slice(-20),
   };
   // Metadata can also contain a pasted token (filename/message ID), not just code.

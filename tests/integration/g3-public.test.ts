@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
-import {createPairCoachServer, type ServerOptions} from '../../src/server/http';
+import {createPairCoachServer, type ServerOptions, type ReportAIFacts} from '../../src/server/http';
 import {REPORT_SYSTEM_PROMPT, type FrozenFacts} from '../../src/server/ReportService';
 import {WorkspaceService} from '../../src/server/WorkspaceService';
 import {SessionController} from '../../src/server/SessionController';
@@ -161,7 +161,7 @@ for(const mode of ['stop','timeout','finish'] as const) test(`G3 real parent/chi
 });
 
 test('G3 frozen report facts/consent/AI attribution and allowlisted AI projection survive later live edits + FAILED/retry',async t=>{
-  const received:FrozenFacts[]=[];let fail=true;let release!:(v:string)=>void;
+  const received:ReportAIFacts[]=[];let fail=true;let release!:(v:string)=>void;
   const f=await fixture(t,{reportGenerate:async(facts,signal)=>{received.push(facts);assert.equal(signal.aborted,false);if(fail)throw new Error('synthetic failure');return new Promise(r=>{release=r;});}},
     {'hidden.txt':'EXCLUDED_CONTEXT','key.pem':'EXCLUDED_KEY','.env.fixture':'EXCLUDED_ENV'});
   await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,aiConsent:true,contextPatterns:['**/*.py','**/*.pem','**/.env*']}});
