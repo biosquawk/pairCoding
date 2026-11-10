@@ -164,8 +164,13 @@ test('MVP2-3: real child hard-kill → rollback/restart; GUI never replays old c
   expect(Object.keys(secondJournal).filter(p => p.endsWith('/COMMITTED'))).toHaveLength(0);
   expect(Object.fromEntries(Object.keys(filesBelow(f.dataDir)).sort()
     .map(p => [p, fs.readFileSync(path.join(f.dataDir, p)).toString('base64')]))).toEqual(stableSessionBytes);
+  const secondSessionId = f.ready.sessionId;
   await page.getByRole('button', { name: 'Połącz ponownie', exact: true }).click();
+  await expect.poll(() => w.sent.some(m => m.type === 'HELLO' && m.sessionId === secondSessionId)).toBe(true);
+  await expect(page.getByRole('status').getByText('Połączono z backendem.', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Otwórz plik main.py', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Edytor pliku main.py', exact: true })).toBeVisible();
+  await expect(page.locator('.monaco-editor .view-lines').getByText('# human before restore', { exact: true })).toBeVisible();
   expect(w.decisions()).toHaveLength(1); expect(f.checkpoints()).toHaveLength(1);
   expect(f.events().filter(e => e.phase === 'PUBLISHED')).toHaveLength(0);
   expect(await snapshots(page, f)).toEqual(list);
