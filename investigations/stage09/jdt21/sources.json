@@ -1,0 +1,227 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/problem/ProblemReporter.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/problem/ProblemReporter.java",
+    "local": "raw/jdt-ProblemReporter.java",
+    "sha256": "39d12865f38fdb1665817c7ed8861528ee42f9ec9862b9d800ae22a1b3d8b511",
+    "bytes": 491744,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/impl/CompilerOptions.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/impl/CompilerOptions.java",
+    "local": "raw/jdt-CompilerOptions.java",
+    "sha256": "3343675ee63ab3347c0f580d38df07d448f11bebc9e11b4d125160d895bcc7ce",
+    "bytes": 147990,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/lookup/BinaryTypeBinding.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/lookup/BinaryTypeBinding.java",
+    "local": "raw/jdt-BinaryTypeBinding.java",
+    "sha256": "e8885b62be20974490dd6641f66b8941c7a2d066f5dda7b9cebc8595e841290b",
+    "bytes": 111857,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/classfmt/ClassFileReader.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/classfmt/ClassFileReader.java",
+    "local": "raw/jdt-ClassFileReader.java",
+    "sha256": "34aebbafd1eb7da6d096539b0fe6a686a42ed2fe9168138608c9793baef522da",
+    "bytes": 55951,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/classfmt/AnnotationInfo.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/classfmt/AnnotationInfo.java",
+    "local": "raw/jdt-AnnotationInfo.java",
+    "sha256": "1b9803b127f74c221db508a55e1bcfad66e60a9d9600898726c9445417d0658d",
+    "bytes": 16574,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/lookup/TagBits.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/lookup/TagBits.java",
+    "local": "raw/jdt-TagBits.java",
+    "sha256": "985fe650f65b237419101555878b8b77b1acedbd1c99e1350c759b1fd37a5d1c",
+    "bytes": 8765,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/classfmt/ClassFileConstants.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/classfmt/ClassFileConstants.java",
+    "local": "raw/jdt-ClassFileConstants.java",
+    "sha256": "17266f3b3404755e70e9784106caff6d6378fbbd3a82b5ae7269e796ca9f9e20",
+    "bytes": 10077,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/codegen/ConstantPool.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/codegen/ConstantPool.java",
+    "local": "raw/jdt-ConstantPool.java",
+    "sha256": "e9a28b37126d03ea8b34febcd14acdc93d6110a734191f44bd5f8bfc4b68f1ae",
+    "bytes": 73911,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/ast/ASTNode.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/ast/ASTNode.java",
+    "local": "raw/jdt-ASTNode.java",
+    "sha256": "7da2118691e302d1a8d56520707828c2c77298ea7519afb29c7f00c67efb0150",
+    "bytes": 70111,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/env/IBinaryAnnotation.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/env/IBinaryAnnotation.java",
+    "local": "raw/jdt-IBinaryAnnotation.java",
+    "sha256": "727e8704379bec8ece32168cfd42428dd09455bf146b6303dc99e41168e8acb4",
+    "bytes": 1183,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/core/compiler/IProblem.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/core/compiler/IProblem.java",
+    "local": "raw/jdt-IProblem.java",
+    "sha256": "cf1728cb5ae35c6d84cc41d6c1214d8c9b7da25ba6967643682302a27e2cf3e4",
+    "bytes": 110532,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/problem/messages.properties",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/problem/messages.properties",
+    "local": "raw/jdt-messages.properties",
+    "sha256": "646b49f8801178570f53b2e00a1048f2bb7ff21447c4d15f4b602b614d2d796e",
+    "bytes": 88479,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/util/JrtFileSystem.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/util/JrtFileSystem.java",
+    "local": "raw/jdt-JrtFileSystem.java",
+    "sha256": "8086f51efa012ab7eb3180d668940aa25f0ed72f864d7844841dc024cfac006a",
+    "bytes": 11468,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/5a4dd839342e057849b378ec912c47035db65dbb/org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/util/CtSym.java",
+    "revision": "5a4dd839342e057849b378ec912c47035db65dbb",
+    "path": "org.eclipse.jdt.core.compiler.batch/src/org/eclipse/jdt/internal/compiler/util/CtSym.java",
+    "local": "raw/jdt-CtSym.java",
+    "sha256": "91caea24460fdbd0a496224ecf37f8e9851521b9ee99398b50c793292e37f60c",
+    "bytes": 16163,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/79ceacffdea9ca0b7f57ce3476a57e34bc154188/org.eclipse.jdt.core/model/org/eclipse/jdt/internal/core/builder/ClasspathJrtWithReleaseOption.java",
+    "revision": "79ceacffdea9ca0b7f57ce3476a57e34bc154188",
+    "path": "org.eclipse.jdt.core/model/org/eclipse/jdt/internal/core/builder/ClasspathJrtWithReleaseOption.java",
+    "local": "raw/jdt-ClasspathJrtWithReleaseOption.java",
+    "sha256": "f1cdf1d72b2f44bf5de0cc91c0fd8f8afbe3e34585fcfacd53f85ccdab84a2f6",
+    "bytes": 9606,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/79ceacffdea9ca0b7f57ce3476a57e34bc154188/org.eclipse.jdt.core/model/org/eclipse/jdt/internal/core/JrtPackageFragmentRoot.java",
+    "revision": "79ceacffdea9ca0b7f57ce3476a57e34bc154188",
+    "path": "org.eclipse.jdt.core/model/org/eclipse/jdt/internal/core/JrtPackageFragmentRoot.java",
+    "local": "raw/jdt-JrtPackageFragmentRoot.java",
+    "sha256": "4ac18e3d88b19ab0d9e6d977b41b51ee016c4eec2b477fbaf97cdadbd7930524",
+    "bytes": 7816,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse-jdt/eclipse.jdt.core/79ceacffdea9ca0b7f57ce3476a57e34bc154188/org.eclipse.jdt.core/model/org/eclipse/jdt/core/JavaCore.java",
+    "revision": "79ceacffdea9ca0b7f57ce3476a57e34bc154188",
+    "path": "org.eclipse.jdt.core/model/org/eclipse/jdt/core/JavaCore.java",
+    "local": "raw/jdt-JavaCore.java",
+    "sha256": "04777b5dfc54cb6fb62fb60ac746d6e77be1faf51f7ff13323208061540b4d2e",
+    "bytes": 328356,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/DiagnosticsHandler.java",
+    "revision": "d98abba8f04cf041542d9ebb6df0d472a1395606",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/DiagnosticsHandler.java",
+    "local": "raw/jdtls-DiagnosticsHandler.java",
+    "sha256": "ac3e3b65e17e07238e935294c49dfba249982f11ad003dc39c144eca4c3960f9",
+    "bytes": 3105,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/BaseDiagnosticsHandler.java",
+    "revision": "d98abba8f04cf041542d9ebb6df0d472a1395606",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/BaseDiagnosticsHandler.java",
+    "local": "raw/jdtls-BaseDiagnosticsHandler.java",
+    "sha256": "40ff55a3cb2e70544fea47848427679913f8a053133401aead58d4c7e5bbf1bd",
+    "bytes": 16301,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openjdk/jdk21u/ba94eace682733f66e623c089bcafcf4a1b8e39c/make/langtools/src/classes/build/tools/symbolgenerator/CreateSymbols.java",
+    "revision": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "path": "make/langtools/src/classes/build/tools/symbolgenerator/CreateSymbols.java",
+    "local": "raw/javac21-CreateSymbols.java",
+    "sha256": "9c8420f72ca4e6d46712a0df80e7b8319234c18256f929b027f0d5dc8ea43eca",
+    "bytes": 192140,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openjdk/jdk21u/ba94eace682733f66e623c089bcafcf4a1b8e39c/src/java.base/share/classes/java/lang/ScopedValue.java",
+    "revision": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "path": "src/java.base/share/classes/java/lang/ScopedValue.java",
+    "local": "raw/javac21-ScopedValue.java",
+    "sha256": "f3972e748779d7da6dcd9da740df316db13be6da88c5b91c4ccc9313cfa56f33",
+    "bytes": 43000,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openjdk/jdk21u/ba94eace682733f66e623c089bcafcf4a1b8e39c/src/java.base/share/classes/jdk/internal/javac/PreviewFeature.java",
+    "revision": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "path": "src/java.base/share/classes/jdk/internal/javac/PreviewFeature.java",
+    "local": "raw/javac21-PreviewFeature.java",
+    "sha256": "b80bab70e0a25a384f4673178a90b14d3e5166aba9c6df2b970d45a2ffb6a137",
+    "bytes": 3761,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openjdk/jdk21u/ba94eace682733f66e623c089bcafcf4a1b8e39c/src/jdk.compiler/share/classes/com/sun/tools/javac/code/Preview.java",
+    "revision": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "path": "src/jdk.compiler/share/classes/com/sun/tools/javac/code/Preview.java",
+    "local": "raw/javac21-Preview.java",
+    "sha256": "44662f618e1c5f8257a5eb2f68e806f6fab48660b1b8911386d7807c61a14010",
+    "bytes": 11526,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openjdk/jdk21u/ba94eace682733f66e623c089bcafcf4a1b8e39c/src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+    "revision": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "path": "src/jdk.compiler/share/classes/com/sun/tools/javac/comp/Check.java",
+    "local": "raw/javac21-Check.java",
+    "sha256": "51996df6f37afecb0c9f65f20f70c37af03b7a55152c3f704cdc1135c27be5eb",
+    "bytes": 237914,
+    "status": "OK"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/openjdk/jdk21u/ba94eace682733f66e623c089bcafcf4a1b8e39c/src/jdk.compiler/share/classes/com/sun/tools/javac/jvm/ClassReader.java",
+    "revision": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "path": "src/jdk.compiler/share/classes/com/sun/tools/javac/jvm/ClassReader.java",
+    "local": "raw/javac21-ClassReader.java",
+    "sha256": "73d9c1337e75f904ccbf53dd5bc4525d3e67d32bf276923dcefa452678a542ce",
+    "bytes": 135277,
+    "status": "OK"
+  }
+]

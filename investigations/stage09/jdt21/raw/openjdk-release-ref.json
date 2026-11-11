@@ -1,0 +1,10 @@
+{
+  "ref": "refs/tags/jdk-21.0.13+9",
+  "node_id": "REF_kwDOJvqWZ7dyZWZzL3RhZ3MvamRrLTIxLjAuMTMrOQ",
+  "url": "https://api.github.com/repos/openjdk/jdk21u/git/refs/tags/jdk-21.0.13+9",
+  "object": {
+    "sha": "10a4adb7b3e073d5f8e4369914af82f9130e69c0",
+    "type": "tag",
+    "url": "https://api.github.com/repos/openjdk/jdk21u/git/tags/10a4adb7b3e073d5f8e4369914af82f9130e69c0"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "node_id": "TA_kwDOJvqWZ9oAKDEwYTRhZGI3YjNlMDczZDVmOGU0MzY5OTE0YWY4MmY5MTMwZTY5YzA",
+  "sha": "10a4adb7b3e073d5f8e4369914af82f9130e69c0",
+  "url": "https://api.github.com/repos/openjdk/jdk21u/git/tags/10a4adb7b3e073d5f8e4369914af82f9130e69c0",
+  "tagger": {
+    "name": "Christoph Langer",
+    "email": "clanger@openjdk.org",
+    "date": "2026-10-20T13:12:48Z"
+  },
+  "object": {
+    "sha": "ba94eace682733f66e623c089bcafcf4a1b8e39c",
+    "type": "commit",
+    "url": "https://api.github.com/repos/openjdk/jdk21u/git/commits/ba94eace682733f66e623c089bcafcf4a1b8e39c"
+  },
+  "tag": "jdk-21.0.13+9",
+  "message": "Added tag jdk-21.0.13+9 for changeset ba94eace6827\n",
+  "verification": {
+    "verified": false,
+    "reason": "unsigned",
+    "signature": null,
+    "payload": null,
+    "verified_at": null
+  }
+}
