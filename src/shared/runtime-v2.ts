@@ -99,5 +99,6 @@ export interface ProjectV2 extends Omit<import('./protocol').Project, 'settings'
   settings: SettingsV2; capabilities: CapabilitiesV2;
 }
 export interface SessionBundleV2 extends Omit<import('./protocol').SessionBundle, 'project' | 'lastRun'> {
+  languageBootstrap: import('./language-authority-v2').LanguageBootstrapV2 | null;
   project: ProjectV2; lastRun: RunV2 | null;
 }
