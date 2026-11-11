@@ -1,0 +1,20 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { validateRuntimeConfigV1 } from '../../src/shared/validation-v2';
+const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+test('shipped root config conforms to frozen RuntimeConfigV1 with package-relative sources and no fallback', () => {
+  const config=JSON.parse(fs.readFileSync(path.join(repo,'paircoach.runtime.json'),'utf8'));
+  assert.equal(validateRuntimeConfigV1(config),true);
+  assert.equal(config.activeProfile,'java-maven-21');
+  assert.equal(config.workspaceRoot,'./examples/java-pattern');
+  assert.equal(config.runtimeCatalog,'./runtimes/catalog.json');
+  assert.equal(config.imageLock,'./runtimes/images.lock.json');
+  assert.deepEqual(config.execution,{backend:'docker',pullPolicy:'never'});
+  assert.deepEqual(config.languageFeatures,{completion:true,diagnostics:true});
+  for(const key of ['workspaceRoot','runtimeCatalog','imageLock'])assert.equal(path.isAbsolute(config[key]),false);
+  const before=JSON.parse(fs.readFileSync(path.join(repo,'package.json'),'utf8'));
+  assert.equal(before.scripts['runtime:prepare'],'node scripts/runtime-prepare-cli.mjs');
+});
