@@ -90,6 +90,7 @@ export class LiveBackend {
   // snapshots may describe the server view BEFORE an already requested tab.
   private selectedView: { path: string; projectId: string; sessionId: string } | null = null;
   private selectionRequest = 0;
+  private snapshotsRequest = 0;
 
   constructor(options: LiveOptions = {}) {
     this.baseUrl = (options.baseUrl ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
@@ -184,7 +185,7 @@ export class LiveBackend {
         }
       }
       this.replaceFinishSession(session.sessionId);
-      this.project = project; this.session = session;
+      this.clearForeignSnapshots(project.projectId); this.project = project; this.session = session;
       const ws = this.socketFactory(`${this.baseUrl.replace(/^http/, 'ws')}/ws/session`);
       this.ws = ws;
       this.connectionTimer = setTimeout(() => { if (!this.synced) ws.close(); }, 5000);
@@ -234,7 +235,16 @@ export class LiveBackend {
     this.finishAttempt = null;
     this.persist(); this.ws?.close(); this.ws = null;
   }
+  private clearForeignSnapshots(projectId: string) {
+    if (this.project?.projectId !== projectId) {
+      // Never display recovery copies (or their read error) from another root
+      // while its replacement list is still loading.
+      this.snapshotsRequest++;
+      this.state.snapshots = []; this.state.snapshotsError = null;
+    }
+  }
   private projectState(project: Wire.Project) {
+    this.clearForeignSnapshots(project.projectId);
     this.project = project;
     this.state.workspaceVersion = project.workspaceVersion;
     this.state.projectSettings = mapSettings(project.settings);
@@ -725,6 +735,7 @@ export class LiveBackend {
       if (this.finishAttempt !== attempt || this.stopped) return;
       if (attempt.replaced || !this.finishReportMatches(attempt, report)) { this.unknownFinish(attempt); return; }
       this.state.report = mapReport(this.latestFinishReport(attempt, report)); this.finishAttempt = null; this.publish();
+      void this.refreshSnapshots();
     } catch (error) {
       if ((attempt && this.finishAttempt !== attempt) || this.stopped) return;
       if (attempt && !(error instanceof HttpRejectedError)) this.unknownFinish(attempt,
@@ -786,6 +797,7 @@ export class LiveBackend {
       if (this.decisionResultError === attempt.notice) this.decisionResultError = null;
       if (this.state.connectionError === attempt.notice) this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError ?? attempt.previousError;
       this.publish();
+      void this.refreshSnapshots();
     } catch { /* Keep UNKNOWN; a later report/state/authorized snapshot may retry GET only. */ }
     finally {
       attempt.reading = false;
@@ -807,8 +819,19 @@ export class LiveBackend {
     } catch (error) { if (this.project?.projectId === projectId) this.fail(error); return false; }
   }
   async refreshSnapshots() {
-    try { const snapshots = await this.http<Wire.Snapshot[]>('/api/snapshots'); this.state.snapshots = snapshots.map(s => ({ id: s.snapshotId, label: s.label, timestamp: Date.parse(s.createdAt), files: s.paths.map(path => ({ path, content: '' })) })); this.state.snapshotsError = null; this.publish(); }
-    catch (error) { this.state.snapshotsError = error instanceof Error ? error.message : String(error); this.publish(); }
+    if (!this.project || this.stopped) return;
+    const projectId = this.project.projectId, generation = this.generation, request = ++this.snapshotsRequest;
+    const current = () => !this.stopped && this.project?.projectId === projectId
+      && this.generation === generation && this.snapshotsRequest === request;
+    try {
+      const snapshots = await this.http<Wire.Snapshot[]>('/api/snapshots');
+      if (!current() || snapshots.some(s => s.projectId !== projectId)) return;
+      this.state.snapshots = snapshots.map(s => ({ id: s.snapshotId, label: s.label, timestamp: Date.parse(s.createdAt), files: s.paths.map(path => ({ path, content: '' })) }));
+      this.state.snapshotsError = null; this.publish();
+    } catch (error) {
+      if (!current()) return;
+      this.state.snapshotsError = error instanceof Error ? error.message : String(error); this.publish();
+    }
   }
   restoreSnapshotById(snapshotId: string) { this.safeSend('PROPOSAL_REQUEST', { kind: 'RESTORE_SNAPSHOT', snapshotId }); }
   async resolveConflict(choice: 'KEEP_LOCAL' | 'LOAD_DISK') {
