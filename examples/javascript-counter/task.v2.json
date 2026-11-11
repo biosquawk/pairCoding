@@ -1,0 +1,38 @@
+{
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SCRIPT",
+          "path": "main.js"
+        },
+        "tests": {
+          "paths": [
+            "counter.test.js"
+          ],
+          "names": []
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SCRIPT",
+          "path": "main.js"
+        },
+        "tests": {
+          "paths": [
+            "counter.test.js"
+          ],
+          "names": []
+        }
+      }
+    }
+  ]
+}
