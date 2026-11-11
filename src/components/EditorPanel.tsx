@@ -301,7 +301,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   useEffect(() => client.onFileUpdated((file) => {
     if (!file.isExternalOrSnapshot || !monacoRef.current) return;
     const model = monacoRef.current.editor.getModel(modelUri(monacoRef.current, file.path));
-    if (model && normalizeContent(model.getValue()) !== normalizeContent(file.content)) {
+    // A recreate/rename-back file read belongs to the NEW lifetime. Never overwrite the
+    // retired model's recoverable bytes before the layout phase archives and replaces it.
+    if (model && !retiredModelsRef.current.has(model) && normalizeContent(model.getValue()) !== normalizeContent(file.content)) {
       isApplyingCoachStepRef.current = true;
       try {
         const mutate=()=>model.setValue(normalizeContent(file.content));
