@@ -132,7 +132,19 @@ for (const invalid of ['expired', 'stale', 'backup-write-denied'] as const) {
 }
 
 visibilityTest('TEST-016: real hidden window pauses server timer, retains veto and manual pause after return', async ({ page, make, wire }) => {
-  const f = await make(); await open(page, f, wire); await veto(page, f);
+  const f = await make(); await open(page, f, wire);
+  // This case covers hidden-window veto retention, not double-Escape timing (AC011/027).
+  // Activate the existing production veto button with a real key; never inject a command.
+  const emergencyVeto = page.getByRole('button', { name: 'Przerwij trenerowi (2× Esc)', exact: true });
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.visibilityState === 'visible' && document.hasFocus())).toBe(true);
+  await expect(emergencyVeto).toBeVisible(); await expect(emergencyVeto).toBeEnabled();
+  const since = wire.sent.length;
+  await emergencyVeto.press('Enter');
+  await expect.poll(() => wire.sent.slice(since).some(m => m.type === 'VETO_ESCAPE')).toBe(true);
+  const vetoAction = wire.sent.slice(since).find(m => m.type === 'VETO_ESCAPE');
+  await wire.ok(vetoAction);
+  await expect.poll(async () => (await session(page, f)).cooldownAfterVeto).toBe(true);
   const original = f.read(), controls = wire.received.filter(m => m.type === 'COACH_STEP_EDIT').length;
   let restore = await hide(page, f, wire);
   try {
