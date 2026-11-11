@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
-  realpathSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
+  realpathSync, renameSync, unlinkSync, writeFileSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import type { ChatEntry, Report, Run, Session, Snapshot } from '../shared/protocol';
 import { AppError } from './errors';
@@ -68,9 +68,17 @@ export class ReportService {
       error: null,
     };
     // Exclusive creation: a crash/retry must not overwrite even an orphaned original facts file.
-    this.writeExclusive(path.join(dir, 'facts.json'), JSON.stringify({ sha256: digest, serialized }));
+    const factsPath = path.join(dir, 'facts.json'), storedFacts = JSON.stringify({ sha256: digest, serialized });
+    const ownedFacts = this.writeExclusive(factsPath, storedFacts);
     const entry: Entry = { report, facts: frozen, hash: digest };
-    this.persist(entry);
+    try { this.persist(entry); }
+    catch (error) {
+      // Only this unpublished attempt is ours to discard. A committed/ambiguous report wins.
+      try {
+        if (this.reportUncommitted(path.join(dir, 'report.json'))) this.removeOwnFile(factsPath, ownedFacts, storedFacts);
+      } catch { /* Keep evidence on cleanup failure; never mask the original persistence error. */ }
+      throw error;
+    }
     this.entries.set(sessionId, entry);
     this.options.emit('SESSION_REPORT', copy(report));
     this.schedule(entry);
@@ -109,12 +117,31 @@ export class ReportService {
     if (lstatSync(dir).isSymbolicLink()) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Dowiązanie w magazynie raportów.');
     return dir;
   }
-  private writeExclusive(file: string, content: string): void {
-    let fd: number | undefined;
+  private removeOwnFile(file: string, identity: Stats, exactContent?: string): void {
+    const current = lstatSync(file);
+    if (current.isFile() && current.dev === identity.dev && current.ino === identity.ino &&
+        (exactContent === undefined || readFileSync(file, 'utf8') === exactContent)) unlinkSync(file);
+  }
+  private reportUncommitted(file: string): boolean {
+    try { return lstatSync(file).isDirectory(); } // Leave the foreign obstruction itself untouched.
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
+  }
+  private writeExclusive(file: string, content: string): Stats {
+    // A failed open (especially EEXIST) gives us no ownership and must never run cleanup.
+    const fd = openSync(file, 'wx', 0o600);
+    let identity: Stats | undefined;
+    let failure: { error: unknown } | undefined;
     try {
-      fd = openSync(file, 'wx', 0o600);
+      identity = fstatSync(fd); // Capture ownership before a partial write/fsync can fail.
       writeFileSync(fd, content, 'utf8'); fsyncSync(fd);
-    } finally { if (fd !== undefined) closeSync(fd); }
+    } catch (error) { failure = { error }; }
+    try { closeSync(fd); } catch (error) { failure ??= { error }; }
+    if (failure) {
+      try { if (identity) this.removeOwnFile(file, identity); }
+      catch { /* An ambiguous/replaced file or failed cleanup is retained, not silently adopted. */ }
+      throw failure.error;
+    }
+    return identity!;
   }
   private persist(entry: Entry): void {
     const dir = this.sessionDir(entry.report.sessionId);
