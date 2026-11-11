@@ -222,3 +222,74 @@ test('UNIT actual inspect may omit empty Entrypoint; nonempty or malformed entry
   assert.equal((await f.resolver().probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
   for (const entrypoint of [['/unreviewed'], '']) { config.Entrypoint = entrypoint; f.write(); await denied(f); }
 });
+
+/** New roots have their OWN exact output/cache evidence; positive controls prove each is valid.
+ * No old malformed ambiguity fixture is treated as proof of two actual matches. */
+function clonePreparedRoot(f: ReturnType<typeof fixture>, name: string, dependency?: string) {
+  const root = path.join(f.temp, name); fs.cpSync(f.root, root, { recursive: true }); fs.chmodSync(root, 0o700);
+  const receipt = structuredClone(f.receipt);
+  receipt.request.outputRoot = root;
+  const oldCache = path.join(root, 'cache', profile.adapterFamily, f.identity.toolchainHash, receipt.request.dependencySha256);
+  const cache = path.join(root, 'cache', profile.adapterFamily, f.identity.toolchainHash, dependency ?? receipt.request.dependencySha256);
+  if (cache !== oldCache) fs.renameSync(oldCache, cache);
+  receipt.request.dependencySha256 = dependency ?? receipt.request.dependencySha256;
+  const prepared = { ...f.prepared, dependencySha256: receipt.request.dependencySha256 };
+  const bytes = Buffer.from(JSON.stringify(prepared)); fs.writeFileSync(path.join(cache, 'dependencies-prepared.json'), bytes);
+  receipt.cacheEvidence.root = cache;
+  receipt.cacheEvidence.dependencies = { path: 'dependencies-prepared.json', sha256: hash(bytes), actual: prepared };
+  const write = () => fs.writeFileSync(path.join(root, 'receipt.json'), JSON.stringify(receipt)); write();
+  return { root, cache, receipt, write };
+}
+async function unrelatedPreparedRoot(f: ReturnType<typeof fixture>) {
+  const workspace = path.join(f.temp, 'other-project'); fs.cpSync(f.workspace, workspace, { recursive: true });
+  fs.writeFileSync(path.join(workspace, 'package.json'), '{"name":"another-valid-project"}');
+  f.dependencies.readRunSourceInventory = async root => ['main.js', 'package.json'].map(p => {
+    const bytes = fs.readFileSync(path.join(root, p)); return { path: p, sha256: hash(bytes), bytes: bytes.length };
+  });
+  const dependency = dependencyHash((await f.dependencies.readRunSourceInventory(workspace)).map(({path,sha256}) => ({path,sha256})));
+  const other = clonePreparedRoot(f, 'other-prepared', dependency);
+  other.receipt.request.project.root = workspace; other.write();
+  const runtime = { ...f.runtime, workspaceRoot: workspace };
+  assert.equal((await f.resolver([other.root]).probe(runtime, 'RUN_MAIN', run)).canRun, true, 'valid unrelated positive control');
+  assert.equal((await f.resolver([f.root]).probe(f.runtime, 'RUN_MAIN', run)).canRun, true, 'valid current positive control');
+  return { ...other, runtime };
+}
+test('UNIT multioutput valid unrelated dependency output never poisons the unique current match (both orders and full cache)', async t => {
+  const f = fixture(t), other = await unrelatedPreparedRoot(f);
+  for (const roots of [[other.root, f.root], [f.root, other.root]]) {
+    const resolver = f.resolver(roots);
+    assert.equal((await resolver.probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+    const selected = await resolver.resolveCache(f.runtime, 'RUN_MAIN', run, { assertCurrent() {} });
+    assert.equal(selected.outputRoot, f.root); assert.equal(selected.cacheRoot, f.cache);
+    assert.equal(selected.dependencySha256, f.receipt.request.dependencySha256);
+    assert.deepEqual(selected.files.map(f => f.path), ['dependencies-prepared.json', 'tools.json']);
+  }
+});
+test('UNIT multioutput valid unrelated dependency output alone yields zero current matches, not false readiness', async t => {
+  const f = fixture(t), other = await unrelatedPreparedRoot(f);
+  assert.equal((await f.resolver([other.root]).probe(f.runtime, 'RUN_MAIN', run)).canRun, false);
+});
+test('UNIT multioutput TWO genuinely valid current roots are ambiguous, both single-root positive controls pass', async t => {
+  const f = fixture(t), second = clonePreparedRoot(f, 'valid-second');
+  for (const root of [f.root, second.root]) assert.equal((await f.resolver([root]).probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+  for (const roots of [[f.root, second.root], [second.root, f.root]])
+    await assert.rejects(f.resolver(roots).resolveCache(f.runtime, 'RUN_MAIN', run, { assertCurrent() {} }), { code: 'PREPARE_REQUIRED' });
+});
+test('UNIT multioutput matching bad cache evidence is never bypassed by a valid unrelated root', async t => {
+  const f = fixture(t), other = await unrelatedPreparedRoot(f);
+  f.receipt.cacheEvidence.root = other.cache; fs.writeFileSync(path.join(f.root, 'receipt.json'), JSON.stringify(f.receipt));
+  for (const roots of [[other.root, f.root], [f.root, other.root]]) assert.equal((await f.resolver(roots).probe(f.runtime, 'RUN_MAIN', run)).canRun, false);
+});
+test('UNIT multioutput malformed dependency selector is not silently ignored beside a valid current root', async t => {
+  const f = fixture(t), second = clonePreparedRoot(f, 'malformed-second');
+  delete second.receipt.request.dependencySha256; second.write();
+  assert.equal((await f.resolver([second.root, f.root]).probe(f.runtime, 'RUN_MAIN', run)).canRun, false);
+});
+test('UNIT multioutput invalid matching candidate is not skipped even beside another VALID current candidate', async t => {
+  const f = fixture(t), second = clonePreparedRoot(f, 'initially-valid-second');
+  assert.equal((await f.resolver([f.root]).probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+  assert.equal((await f.resolver([second.root]).probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+  second.receipt.cacheEvidence.tools.sha256 = 'f'.repeat(64); second.write();
+  for (const roots of [[second.root, f.root], [f.root, second.root]])
+    assert.equal((await f.resolver(roots).probe(f.runtime, 'RUN_MAIN', run)).canRun, false);
+});

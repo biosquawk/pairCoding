@@ -214,6 +214,11 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
         // Unrelated valid outputs are not candidates; never select by directory/profile-name guesses.
         const project = object(request.project);
         if (request.key !== runtime.profile.id || request.workingDirectory !== run.task.workingDirectory) continue;
+        // Repeatable selectors may contain another valid project of the SAME profile/cwd.
+        // A well-formed different raw dependency identity is not a candidate. Matching outputs
+        // still require EVERY actual cache/tool/engine/image proof below; malformed is not skipped.
+        requireThat(hex(request.dependencySha256));
+        if (request.dependencySha256 !== dependency) continue;
         // Explicit prepared output is reusable across roots only with the complete current raw
         // dependency hash + exact pins/tools/cache/engine/image proof below. Keep the historical
         // producer request untouched; a root-sensitive producer helper must fail, not be remapped.
