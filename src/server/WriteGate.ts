@@ -3,6 +3,7 @@ import { WorkspaceService } from './WorkspaceService';
 import { SessionController } from './SessionController';
 import { AppError } from './errors';
 import type { AcknowledgedRunInput, InputFile } from './execution/ports';
+import type { SettingsTransactionIdentity, SettingsWriteLease } from './settings-v2';
 
 export type MutationAuth = { clientId: string; sessionId: string; controlEpoch: number; actor: 'STUDENT' | 'COACH' };
 export type FileMutation = MutationAuth & { operation: 'CREATE' | 'RENAME' | 'DELETE'; path: string;
@@ -91,6 +92,35 @@ export class WriteGate {
         return copied;
       } finally { held = false; }
     });
+  }
+
+  /** @internal Prevent accidental composition with a gate from another project instance. */
+  _assertSettingsWorkspace(workspace: WorkspaceService): void {
+    if (workspace !== this.workspace) throw new AppError(409, 'WORKSPACE_SCOPE_MISMATCH', 'Settings authority and WriteGate must share the actual workspace instance.');
+  }
+
+  /** @internal Settings use the SAME FIFO/root exclusion as writes and immutable Run capture.
+   * Recovery is trusted server work, not browser authority to mutate an old session. */
+  _withSettingsLease<T>(identity: Readonly<SettingsTransactionIdentity>, recovery: boolean,
+      action: (lease: SettingsWriteLease) => T): Promise<T> {
+    const accepted = structuredClone(identity);
+    const auth: MutationAuth = { clientId: accepted.clientId, sessionId: accepted.sessionId,
+      controlEpoch: this.session.state.controlEpoch, actor: 'STUDENT' };
+    return this.workspace._withQueuedMutation(async () => {
+      let held = true;
+      const lease: SettingsWriteLease = { assertCurrent: () => {
+        if (!held) throw new AppError(409, 'SETTINGS_LEASE_RELEASED', 'Settings lease is no longer held.');
+        this.workspace._settingsVersionStore().assertCurrent();
+        if (recovery) {
+          if (this.session.state.writeOwner !== 'STUDENT') throw new AppError(409, 'WRITE_OWNER_CONFLICT', 'Student authority is required for settings recovery.');
+        } else {
+          this.authorize(auth);
+        }
+      } };
+      try {
+        lease.assertCurrent(); return action(lease);
+      } finally { held = false; }
+    }, true);
   }
 
   private writeAuthorized(input: MutationAuth & { path: string; baseVersion: number; content: string }): Document {

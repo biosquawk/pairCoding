@@ -41,6 +41,8 @@ export function createPreparedRuntimeInspection(transport: Pick<DockerTransport,
 }
 export interface PreparedRuntimeSelection {
   readonly outputRoot: string;
+  /** Historical prepare provenance only. NEVER a source path/inventory for Run capture. */
+  readonly preparationProjectRoot: string;
   readonly engineId: string;
   readonly image: Readonly<ImageLockEntry>;
   readonly caches: readonly Readonly<ManagedDependencyCache>[];
@@ -144,7 +146,11 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
         const receiptPath = path.join(root, 'receipt.json'), receipt = read(receiptPath), r = receipt.data, request = object(r.request);
         // Unrelated valid outputs are not candidates; never select by directory/profile-name guesses.
         const project = object(request.project);
-        if (request.key !== runtime.profile.id || project.root !== runtime.workspaceRoot || request.workingDirectory !== run.task.workingDirectory) continue;
+        if (request.key !== runtime.profile.id || request.workingDirectory !== run.task.workingDirectory) continue;
+        // Explicit prepared output is reusable across roots only with the complete current raw
+        // dependency hash + exact pins/tools/cache/engine/image proof below. Keep the historical
+        // producer request untouched; a root-sensitive producer helper must fail, not be remapped.
+        requireThat(text(project.root) && (path.posix.isAbsolute(project.root) || /^[A-Za-z]:[\\/]/.test(project.root) || /^\\\\[^\\]+\\[^\\]+/.test(project.root)));
         requireThat(r.schemaVersion === 1 && r.status === 'PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION' &&
           request.outputRoot === root && request.family === runtime.profile.adapterFamily && request.imageTag === runtime.image.image &&
           request.dependencySha256 === dependency && r.imageId === runtime.image.imageId && canonical(engine(r.engine)) === canonical(currentEngine));
@@ -184,7 +190,7 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
           sha256(readRecord(receiptPath, 4 * 1024 * 1024)!) === sha256(receipt.bytes) &&
           readRecord(toolPath, 128 * 1024)!.equals(toolBytes) && readRecord(preparedPath, 256 * 1024)!.equals(prepared.bytes));
         privateRoot(root); canonicalDirectory(directory);
-        matches.push({ outputRoot: root, engineId: currentEngine.ID, image: structuredClone(runtime.image), caches: [{ directory,
+        matches.push({ outputRoot: root, preparationProjectRoot: project.root, engineId: currentEngine.ID, image: structuredClone(runtime.image), caches: [{ directory,
           family: runtime.profile.adapterFamily, toolchainHash: identity.toolchainHash, dependencyHash: dependency, readOnly: true }] });
       }
       requireThat(matches.length === 1); // Multiple matching outputs are ambiguous even if their hashes agree.

@@ -84,7 +84,7 @@ for (const field of ['engine', 'image', 'tools', 'dependency', 'dispatcher', 'he
       case 'dispatcher': f.receipt.dispatcherFiles = [{ path: 'scripts/runtime-task.mjs', sha256: 'f'.repeat(64) }]; break;
       case 'helper': f.dependencies.resolvePreparedToolchainIdentity = () => { throw Error('installed pins changed'); }; break;
       case 'status': f.receipt.status = 'PLAN_ONLY_NOT_PREPARED'; break;
-      case 'project': f.receipt.request.project.root = path.join(f.temp, 'other-project'); break;
+      case 'project': f.receipt.request.project.root = '../untrusted-relative-root'; break;
       case 'cwd': f.receipt.request.workingDirectory = 'other'; break;
       case 'family': f.receipt.request.family = 'python'; break;
       case 'profile': f.receipt.request.key = 'unselected'; break;
@@ -149,4 +149,36 @@ test('UNIT malformed RepoDigest strings or incomplete OCI descriptors never conf
   f.inspected.RepoDigests = ['not a repository@' + f.image.digest]; f.write(); await denied(f);
   const inspected: any = f.inspected;
   inspected.RepoDigests = []; inspected.Descriptor = { digest: f.image.digest, mediaType: 'application/vnd.oci.image.manifest.v1+json' }; f.write(); await denied(f);
+});
+
+
+test('UNIT explicitly selected staging output keeps provenance, CURRENT raw dependency proof remains mandatory', async t => {
+  const f = fixture(t), staging = path.join(f.temp, 'former-staging-root');
+  // Staging no longer exists and its receipt inventory is not current source authority.
+  f.receipt.request.project = { root: staging, files: [{ path: 'main.js', sha256: 'f'.repeat(64) }] }; f.write();
+  const seen: string[] = [], inventory = f.dependencies.readRunSourceInventory;
+  f.dependencies.readRunSourceInventory = async root => { seen.push(root); return inventory(root); };
+  const result = await f.resolver().resolve(f.runtime, 'RUN_MAIN', run);
+  assert.equal(result.preparationProjectRoot, staging);
+  assert.deepEqual(seen, [f.workspace, f.workspace]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(f.root, 'receipt.json'), 'utf8')).request.project.root, staging);
+  fs.writeFileSync(path.join(f.workspace, 'package.json'), '{"new":"dependency"}'); await denied(f);
+});
+
+
+test('UNIT staging provenance never rewrites a root-sensitive producer identity', async t => {
+  const f = fixture(t), staging = path.join(f.temp, 'staged');
+  f.receipt.request.project.root = staging; f.write();
+  f.dependencies.resolvePreparedToolchainIdentity = request => {
+    assert.equal((request as any).project.root, staging);
+    return { ...f.identity, toolchainHash: 'f'.repeat(64) };
+  };
+  await denied(f);
+});
+
+
+test('UNIT nonlocal native staging provenance is metadata, not a path to resolve or open', async t => {
+  const f = fixture(t);
+  f.receipt.request.project.root = 'C:\\staging\\old project'; f.write();
+  assert.equal((await f.resolver().resolve(f.runtime, 'RUN_MAIN', run)).preparationProjectRoot, 'C:\\staging\\old project');
 });

@@ -1,0 +1,20 @@
+/** Real process-death seam child. No task process/Docker; exits by SIGKILL at a durable boundary. */
+import fs from 'node:fs';
+import path from 'node:path';
+import { WorkspaceService } from '../../src/server/WorkspaceService';
+import { SessionController } from '../../src/server/SessionController';
+import { WriteGate } from '../../src/server/WriteGate';
+import { SettingsV2Store } from '../../src/server/settings-v2';
+import { GateSettingsAuthority } from '../../src/server/runtime-coordinator/GateSettingsAuthority';
+const [root, boundary] = process.argv.slice(2);
+const workspace = new WorkspaceService(root, undefined, { durableVersions: true });
+const session = new SessionController(workspace), clientId = 'd6d23782-812d-46b6-83bb-2f2fa3f9ecf1'; session.claimLease(clientId);
+const authority = new GateSettingsAuthority(workspace, new WriteGate(workspace, session));
+const settingsPath = path.join(workspace.dataDir, 'project.json');
+const store = new SettingsV2Store({ settingsPath, authority, checkpoint: phase => { if (phase === boundary) process.kill(process.pid, 'SIGKILL'); } });
+if (boundary === 'COMMITTED') workspace.on('changed', change => { if (change.actor === 'SETTINGS') process.kill(process.pid, 'SIGKILL'); });
+const settings = { ...JSON.parse(fs.readFileSync(settingsPath, 'utf8')), aiConsent: true };
+const request = { requestId: 'crash-save', clientId, sessionId: session.state.sessionId, expectedWorkspaceVersion: workspace.workspaceVersion, settings };
+fs.writeSync(1, JSON.stringify(request) + '\n');
+await store.save({ request, humanConfirmed: true, expectedSourceSha256: store.read().sourceSha256 });
+throw Error('Crash boundary was not reached');
