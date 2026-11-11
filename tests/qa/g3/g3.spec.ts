@@ -157,7 +157,9 @@ visibilityTest('TEST-017: pauseOnHidden=false counts real hidden time but reject
   await expect(page.getByText('Połączono z backendem.', { exact: true })).toBeVisible();
   const policy = page.getByLabel('Pauzuj przy ukryciu', { exact: true });
   await expect(policy).toBeChecked(); const since = wire.sent.length;
-  await policy.click();
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.visibilityState === 'visible' && document.hasFocus())).toBe(true);
+  await policy.press('Space');
   await expect.poll(() => wire.sent.slice(since).some(m => m.type === 'TIMER_ACTION'
     && m.payload.action === 'SET_HIDDEN_POLICY' && m.payload.pauseOnHidden === false)).toBe(true);
   const action = wire.sent.slice(since).find(m => m.type === 'TIMER_ACTION' && m.payload.action === 'SET_HIDDEN_POLICY' && m.payload.pauseOnHidden === false);
