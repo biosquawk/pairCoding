@@ -93,6 +93,10 @@
         {
           "name": "node",
           "version": "22.22.0"
+        },
+        {
+          "name": "typescript",
+          "version": "5.9.3"
         }
       ],
       "compilerRelease": null,
@@ -176,6 +180,14 @@
         {
           "name": "node",
           "version": "22.22.0"
+        },
+        {
+          "name": "python",
+          "version": "3.13.9"
+        },
+        {
+          "name": "pytest",
+          "version": "8.4.2"
         }
       ],
       "compilerRelease": null,
@@ -263,6 +275,18 @@
         {
           "name": "node",
           "version": "22.22.0"
+        },
+        {
+          "name": "java",
+          "version": "11.0.33"
+        },
+        {
+          "name": "javac",
+          "version": "11.0.33"
+        },
+        {
+          "name": "maven",
+          "version": "3.9.12"
         }
       ],
       "compilerRelease": 11,
@@ -346,6 +370,18 @@
         {
           "name": "node",
           "version": "22.22.0"
+        },
+        {
+          "name": "java",
+          "version": "17.0.21"
+        },
+        {
+          "name": "javac",
+          "version": "17.0.21"
+        },
+        {
+          "name": "maven",
+          "version": "3.9.12"
         }
       ],
       "compilerRelease": 17,
@@ -429,6 +465,18 @@
         {
           "name": "node",
           "version": "22.22.0"
+        },
+        {
+          "name": "java",
+          "version": "21.0.13"
+        },
+        {
+          "name": "javac",
+          "version": "21.0.13"
+        },
+        {
+          "name": "maven",
+          "version": "3.9.12"
         }
       ],
       "compilerRelease": 21,
@@ -516,6 +564,18 @@
         {
           "name": "node",
           "version": "22.22.0"
+        },
+        {
+          "name": "java",
+          "version": "27.0.1.0"
+        },
+        {
+          "name": "javac",
+          "version": "27.0.1.0"
+        },
+        {
+          "name": "maven",
+          "version": "3.9.12"
         }
       ],
       "compilerRelease": 27,

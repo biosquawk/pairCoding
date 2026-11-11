@@ -56,3 +56,45 @@ The preparation receipt alone is deliberately PREPARED_REQUIRES_OFFLINE_AND_TOOL
 
 After integration the normal packager owner adds these paths/commands; package/lock/packager are
 untouched here. Runtime config selection, HTTP/Runner/settings/UI cutover are separate, not simulated.
+
+## Reviewed production-input preparation (not readiness)
+`production-inputs.lock.json` resolves immutable official linux/amd64 image manifests/configs,
+regular-file npm tool inventories and real PyPI wheel hashes. Catalog expected versions derive from
+those metadata; they are NOT measured actual tools. `images.lock.json` stays empty/NOTREADY until
+actual image ID+manifest/descriptor digest, tools and reviewed cache/offline receipts exist. Never
+substitute a local config imageId for an absent registry/OCI manifest digest.
+
+Operator workflow, only after K reviews the exact frozen source AND plan:
+1. `node scripts/runtime-operator.mjs plan ABS_PRIVATE_OPERATOR_ROOT NEW_PLAN.json` is pure:
+   nine cache jobs cover seven runtime profiles and Spring21/27; includes copied fixture bytes,
+   exact source/inventory hashes, explicit mounts/pins and language build recipes. No download/Docker.
+2. `node scripts/runtime-stage-inputs.mjs ABS_PRIVATE_OPERATOR_ROOT` creates a NEW private owned
+   root under an existing canonical parent. Downloads only exact official URLs/hash/size-bounded
+   artifacts. Node stdlib only; no package install, lifecycle script or host Java/Python/TS toolchain dependency.
+3. `node scripts/runtime-operator.mjs execute PLAN.json EXACT_PLAN_SHA256` refuses any source,
+   pin, fixture or staged-tool difference. Max ONE heavy operation, aggregate45min, command8min;
+   unknown/failure retains resources/receipts. Inspect exact ownership/state before any retry;
+   never rerun a partially consumed root, use force cleanup or Docker prune.
+
+Controlled prepare containers have network only during explicit dependency acquisition. Build uses
+network=none; Run/Test fixture smoke uses no network, immutable RO input, fresh independent RW copy,
+fresh artifacts and one RO dependency cache. All containers lack host socket/home/credentials. Exit,
+full raw logs, image/tools and bounded artifact digests persist before exact nonforce container-ID rm.
+Images/caches/inputs/evidence are retained for review; there is NO automated image/volume cleanup.
+The fixtures deliberately fail, then independent corrected copies must pass with nonzero testcase
+counts and no skipped tests. Smoke is Test-only, NOT Run/service/Stop/GUI/realACK authority or fullQA.
+
+Java LSP image has server `/opt/jdk27/bin/java`, targets `/opt/jdk11`, `/opt/jdk17`,
+`/opt/java/openjdk`(21), `/opt/jdk27`; exact JDT launcher/config in lock. Python LSP preinstalls
+same12 frozen wheels into `/opt/pylsp`, uses `/usr/local/bin/python -m pylsp` and explicit
+`PYTHONPATH=/opt/pylsp`. No startup install/fallback. Dedicated images are NOT runtime containers.
+Version probes are not LSP functionality proof. Raw JDT severity/oracle/FULL5aFAIL remain unchanged.
+
+Receipt writes use a writable exclusive handle, required file fsync, close, identity/content readback,
+rename and post-publication bounded readback. Directory fsync only tolerates established unsupported
+codes on actual Win32 after canonical component ancestry checks. File errors, POSIX directory errors,
+unexpected errors and close/rename/read errors always propagate. Win32 metadata-directory durability
+can be unavailable; confidentiality relies on operator private-parent inherited ACLs, NOT fake POSIX
+chmod/0700 assertions. This is not protection against a malicious same-user host process. Final native
+proof remains pending. Preparation request keys permit safe dots for the frozen `python-3.13` ID;
+no shared DTO/port, executable, mount or environment grammar changed.

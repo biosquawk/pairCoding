@@ -1,13 +1,9 @@
 {
-  "schemaVersion":1,
-  "readiness":"NOTREADY",
-  "reason":"No production dispatcher images have been built, inspected or tool-validated; images.lock images is deliberately empty and rejected by shared strict validation.",
-  "profilesMissingProductionPins":["javascript-node","typescript-node","python-3.13","java-maven-11","java-maven-17","java-maven-21","java-maven-27"],
-  "readOnlyReference":"ROOT/sequential-review-20261111/stage09-host-operator/runtime-wsl-01-prepare/evidence.json",
-  "baseReferencesNotProductionImages":[
-    {"family":"java-maven","release":21,"ref":"eclipse-temurin@sha256:0b84a658e0d745af944a4e4d40454bac2b2fba5252cf0f2990573a8aa0cb83e1","evidenceVersion":"21.0.13+9"},
-    {"family":"java-maven","release":27,"ref":"eclipse-temurin@sha256:de25c3be25d05d4e1f82d594fb3f3914271964361cb7cf20f3abf9d027c5ae72","evidenceVersion":"27.0.1.0"},
-    {"family":"python","ref":"python@sha256:f3dac913ab53b78c64f26d5518fcd7043d5a1a46522d6a493b598c3ed12f62a6","evidenceVersion":"3.13.18 (runtime spike, NOT Python LSP3.13.9 image)"}
-  ],
-  "missing":["Node image digest","JDK11/17 base image digests","Maven base image digests","dispatcher tool inventory and hashes","pytest wheel hash lock","production imageId/digest and actual tools","offline current dependency cache proof","language image pins supplied by separate language owner"]
+  "schemaVersion": 1,
+  "readiness": "NOTREADY",
+  "reason": "Reviewed immutable public inputs are now resolved in production-inputs.lock.json; NO production image build/inspect/offline receipts yet. images.lock remains deliberately empty/rejected.",
+  "profilesAwaitingProductionReceipts": ["javascript-node", "typescript-node", "python-3.13", "java-maven-11", "java-maven-17", "java-maven-21", "java-maven-27"],
+  "inputsResolved": ["Official linux/amd64 Node22.22.0/Python3.13.9/Temurin11,17,21,27/Maven3.9.12 manifest+config metadata", "Exact TypeScript5.9.3,fast-xml-parser5.3.0,strnum2.1.1 tarball SHA256+SHA512 and regular-file inventories", "Pytest8.4.2+all4 required LinuxCPython3.13 transitive wheel hashes", "JDT1.63.0/JVM27+separate11/17/21/27 targets and same12 pinned pylsp wheels coordinated with language owner"],
+  "remaining": ["K frozen source+operator request review before any execute", "Actual built imageId AND actual manifest/descriptor digest, never imageId pretending registry digest", "Actual tool inventories and reviewed prepared dependency/cache manifests", "Offline5example fixture checks, all7 profiles+Spring21/27", "Real LSP boot/correlation/GUI/native/fullF acceptance"],
+  "languageCoordination": "P1_2 frozen5a10b46fe74b8d956591a6ebb484f07d2509c27f; JVM21 historical bootstrap metadata explicitly corrected to actual JVM27; pylsp immutable PYTHONPATH=/opt/pylsp"
 }

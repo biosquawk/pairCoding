@@ -1,0 +1,21 @@
+// UNIT portability seam, NOT actual Win32 evidence. Same driver used on old and corrected source.
+import fs from 'node:fs';
+import path from 'node:path';
+import childProcess from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+import {createHash} from 'node:crypto';
+import {pathToFileURL} from 'node:url';
+const originalSync=fs.fsyncSync,originalOpen=fs.openSync,fds=new Map();
+fs.openSync=(p,flags,...rest)=>{const fd=originalOpen(p,flags,...rest);fds.set(fd,flags);return fd;};
+fs.fsyncSync=fd=>{if(fs.fstatSync(fd).isDirectory() || !['w','wx','r+'].includes(fds.get(fd)) && !(typeof fds.get(fd)==='number' && (fds.get(fd)&(fs.constants.O_WRONLY|fs.constants.O_RDWR)))) throw Object.assign(new Error('UNIT Win32 fsync EPERM'),{code:'EPERM'});originalSync(fd);};
+childProcess.spawnSync=()=>{throw new Error('No Docker or child allowed during plan');};
+Object.defineProperty(process,'platform',{value:'win32'});syncBuiltinESMExports();
+const root=fs.mkdtempSync(path.join(process.env.TMPDIR,'prepare-counter-'));
+const sha=s=>createHash('sha256').update(s).digest('hex'),I='sha256:'+'a'.repeat(64);
+for(const d of ['tools','project'])fs.mkdirSync(path.join(root,d));
+fs.writeFileSync(path.join(root,'tools','package.json'),'{}');fs.writeFileSync(path.join(root,'project','main.js'),'console.log(1)');
+const files=[{path:'main.js',sha256:sha('console.log(1)')}];
+const {prepare}=await import(pathToFileURL(path.resolve(process.argv[2])).href);
+const receipt=prepare({schemaVersion:1,workingDirectory:'.',installationId:'counter',family:'node',key:'node',imageTag:'paircoach/runtime-node:counter',baseImage:'node@'+I,nodeImage:'node@'+I,tools:{root:path.join(root,'tools'),files:[{path:'package.json',sha256:sha('{}')}]},project:{root:path.join(root,'project'),files},expectedTools:[{name:'node',version:'fixture'}],dependencySha256:sha('[]'),outputRoot:path.join(root,'output')},false);
+if(receipt.status!=='PLAN_ONLY_NOT_PREPARED' || receipt.commands.length)throw new Error('Unexpected plan result');
+console.log(JSON.stringify({status:receipt.status,commands:receipt.commands,scope:'UNIT Win32 file-r EPERM + directory unsupported simulation only'}));
