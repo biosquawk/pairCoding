@@ -4,8 +4,10 @@
 Ten dokument uzupełnia [start](windows-start.md) i [pakowanie](windows-package.md).
 Sprawdź rewizję wskazaną przez K oraz zaufany, przekazany niezależnie SHA256 manifestu.
 Sam ZIP, plan prepare, lokalny tag ani pusty `runtimes/images.lock.json` nie oznacza gotowości.
-Na bazie tej zmiany CLI i runtime assets są osobną dostawą P1_4; zanim zostaną
-zintegrowane, `runtime:prepare` / lista pakietera mają jawnie odmówić z powodu braków.
+Publiczne CLI i runtime assets są osobną, źródłowo odebraną dostawą P1_4.
+To nie odbiór ich integracji z backendem: przed użyciem K musi wskazać spójną rewizję
+aplikacji zawierającą producenta, konsumenta i pakowanie. Niepełna kopia źródeł ma
+jawnie odmówić zamiast pominąć wymagane pliki.
 Nie korzystaj zamiast nich z prywatnych operator-request/ROOT paths.
 
 ## 1. Platforma i wybór profilu
@@ -132,12 +134,21 @@ Po `pom.xml`, `requirements.txt`, `package.json` lub lock/config zmienionym wzgl
 przygotowanego projektu wykonaj nowe jawne prepare; zwykła edycja źródła nie zmienia zależności.
 Run/Test używają później wyłącznie przypiętych lokalnych obrazów `--pull=never` i zarządzanych cache.
 
-**Przekazanie wyniku do aplikacji: zamrożony producent P1_4, JESZCZE NIE ZINTEGROWANY.**
-Źródło publicznego CLI jest zamrożone; poniższe nazwy/statusy odpowiadają jego kodowi.
-Celowany smoke rzeczywistego CLI na izolowanej źródłowej kopii bez Git w WSL potwierdził
+**Przekazanie wyniku do aplikacji: odebrany źródłowo producent P1_4, JESZCZE NIE ZINTEGROWANY.**
+K dopuścił dokładne źródła CLI `337dbb3aa1d439a4c9cf706037c80a595419f773`
+i pełne assets `b60254a40aa8c47455b829ffa1844e11b99f6311`; poniższe nazwy/statusy
+odpowiadają temu producentowi. To identyfikatory źródeł, nie finalna rewizja aplikacji.
+W pełnym źródle generator, catalog, production pins i language prepare mają spójne
+metadane Java/Javac `27.0.1.0.2`; nie zmieniaj ich na `27.0.1.0` ani nie ignoruj
+ścisłej kontroli narzędzi. Wcześniejsze prepare z błędnymi metadanymi zakończyło się FAIL,
+nie gotowością Java27. Odbiór źródła nie upoważnia do ponawiania tego wykonania.
+Historyczny celowany smoke rzeczywistego CLI `6417183` na izolowanej źródłowej kopii bez Git w WSL potwierdził
 `PLAN_ONLY` bez zapisu i procesów potomnych (7 profili oraz Spring21/27), a także odmowę
 fragmentu settings, obcej flagi i istniejącego outputu. Używał istniejących zależności,
-nie świeżej instalacji. Nie wykonywał `--execute`, npm/PowerShell ani backendu.
+nie świeżej instalacji. Nie wykonywał `--execute`, npm/PowerShell ani backendu i nie jest
+nowym testem poprawionych źródeł. Poprawiona tożsamość obrazu zachowuje zatwierdzony
+selektor nazwa:tag, osobno rzeczywisty digest i imageId — nie zamieniaj selektora
+na RepoDigest, aby ręcznie obejść odmowę konsumenta.
 Faktyczny konsument i zintegrowany pakiet nadal wymagają osobnego potwierdzenia;
 nie jest to gotowe wydanie.
 Execute zwraca `PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE` albo `NOTREADY`, nigdy
@@ -224,6 +235,10 @@ kontrakt snapshot recovery. Wykluczone są m.in. `.env*`, sekrety/klucze, node_m
 obrazy/tar, download binaries, cache/target/__pycache__, raw receipts/logi i artifacts.
 Symlink, submodule w wybranym zakresie i alias nazwy Windows są odrzucane.
 `manifest.commands` obejmuje także literalny `runtime:prepare`; pakieter niczego nie wykonuje.
+Obie polityki źródłowe (pakieter i weryfikator) wymagają dokładnie14skryptów runtime,
+w tym publicznego CLI. Operator-only `runtime-operator-remainder.mjs` nie jest jego
+importem i pozostaje poza obiema allowlistami; nie ma publicznego polecenia npm
+do tego helpera. Nie rozszerzaj listy do15 ani do wildcarda `scripts/**`.
 Zaufanie pochodzi z niezależnie przekazanego SHA256 manifestu od K/operatora,
 nie z leżącego obok SHA256SUMS. Nie osłabia to istniejącego weryfikatora/recovery.
 
