@@ -106,6 +106,8 @@ jedno wspólne niekropkowe `workingDirectory` ma być zachowane, nie zastąpione
 
 ## 2. Jawne prepare (bez domyślnego wykonania)
 
+Poniżej schemat docelowy, nie dowód gotowości bieżących źródeł. Przed `--execute`
+sprawdź aktualną dopuszczoną rewizję i ograniczenia opisane pod przykładem.
 Z katalogu aplikacji, po instalacji zależności zgodnie z windows-start:
 
 ```powershell
@@ -142,6 +144,14 @@ W pełnym źródle generator, catalog, production pins i language prepare mają 
 metadane Java/Javac `27.0.1.0.2`; nie zmieniaj ich na `27.0.1.0` ani nie ignoruj
 ścisłej kontroli narzędzi. Wcześniejsze prepare z błędnymi metadanymi zakończyło się FAIL,
 nie gotowością Java27. Odbiór źródła nie upoważnia do ponawiania tego wykonania.
+Nowy dowód operatora wykazał dodatkowy problem tych źródeł: nawet samo `buildx inspect`
+zapisuje własne metadane klienta w dedykowanym config, a guard wymagający jego pustki
+przed każdą komendą odrzuca ten legalny stan. Kontrola z osobnym child-only
+`BUILDX_CONFIG` zachowała pusty config poświadczeń; to **nie** dowód builda ani Windows.
+P1_4 ma dostarczyć poprawione, zamrożone źródło do niezależnego review; obecne identyfikatory
+nie są potwierdzeniem poprawki. Operator wstrzymał wyłącznie wykonanie remainder `b602/648`;
+praca nad backendem, LSP, FE i pakowaniem trwa dalej. Nie obchodź odmowy przez dowolny
+niepusty config, usuwanie metadanych, globalne env ani ręczny retry.
 Historyczny celowany smoke rzeczywistego CLI `6417183` na izolowanej źródłowej kopii bez Git w WSL potwierdził
 `PLAN_ONLY` bez zapisu i procesów potomnych (7 profili oraz Spring21/27), a także odmowę
 fragmentu settings, obcej flagi i istniejącego outputu. Używał istniejących zależności,
