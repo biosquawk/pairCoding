@@ -28,7 +28,9 @@ export class DurableWorkspaceVersions {
   constructor(directory: string, projectId: string, root: string, initial: VersionSnapshot) {
     privateDirectory(directory);
     this.file = path.join(directory, 'versions.json');
-    this.lease = new JournalLease(path.join(directory, 'lease.lock'));
+    const leasePath = path.join(directory, 'lease.lock');
+    const priorOwnership = fs.existsSync(leasePath);
+    this.lease = new JournalLease(leasePath);
     try {
       // Unknown/partial publications are retained. No record absence in a nonempty journal is
       // authority to forget prior versions or settings outcomes.
@@ -57,6 +59,9 @@ export class DurableWorkspaceVersions {
         if (canonical(files) !== canonical(this.state.files) || workspaceVersion !== this.state.workspaceVersion)
           this.publish({ ...this.state, files, workspaceVersion });
       } else {
+        // The stable kernel lease is never unlinked. Its prior presence with missing state is
+        // initialization uncertainty/lost persistence, NOT a new workspace/version-zero grant.
+        if (priorOwnership) throw Error('Missing prior workspace versions; retain state and recover');
         this.state = { ...copy(initial), schemaVersion: 1, projectId, root, pending: null, outcomes: [] };
         this.validate(this.state); createRecord(this.file, this.encoded(this.state));
       }

@@ -140,3 +140,12 @@ test('SEAM durable publication corruption fences reads/writes, other gate cannot
   assert.throws(() => a.gate.write({ ...a.auth(), path: 'main.py', baseVersion: 1, content: 'no' }));
   assert.equal(fs.readFileSync(path.join(f.root, 'main.py'), 'utf8'), '\ufeffone\r\n');
 });
+
+test('SEAM missing prior durable version state cannot reset acknowledged versions on restart', async t => {
+  const f = fixture(t), a = f.open();
+  a.gate.write({ ...a.auth(), path: 'main.py', baseVersion: 1, content: 'acknowledged\n' });
+  const state = path.join(a.workspace.dataDir, 'workspace-v2', 'versions.json'); a.close();
+  fs.unlinkSync(state);
+  assert.throws(() => f.open(), /Missing prior workspace versions/);
+  assert.equal(fs.existsSync(state), false);
+});
