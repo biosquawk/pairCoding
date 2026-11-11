@@ -98,13 +98,18 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if (['COACH_STEP_EDIT','CONTROL_STATE'].includes(type)) facts.push(clone(message));
     if (type==='RUN_STATE') {
       lastRun = clone(payload as Run);
-      if (lastRun.finishedAt) { facts.push({type:'RUN',run:clone(lastRun)}); coach?.updateRun?.(lastRun); if(!transitioning) {session.noteNewFact('RUN');coach?.trigger('RUN');} }
+      if (lastRun.finishedAt) facts.push({type:'RUN',run:clone(lastRun)});
     }
     if (type==='SESSION_REPORT') report = clone(payload as Report);
     if (type==='CHAT_REPLY') { chat.push({messageId:message.messageId,author:'COACH',text:(payload as {text:string}).text,createdAt:new Date().toISOString()});chat=chat.slice(-100); }
     for (const [ws,p] of peers) if (p.authenticated && ws.readyState===WebSocket.OPEN) {
       if (ws.bufferedAmount > 8*1024*1024) { ws.close(1013,'Slow consumer'); continue; }
       ws.send(encoded);
+    }
+    // Coach updates can publish more frames. Send this sequence before reentering emit.
+    if (type==='RUN_STATE' && (payload as Run).finishedAt) {
+      coach?.updateRun?.(clone(payload as Run));
+      if(!transitioning) {session.noteNewFact('RUN');coach?.trigger('RUN');}
     }
   }
   function getBundle():SessionBundle {
