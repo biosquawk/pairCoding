@@ -73,6 +73,9 @@ export class WriteGate {
         inventory(root: string): Promise<readonly { path: string; sha256: string; bytes: number }[]>;
         copy(options: { workspaceDirectory: string; runDirectory: string; runId: string; profileId: string; configurationGeneration: string;
           acknowledgement: { projectId: string; sessionId: string; workspaceVersion: number; files: readonly InputFile[]; assertCurrent(): Promise<void> } }): Promise<AcknowledgedRunInput>;
+        /** Trusted coordinator only: prepare/verify selected cache under this SAME capture lease. */
+        prepare?(lease: { assertCurrent(): void }): Promise<void>;
+        assertCurrent?(): void;
       }): Promise<AcknowledgedRunInput> {
     const accepted = structuredClone(input);
     return this.workspace._withQueuedMutation(async () => {
@@ -80,10 +83,13 @@ export class WriteGate {
       const assertLease = () => {
         if (!held) throw new AppError(409, 'RUN_INPUT_CHANGED', 'Immutable input lease has already been released.');
         this.authorize(accepted);
+        collaborators.assertCurrent?.();
         if (accepted.actor !== 'STUDENT') throw new AppError(403, 'RUN_FORBIDDEN', 'Only student authority may capture Run input.');
         if (this.workspace.workspaceVersion !== accepted.expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Run requires the current settled workspace.');
       };
       try {
+        assertLease();
+        await collaborators.prepare?.(Object.freeze({ assertCurrent: assertLease }));
         assertLease();
         const capture = await this.workspace._settledRunInput(collaborators.inventory, assertLease);
         const acknowledgement = Object.freeze({ projectId: this.workspace.projectId, sessionId: accepted.sessionId,

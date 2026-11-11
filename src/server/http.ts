@@ -17,6 +17,9 @@ import { apiError, CommandLedger, TransportError, validateRequest, type CommandL
 import { validateV2Request } from '../shared/validation-v2';
 import type { ProjectV2, SessionBundleV2 } from '../shared/runtime-v2';
 import type { LanguageView } from '../shared/language-v2';
+import { createRuntimeExecution } from './runtime-coordinator/RuntimeExecution';
+import { createRuntimeExecutionLayout } from './runtime-coordinator/RuntimeExecutionLayout';
+import { createRuntimeDockerTransport } from './runtime-coordinator/RuntimeDockerTransport';
 import type { DockerTransport } from './execution/DockerTransport';
 import type { RuntimeEnvironment, RuntimeReadinessDependencies } from './runtime-config';
 import { createRuntimeStartup, requireRuntimeWorkspace, type RuntimeStartup } from './runtime-coordinator/RuntimeStartup';
@@ -33,6 +36,8 @@ export interface ServerOptions {
   /** Programmatic options, not HTTP/config/env discovery surfaces. Production composition is index. */
   runtimeArguments?: readonly string[]; runtimeEnvironment?: RuntimeEnvironment;
   runtimeTransport?: Pick<DockerTransport, 'run'>;
+  /** Trusted programmatic dependency only, never an env/task/HTTP selector. */
+  dockerExecutable?: string;
   runtimeReadiness?: RuntimeReadinessDependencies;
   ledgerOptions?: CommandLedgerOptions; openLedgerOptions?: CommandLedgerOptions;
   devBootstrap?: boolean; staticDir?: string; enableCoach?: boolean; enableExecution?: boolean;
@@ -68,11 +73,19 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   if ([8765,8766,8767,8768].includes(port)) fail(400,'PORT_FORBIDDEN','Port zastrzeżony.');
   // Construct/recover the real canonical V2 core before listen, never a mock/temp project.
   // A configured Docker transport is a separate composition step; absence cannot run a host task.
-  const runtimeTransport: Pick<DockerTransport, 'run'> = options.runtimeTransport ?? {
-    run: async () => { throw new TransportError(503, 'RUNTIME_TRANSPORT_UNAVAILABLE', 'Docker transport is not composed. Editing remains available.'); },
+  const startupOptions = { argv: [...(options.runtimeArguments ?? [])],
+    environment: options.runtimeEnvironment, dataDir:options.dataDir };
+  const startupTransports = new WeakMap<RuntimeStartup, { transport: DockerTransport; install(transport: DockerTransport): void }>();
+  const constructStartup = async (root?: string) => {
+    let installed: DockerTransport | undefined = options.runtimeTransport;
+    const transport: DockerTransport = { run: (args, bounds) => {
+      if(!installed) throw new TransportError(503, 'DOCKER_CLI_UNAVAILABLE', 'Canonical runtime transport is not available. Manual editing remains available.');
+      return installed.run(args, bounds);
+    } };
+    const value = await createRuntimeStartup({ ...startupOptions, explicitWorkspaceRoot: root, transport });
+    startupTransports.set(value, { transport, install(value) { installed = value; } });
+    return value;
   };
-  const startupOptions = { argv: [...(options.runtimeArguments ?? [])], transport: runtimeTransport,
-    environment: options.runtimeEnvironment, explicitWorkspaceRoot: options.rootPath, dataDir:options.dataDir };
   let startup: RuntimeStartup;
   let workspace!: WorkspaceService, session!: SessionController, gate!: WriteGate;
   function currentCore() {
@@ -80,7 +93,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(closing) fail(503,'SESSION_CLOSED','Server is closed.');
     return requireRuntimeWorkspace(startup);
   }
-  const makeCore = async (root: string) => createRuntimeStartup({ ...startupOptions, explicitWorkspaceRoot: root });
+  const makeCore = (root: string) => constructStartup(root);
   const sessionLedgerOptions={...options.ledgerOptions};
   const makeLedgers=()=>({ledger:new CommandLedger(sessionLedgerOptions),proposalOutcomes:new CommandLedger(sessionLedgerOptions)});
   let {ledger,proposalOutcomes}=makeLedgers();
@@ -92,6 +105,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   let seq = 0, closing = false, transitioning = false, persistingFinish = false;
   let coach:CoachService|undefined, execution:ExecutionServices|undefined;
   let reports:ExecutionServices['reports']|undefined;
+  let runtimeExecution: ReturnType<typeof createRuntimeExecution> | undefined;
   const peers = new Map<WebSocket,{clientId:string|null; authenticated:boolean; alive:boolean; count:number; since:number; queued:number; queue:Promise<void>; handshakeGeneration:string|null;leaseSession:SessionController|null}>();
   const server = http.createServer((req,res) => { void handleHttp(req,res); });
   server.requestTimeout = 10000; server.headersTimeout = 10000; server.maxHeadersCount = 64;
@@ -132,11 +146,18 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     };
     const unavailable = { code:'LANGUAGE_PROVIDER_UNAVAILABLE', message:'Language provider composition is not available.',
       recovery:'Keep editing; language runtime integration is required before completion can be enabled.', retryable:true };
-    return readRuntimeProject({ core, sessionId:core.session.state.sessionId, configuration:bound.configuration,
-      readiness:options.runtimeReadiness ?? { execution:{ readiness:async()=> { throw Error('Execution composition unavailable'); } }, probe:bound.prepared },
+    const project = await readRuntimeProject({ core, sessionId:core.session.state.sessionId, configuration:bound.configuration,
+      readiness:options.runtimeReadiness ?? runtimeExecution?.readiness ?? { execution:{ readiness:async()=> { throw binding?.runtimeError ?? Error('Execution composition unavailable'); } }, probe:bound.prepared },
       assertCurrent, readLanguage:():LanguageView => ({ projectId:core.workspace.projectId,
         profileId:bound.configuration.resolved?.profile.id ?? 'unconfigured', configurationGeneration:bound.configuration.configurationGeneration,
         providerGeneration:'unavailable', state:'OFF', autocomplete:'OFF', docs:'N/A', problem:unavailable }) });
+    if(binding?.runtimeError && core.readSettings().settings !== null) {
+      const problem = {code:'RUNTIME_STATE_UNAVAILABLE',message:'Execution state or owned Docker client configuration cannot be safely initialized.',
+        recovery:'Place the runtime configuration outside original/prepared sources, retain prior ownership and repair the private canonical runtime state. Manual editing remains available.',retryable:true};
+      project.capabilities.execution.runtime.state='CONFIG_ERROR';project.capabilities.execution.runtime.problem=problem;
+      project.capabilities.execution.modes={RUN_MAIN:{canRun:false,problem},RUN_TESTS:{canRun:false,problem}};
+    }
+    return project;
   }
   async function getBundle():Promise<SessionBundleV2> {
     const bound=startup, settingsHash=currentCore().readSettings().sourceSha256, project=await getProject();
@@ -161,11 +182,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   }
   type Core = ReturnType<typeof currentCore>;
   // Preparation owns its core, listeners and services. Nothing may publish to the old binding.
-  function prepareBinding(core:Core) {
+  function prepareBinding(core:Core, owner:RuntimeStartup) {
     const {workspace:boundWorkspace,session:boundSession}=core;
     let active=false, disposed=false;
     let boundCoach:CoachService|undefined, boundExecution:ExecutionServices|undefined;
     let boundReports:ExecutionServices['reports']|undefined;
+    let boundRuntime: ReturnType<typeof createRuntimeExecution> | undefined, runtimeError:unknown;
     const listeners:{source:WorkspaceService|SessionController;event:string;handler:(...args:any[])=>void}[]=[];
     const publish=(type:string,payload:unknown)=>{if(active)emit(type,payload);};
     const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);},
@@ -182,6 +204,17 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }
     }
     try {
+      if(options.enableExecution && owner.configuration.resolved) {
+        try {
+          const layout = createRuntimeExecutionLayout(path.join(path.dirname(owner.configuration.resolved.configPath), '.paircoach-runtime'),
+            boundWorkspace.rootPath, boundWorkspace.projectId, owner.arguments.preparedRuntimeRoots);
+          const client = startupTransports.get(owner)!;
+          if(!options.runtimeTransport) client.install(createRuntimeDockerTransport({ stateDirectory:layout.stateDirectory, executable:options.dockerExecutable }));
+          boundRuntime = createRuntimeExecution({core, configuration:owner.configuration, prepared:owner.prepared, layout,
+            transport:client.transport, serviceNetwork:`paircoach-${layout.installationId}-service`, emit:publish,
+            assertCurrent:()=>{if(disposed || startup!==owner || transitioning || closing) fail(409,'PROJECT_STATE_CHANGED','Runtime binding changed during admission.');}});
+        } catch(error) {runtimeError=error;} // ONLY execution is unavailable; real editor/recovery stay live.
+      }
       if(options.executionFactory) { boundExecution=options.executionFactory(boundContext); boundReports=boundExecution.reports; }
       else if(options.enableExecution) {
         // Reports are independent from Run availability; NEVER instantiate the legacy host Runner.
@@ -197,18 +230,18 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       on(boundWorkspace,'watcherError',(error:unknown)=>publish('ERROR',apiError(error)));
       on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
       on(boundSession,'veto',()=>boundCoach?.abort());
-      return {execution:boundExecution,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;},dispose};
+      return {execution:boundExecution,runtime:boundRuntime,runtimeError,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
     } catch(error) {dispose();throw error;}
   }
   let binding:ReturnType<typeof prepareBinding>|undefined;
   // Catch immediately to avoid an unhandled rejection if the caller has not called listen yet.
-  const initialized = createRuntimeStartup(startupOptions).then(value => {
+  const initialized = constructStartup(options.rootPath).then(value => {
     startup=value;
     try {
       if(closing) {value.close();return {error:new TransportError(503,'SESSION_CLOSED','Server closed during recovery.')};}
       if(value.core) {
         ({workspace,session,gate}=value.core);
-        binding=prepareBinding(value.core);binding.activate();
+        binding=prepareBinding(value.core,value);binding.activate();
       }
       return {error:null};
     } catch(error) { value.close();return {error}; }
@@ -317,6 +350,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     try {
       coach?.abort(); session.releaseCoach();
       await execution?.runner.stopAll();
+      await runtimeExecution?.runner.stopAll();
       const finalSnapshot=await workspace.createSnapshotAsync('Stan końcowy próby');
       const finalMaterial=workspace.readSnapshot(finalSnapshot.snapshotId);
       const finalSession=session.getSession();
@@ -365,7 +399,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           if(!reports?.list) fail(503,'GATE003_NOT_ENABLED','Historia raportów nie jest jeszcze włączona.');
           value={reports:reports.list()};
         } else if(/^\/api\/run\/[A-Za-z0-9._:-]+$/.test(url.pathname)) {
-          if(!execution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.'); value=execution.runner.get(url.pathname.split('/')[3]);
+          if(!execution && !runtimeExecution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.'); value=(execution?.runner ?? runtimeExecution!.runner).get(url.pathname.split('/')[3]);
         } else fail(404,'NOT_FOUND','Nieznany endpoint.');
         respond(res,200,value);return;
       }
@@ -406,8 +440,9 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             const nextCore=requireRuntimeWorkspace(next);
             // Open is NOT a settings SAVE. Its opening form is never authority or persisted.
             nextCore.session.claimLease(body.clientId);
-            prepared=prepareBinding(nextCore);
+            prepared=prepareBinding(nextCore,next);
             await execution?.runner.stopAll();
+            await runtimeExecution?.runner.stopAll();
             if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
             const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
             startup=next;({workspace,session,gate}=nextCore);binding=prepared;
@@ -421,7 +456,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             transitioning=false;
             return await getProject();
           } finally {
-            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();prepared.dispose();}else next.close();}}
+            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.runner.stopAll();prepared.dispose();}else next.close();}}
             finally {transitioning=false;}
           }
         }
@@ -429,7 +464,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(url.pathname==='/api/file') { await gate.mutateAsync({...body,actor:'STUDENT'});await snapshot();return getProject(); }
         if(url.pathname==='/api/session/start') { const state=session.start(body.limitMs,body.pauseOnHidden);coach?.trigger('START');return clone(state); }
         if(url.pathname==='/api/run') fail(503,'RUNTIME_MUTATION_NOT_COMPOSED','Neutral Run and durable original admission outcome composition is not yet available. No host fallback exists.');
-        if(stopMatch) { if(!execution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.');return execution.runner.stop(url.pathname.split('/')[3]); }
+        if(stopMatch) { if(!execution && !runtimeExecution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.');return (execution?.runner ?? runtimeExecution!.runner).stop(url.pathname.split('/')[3]); }
         if(url.pathname==='/api/session/finish') { assertVersion(body.expectedWorkspaceVersion); return finish(body.reason); }
         if(url.pathname==='/api/session/report/retry') { if(!reports) fail(503,'REPORTS_NOT_ENABLED','Raport nie jest jeszcze włączony.'); report=reports.retry(body.sessionId);return clone(report); }
         return fail(404,'NOT_FOUND','Nieznana komenda.');
@@ -640,7 +675,9 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       const result=await initialized;
       await socketAttempt?.catch(()=>{});
       ledger.close();proposalOutcomes.close();openLedger.close();
-      try {await execution?.runner.stopAll();} finally {
+      try {
+        await execution?.runner.stopAll();await runtimeExecution?.runner.stopAll();
+      } finally {
         try {if(binding)binding.dispose();else if(!result.error)startup.close();} finally {
           for(const [ws,p] of peers){p.authenticated=false;ws.terminate();}wss.close();
           if(server.listening)await new Promise<void>((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
