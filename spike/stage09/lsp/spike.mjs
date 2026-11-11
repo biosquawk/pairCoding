@@ -1,11 +1,12 @@
 import {spawn} from 'node:child_process';
-import {readFile,writeFile,mkdir,chmod,copyFile,stat} from 'node:fs/promises';
+import {readFile,writeFile,mkdir,copyFile,stat} from 'node:fs/promises';
 import {appendFileSync} from 'node:fs';
 import {createHash,randomBytes} from 'node:crypto';
 import {resolve,join,dirname,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {Rpc} from './rpc.mjs';
+import {createPrivateOutput,assertPrivateOutput,createMutableShadow} from './shadow-access.mjs';
 import {javaLaunch,prepareBootDirectory,prepareJdtStateDirectory,readJavaVersions,collectBootArtifacts,assertJavaProjectImported,assertJavaProjectDiagnostics} from './boot-artifacts.mjs';
 
 const here=dirname(fileURLToPath(import.meta.url));
@@ -15,8 +16,8 @@ if(!['prepare','run'].includes(mode)||!outArg||!isAbsolute(outArg)) throw new Er
 const out=resolve(outArg);
 // Never touch an existing result or accept arbitrary user Docker flags/environment.
 // The operator chooses a fresh NEW owned directory, then reuses it only for run.
-if(mode==='prepare') await mkdir(out,{recursive:false});
-else await stat(join(out,'prepared-images.json'));
+if(mode==='prepare') createPrivateOutput(out);
+else {assertPrivateOutput(out);await stat(join(out,'prepared-images.json'));}
 const nonce=mode==='prepare'?randomBytes(6).toString('hex'):JSON.parse(await readFile(join(out,'prepared-images.json'),'utf8')).nonce;
 if(!/^[a-f0-9]{12}$/.test(nonce)) throw new Error('Invalid owned nonce');
 const owner='paircoach-seq09-ab-lsp';
@@ -73,7 +74,6 @@ async function prepare(){
   }
 }
 const containerFlags=(name,shadow,imageId,boot,jdtState)=>['create','-i','--name',name,'--label',`paircoach.owner=${owner}`,'--label',`paircoach.nonce=${nonce}`,'--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10001:10001','--memory=2048m','--cpus=2','--pids-limit=192','--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--tmpfs','/tmp:rw,nosuid,nodev,size=768m,mode=1777','--mount',`type=bind,src=${shadow},dst=/work`,'--workdir=/work',...(boot?['--mount',`type=bind,src=${boot},dst=/artifacts`]:[]),...(jdtState?['--mount',`type=bind,src=${jdtState},dst=/jdt-state`]:[]),imageId];
-async function writeShadow(root,path,text){const file=join(root,path);await mkdir(dirname(file),{recursive:true,mode:0o777});await chmod(dirname(file),0o777);await writeFile(file,text,{mode:0o666});return file;}
 const javaText=(method,bad=false)=>`import java.lang.ScopedValue;\r\npublic class Demo {\r\n  static class Helper { public String ${method}() { return "żółć 😀"; } }\r\n  ScopedValue<String> scoped = ScopedValue.newInstance();\r\n  void demo() { Helper h = new Helper(); h.${method}(); ${bad?'int broken = "not-int";':''} }\r\n}\r\n`;
 const pythonText=(method,bad=false)=>`class Calculator:\r\n    def ${method}(self):\r\n        return "żółć 😀"\r\n\r\ncalc = Calculator()\r\ncalc.${method}()\r\n${bad?'unknown_paircoach_symbol\r\n':''}`;
 function position(text,needle){const prefix=text.slice(0,text.indexOf(needle)+needle.length);assert.ok(text.includes(needle));const lines=prefix.split('\n');return {line:lines.length-1,character:lines.at(-1).length};}
@@ -83,16 +83,16 @@ async function exercise(language,target,imageId){
   if(interrupted)throw new Error('Execution interrupted');
   const kind=language==='java'?`java${target}`:'python';
   const name=`paircoach-spike-p1-2-lsp-${nonce}-${kind}`;
-  const shadow=join(out,`shadow-${kind}`);await mkdir(shadow,{mode:0o777});await chmod(shadow,0o777);
+  const shadowAccess=createMutableShadow(out,kind),shadow=shadowAccess.root;
   const relative=language==='java'?'src/Demo.java':'demo.py',uri=`file:///work/${relative}`;
   if(language==='java'){
-    await writeShadow(shadow,'.project','<?xml version="1.0" encoding="UTF-8"?><projectDescription><name>lsp-probe</name><comment/><projects/><buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec><natures><nature>org.eclipse.jdt.core.javanature</nature></natures></projectDescription>');
-    await writeShadow(shadow,'.classpath',`<?xml version="1.0" encoding="UTF-8"?><classpath><classpathentry kind="src" path="src"/><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-${target}"/><classpathentry kind="output" path="bin"/></classpath>`);
-    await writeShadow(shadow,'.settings/org.eclipse.jdt.core.prefs',`eclipse.preferences.version=1\norg.eclipse.jdt.core.compiler.codegen.targetPlatform=${target}\norg.eclipse.jdt.core.compiler.compliance=${target}\norg.eclipse.jdt.core.compiler.source=${target}\norg.eclipse.jdt.core.compiler.release=enabled\n`);
+    shadowAccess.write('.project','<?xml version="1.0" encoding="UTF-8"?><projectDescription><name>lsp-probe</name><comment/><projects/><buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec><natures><nature>org.eclipse.jdt.core.javanature</nature></natures></projectDescription>');
+    shadowAccess.write('.classpath',`<?xml version="1.0" encoding="UTF-8"?><classpath><classpathentry kind="src" path="src"/><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-${target}"/><classpathentry kind="output" path="bin"/></classpath>`);
+    shadowAccess.write('.settings/org.eclipse.jdt.core.prefs',`eclipse.preferences.version=1\norg.eclipse.jdt.core.compiler.codegen.targetPlatform=${target}\norg.eclipse.jdt.core.compiler.compliance=${target}\norg.eclipse.jdt.core.compiler.source=${target}\norg.eclipse.jdt.core.compiler.release=enabled\n`);
   }
   const method='pairCoachUniqueMethod',renamed='pairCoachRenamedMethod';
   const makeText=language==='java'?javaText:pythonText;
-  let text=makeText(method);await writeShadow(shadow,relative,text);
+  let text=makeText(method);shadowAccess.write(relative,text);
   const launch=language==='java'?javaLaunch(target,lock.jdt.launcher):null;
   const boot=launch?prepareBootDirectory(out,kind):null;
   const jdtState=launch?prepareJdtStateDirectory(out,kind):null;
