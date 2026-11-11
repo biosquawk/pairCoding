@@ -47,7 +47,7 @@ test('ledger byte budget: oversized accepted effect returns stable503, then fail
   const value={content:'independent-large-result-'.repeat(2048)};
   const first=ledger.run('large',{n:1},()=>{effects++;return value;});
   await assert.rejects(first.result,{status:503,code:'COMMAND_RESULT_UNAVAILABLE'});
-  limited(()=>ledger.run('next',{n:2},()=>++effects));
+  assert.throws(()=>ledger.run('next',{n:2},()=>++effects),{status:503,code:'COMMAND_STORAGE_UNAVAILABLE'});
   const replay=ledger.run('large',{n:1},()=>{effects++;return null;});
   assert.equal(replay.duplicate,true);await assert.rejects(replay.result,{status:503,code:'COMMAND_RESULT_UNAVAILABLE'});
   assert.throws(()=>ledger.run('large',{n:99},()=>++effects),{status:409,code:'IDEMPOTENCY_CONFLICT'});
