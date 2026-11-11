@@ -1,0 +1,38 @@
+{
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SCRIPT",
+          "path": "calculator.py"
+        },
+        "tests": {
+          "paths": [
+            "test_calculator.py"
+          ],
+          "names": []
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SCRIPT",
+          "path": "calculator.py"
+        },
+        "tests": {
+          "paths": [
+            "test_calculator.py"
+          ],
+          "names": []
+        }
+      }
+    }
+  ]
+}
