@@ -1,5 +1,10 @@
 # PairCoach
 
+> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
+> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
+> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
+> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+
 Lokalny trener programowania: edytor Monaco, czat z AI, uruchamianie programu i testów, snapshoty oraz raport końcowy. Interfejs i backend znajdują się w tym repozytorium.
 
 ## Uruchomienie
@@ -40,7 +45,7 @@ Plik [paircoach.config.json](paircoach.config.json) w katalogu aplikacji:
 }
 ```
 
-Trener i raport końcowy uruchamiają lokalną instancję `codex exec --model gpt-6.1-sol` z `model_reasoning_effort="medium"`. Używają istniejącego logowania Codexa. Konfiguracja nie wymaga klucza API ani URL API.
+Trener i raport końcowy uruchamiają lokalną instancję `codex exec --ephemeral --model gpt-6.1-sol` z `model_reasoning_effort="medium"`. Używają własnego logowania ChatGPT w Codex CLI. Aplikacja jawnie wyłącza ComputerUse (`features.computer_use=false`); model nie wykonuje narzędzi ani interakcji z komputerem. Konfiguracja nie wymaga klucza API ani URL API.
 
 Po zmianie pliku zrestartuj serwer. `PAIRCOACH_CONFIG` może wskazać inny plik JSON pełną ścieżką. Opcjonalne nadpisania: `PAIRCOACH_CODEX_MODEL` i `PAIRCOACH_CODEX_REASONING_EFFORT`. Ustawienia zapisane w konfiguracji użytkownika Codexa nie zmieniają tych wartości — aplikacja przekazuje je jawnie. Błędny plik lub niepoprawna wartość zatrzymuje konfigurację dostawcy zamiast wybierać inny model.
 
@@ -59,3 +64,8 @@ npx tsx --test tests/integration/coach-http.test.ts tests/integration/run-event-
 ```
 
 Instrukcje i uruchomienia testów Windows znajdują się w [docs/WINDOWS.md](docs/WINDOWS.md). Testy wymagające konkretnego systemu, przeglądarki lub dostawcy AI mają osobne wymagania środowiskowe.
+
+Oficjalna dokumentacja OpenAI: [tryb exec/--ephemeral](https://learn.chatgpt.com/docs/non-interactive-mode),
+[logowanie ChatGPT](https://learn.chatgpt.com/docs/auth), [modele](https://learn.chatgpt.com/docs/models).
+Dostępność `gpt-6.1-sol` zależy od konta; konfiguracja i `login status` nie dowodzą odpowiedzi modelu.
+`--ephemeral` nie zapisuje plików sesji CLI, nie zastępuje logowania ani danych raportu aplikacji.

@@ -1,18 +1,27 @@
 # PairCoach v3 — Windows, uruchomienie i dowody
 
+> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
+> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
+> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
+> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+
 ## Zakres i bezpieczeństwo
 
 Docelowo Windows + Node >=22.22 (operator potwierdził Windows Node25.6.1 x64).
-Nie potrzeba kontenerów ani zewnętrznej bazy. Node/Python/Java w otwieranym zadaniu
-są opcjonalne: brak narzędzia nie blokuje edytora. Gemini to opcjonalny zewnętrzny
-provider wymagający klucza **tylko po stronie backendu** oraz zgody użytkownika.
-Bez klucza/zgody raport używa jawnego lokalnego podsumowania faktów, nie udaje AI.
+Bieżąca implementacja nie wymaga kontenerów ani zewnętrznej bazy; ETAP9 ma osobny przyszły kontrakt. Node/Python/Java w otwieranym zadaniu
+są opcjonalne: brak narzędzia nie blokuje edytora. Wybór `PAIRCOACH_COACH_PROVIDER=codex` obsługuje trenera i raport przez lokalne
+`codex exec --ephemeral`, model `gpt-6.1-sol`, effort `medium`, własne logowanie
+ChatGPT, bez dodatkowego klucza lub URL API. ComputerUse jawnie wyłączone;
+nie wykonujemy narzędzi modelu/interakcji z komputerem. Dostępność modelu zależy
+od konta. Gemini pozostaje opcją wymagającą klucza **tylko po stronie backendu**.
+Bez generatora/zgody raport używa jawnego lokalnego podsumowania faktów, nie udaje AI.
+Błąd wybranego dostawcy to FAILED, nie cichy fallback. Pełny start: [windows-start.md](windows-start.md).
 
 Nie wystawiaj serwera publicznie. Do pilota użyj **kopii** ćwiczenia, nie jedynej
 kopii ważnego repo. Uruchomione profile są zaufanym kodem z prawami użytkownika,
 nie sandboxem dla złośliwych programów. Nie uruchamiaj Thalamusa ani dodatkowych
-usług. Nie używaj portów 8765–8768. Etapy 001→002→003 zatwierdza K; same obecne
-moduły Runner/ReportService nie włączają autonomii i nie dowodzą zamknięcia bramek.
+usług. Nie używaj portów 8765–8768. Historyczne bramki 001→002→003 nie zastępują bieżącej kolejki4→9 i końcowego QA.
+Same moduły Runner/ReportService nie włączają autonomii ani nie dowodzą odbioru.
 
 ## Instalacja kompletnego kandydata
 
@@ -119,13 +128,42 @@ powershell.exe -NoProfile -File 'C:\PairCoach\v3\scripts\windows-verify.ps1' `
   -Source 'C:\PairCoach\v3' -Revision '<40-znakowy-commit-kandydata-K>'
 ```
 
-K podaje prawdziwy commit i manifest, operator porównuje wejściowe bajty.
-Można użyć źródłowej ścieżki UNC z WSL zamiast `C:\PairCoach\v3`; skrypt kopiuje
-kod do unikalnego `%TEMP%\paircoach-verify-<id>\repo`, bez .env/kluczy/.git/
-node_modules i bez podążania za reparse points. Tam wykonuje npm ci (własny cache),
-tsc, build i rzeczywiste tests/execution. Testy tworzą własne temp fixtures,
-uruchamiają realne procesy rodzic→dziecko→wnuk, sprawdzają Stop i timeout oraz
-przetrwanie obcego procesu kontrolnego. Nie otwierają portów platformy.
+`-Source` musi być rzeczywistym korzeniem czystego checkoutu Git, a `-Revision`
+pełnym SHA równym **rzeczywistemu HEAD**. Podrepo/paczka w obcym repo nie dziedziczy
+jego tożsamości. Brak Git/zaufania, wrongSHA lub dirty source kończy się przed npm.
+Helper z zaufanego katalogu operatora porównuje źródłowe bajty z blobami Git;
+dopuszcza wyłącznie różnicę LF/CRLF w poprawnym UTF-8 bez NUL, nie lone CR ani
+zmianę treści. Kopia zachowuje i weryfikuje **dokładne** bajty checkoutu.
+
+Dla rozpakowanego ZIP bez Git obowiązkowe są dwa dodatkowe parametry:
+
+```powershell
+# Skrypt/helper z wcześniej zweryfikowanego katalogu operatora, nie niezaufanej paczki.
+powershell.exe -NoProfile -File 'C:\PairCoach\trusted-tools\windows-verify.ps1' `
+  -Source 'C:\PairCoach\unpacked\paircoach-v3-mvp2-<40SHA>' -Revision '<40SHA-od-K>' `
+  -TrustedManifest 'C:\PairCoach\trusted-inputs\manifest.json' `
+  -ManifestSha256 '<64-male-hex-z-niezaleznego-zaufanego-kanalu-K>'
+```
+
+Manifest musi leżeć **poza Source**. Hash uzyskaj z zaufanego kanału K/operatora,
+nie z samego sąsiedniego `SHA256SUMS`. Pole sourceCommit ani nazwa ZIP nie są
+zaufaniem. W tym trybie wymagane są dokładne długości/hashe, kompletny zestaw
+wymaganych źródeł i bezpieczne ścieżki bez symlink/reparse/duplikatów. Helper nie
+instaluje niczego, nie chroni przed administratorem kontrolującym host/verifier.
+Git-less actualRevision oznacza sourceCommit poświadczony przez zaufany manifest, nie
+niezależny odczyt Git ani weryfikację podpisu commitu. Git tryb odrzuca cały dirty
+checkout (również poza kopiowanym allowlist); ignorowane dodatkowe pliki z
+allowlist też są odrzucane. Nie zmieniaj globalnego Git config ani limitów.
+
+Skrypt tworzy unikalny `%TEMP%\paircoach-verify-<id>`, weryfikuje źródła i
+rzeczywiste bajty skopiowanego `repo` **przed npm**. Kopiuje tylko skończony
+allowlist pakietera, w tym config/docs/helper, bez .env/kluczy/.git/node_modules.
+Mismatch = nonzero, npm NOT_RUN, nigdy Windows PASS. `source-verification.json`
+przechowuje requestedRevision, actualRevision, trustMode, manifestDigest,
+byteVerification i tożsamość każdego pliku. Przy błędzie sprawdź ten plik oraz
+source-verification.log; brak pomiaru nie oznacza PASS. Nie zmieniaj źródła podczas próby.
+Następnie kopia wykonuje npm ci (własny cache), tsc, build i tests/execution;
+testy uruchamiają własne procesy i badają własne drzewa, bez globalnych kill.
 
 Jeśli `tests/core/recovery.test.ts` istnieje, skrypt wykona również prawdziwy
 zestaw snapshot/recovery P1; brak testu to **NOT_RUN**, exit2. Windows walidacja

@@ -1,3 +1,9 @@
+> **HISTORYCZNY dokument / dowody dokładnie ówczesnych rewizji.** Ten plik nie
+> opisuje bieżącego providera ani statusu wydania. Aktualne: [README](../../../README.md),
+> [Windows start (w tym raport §7)](../../../docs/windows-start.md). ETAP8 IMPLEMENTED /
+> PENDING_FINAL_QA; pełna kampania po implementacji9. Poniższe oryginalne wyniki,
+> w tym FAIL/NOT_RUN, pozostają bez zmian i nie są nowym PASS.
+
 # MVP2 — niezależne przygotowanie QA, nie odbiór
 
 P3, work `paircoach-mvp2-final-qa`, execution `ca7c9b81-7583-45b1-9685-79b5359b8846`.

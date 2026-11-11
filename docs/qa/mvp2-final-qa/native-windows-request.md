@@ -1,3 +1,9 @@
+> **HISTORYCZNY dokument / dowody dokładnie ówczesnych rewizji.** Ten plik nie
+> opisuje bieżącego providera ani statusu wydania. Aktualne: [README](../../../README.md),
+> [Windows start (w tym raport §7)](../../../docs/windows-start.md). ETAP8 IMPLEMENTED /
+> PENDING_FINAL_QA; pełna kampania po implementacji9. Poniższe oryginalne wyniki,
+> w tym FAIL/NOT_RUN, pozostają bez zmian i nie są nowym PASS.
+
 # JEDEN request native Windows — przygotowany, JESZCZE NIE WYSŁANY DO ROOT
 
 ## Warunek uruchomienia — K, nie operator, uzupełnia znane dane

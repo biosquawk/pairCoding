@@ -4,7 +4,9 @@ param(
   [Parameter(Mandatory = $true)][string]$Source,
   [Parameter(Mandatory = $true)][ValidatePattern('^[a-f0-9]{40}$')][string]$Revision,
   [string]$Node = 'C:\Program Files\nodejs\node.exe',
-  [string]$EvidenceParent = $env:TEMP
+  [string]$EvidenceParent = $env:TEMP,
+  [string]$TrustedManifest,
+  [ValidatePattern('^[a-f0-9]{64}$')][string]$ManifestSha256
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -18,38 +20,28 @@ New-Item -ItemType Directory -Path $Work | Out-Null
 $Repo = Join-Path $Work 'repo'
 $Logs = Join-Path $Work 'evidence'
 $Temp = Join-Path $Work 'temp'
-New-Item -ItemType Directory -Path $Repo, $Logs, $Temp | Out-Null
-function Copy-SafeTree([string]$From, [string]$To) {
-  if ((Get-Item -LiteralPath $From).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse source refused: $From" }
-  New-Item -ItemType Directory -Path $To -Force | Out-Null
-  foreach ($Item in Get-ChildItem -LiteralPath $From -Force) {
-    if ($Item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Reparse source refused: $($Item.Name)" }
-    if ($Item.Name -match '^\.env' -or $Item.Name -match '\.(pem|key|pfx)$' -or $Item.Name -in @('.git','node_modules','.paircoach','artifacts','test-results')) { continue }
-    $Target = Join-Path $To $Item.Name
-    if ($Item.PSIsContainer) { Copy-SafeTree $Item.FullName $Target }
-    else { Copy-Item -LiteralPath $Item.FullName -Destination $Target }
-  }
+New-Item -ItemType Directory -Path $Logs, $Temp | Out-Null
+# The operator-side helper is trusted code; do not run a helper taken from an untrusted ZIP.
+# It compares actual HEAD (exact intended root) or an externally trusted manifest digest,
+# validates all source bytes, copies only the finite package closure, then rechecks the copy.
+$Helper = Join-Path $PSScriptRoot 'verify-source-revision.mjs'
+if (-not (Test-Path -LiteralPath $Helper -PathType Leaf)) { throw 'Missing trusted revision helper' }
+$Preflight = @($Helper, '--source', $Source, '--revision', $Revision, '--destination', $Repo,
+  '--evidence', (Join-Path $Logs 'source-verification.json'))
+if ($TrustedManifest -or $ManifestSha256) {
+  if (-not $TrustedManifest -or -not $ManifestSha256) { throw 'Supply both TrustedManifest and ManifestSha256 from K/operator trusted channel' }
+  $Preflight += @('--trusted-manifest', $TrustedManifest, '--manifest-sha256', $ManifestSha256)
 }
-foreach ($Dir in @('src','tests','scripts','docs')) {
-  $Path = Join-Path $Source $Dir
-  if (Test-Path -LiteralPath $Path -PathType Container) { Copy-SafeTree $Path (Join-Path $Repo $Dir) }
-}
-foreach ($Name in @('package.json','package-lock.json','tsconfig.json','vite.config.ts','index.html','metadata.json','playwright.config.ts')) {
-  $Path = Join-Path $Source $Name
-  if (Test-Path -LiteralPath $Path -PathType Leaf) {
-    if ((Get-Item -LiteralPath $Path).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Reparse file refused' }
-    Copy-Item -LiteralPath $Path -Destination (Join-Path $Repo $Name)
-  }
-}
+& $Node @Preflight 2>&1 | Out-File -LiteralPath (Join-Path $Logs 'source-verification.log') -Encoding utf8
+if ($LASTEXITCODE -ne 0) { throw "Source revision/byte verification FAIL; npm NOT_RUN; evidence: $Logs" }
+$Identity = Get-Content -LiteralPath (Join-Path $Logs 'source-verification.json') -Raw | ConvertFrom-Json
+if ($Identity.byteVerification -ne 'PASS' -or $Identity.actualRevision -ne $Revision) { throw 'Missing verified source identity; npm NOT_RUN' }
 $OldEnvironment = @{}
 foreach ($Key in @('TEMP','TMP','TMPDIR','npm_config_cache','PATH')) { $OldEnvironment[$Key] = [Environment]::GetEnvironmentVariable($Key, 'Process') }
 Get-ChildItem -LiteralPath $Repo -File -Recurse | Sort-Object FullName | Get-FileHash -Algorithm SHA256 |
   Select-Object Path, Hash | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $Logs 'input-sha256.json') -Encoding utf8
-[pscustomobject]@{ expectedRevision = $Revision; source = $Source; copiedCandidate = $Repo; windowsVersion = [Environment]::OSVersion.VersionString; powershell = $PSVersionTable.PSVersion.ToString() } |
+[pscustomobject]@{ requestedRevision = $Revision; actualRevision = $Identity.actualRevision; trustMode = $Identity.trustMode; manifestDigest = $Identity.manifestDigest; byteVerification = $Identity.byteVerification; source = $Source; copiedCandidate = $Repo; windowsVersion = [Environment]::OSVersion.VersionString; powershell = $PSVersionTable.PSVersion.ToString() } |
   ConvertTo-Json | Set-Content -LiteralPath (Join-Path $Logs 'environment.json') -Encoding utf8
-$env:TEMP = $Temp; $env:TMP = $Temp; $env:TMPDIR = $Temp
-$env:npm_config_cache = Join-Path $Work 'npm-cache'
-$env:PATH = (Split-Path -Parent $Node) + ';' + $env:PATH
 $Results = New-Object System.Collections.Generic.List[object]
 function Invoke-NodeCheck([string]$Name, [string[]]$Arguments) {
   $Previous = $ErrorActionPreference
@@ -63,6 +55,9 @@ function Invoke-NodeCheck([string]$Name, [string[]]$Arguments) {
 }
 $PreviousCwd = Get-Location
 try {
+  $env:TEMP = $Temp; $env:TMP = $Temp; $env:TMPDIR = $Temp
+  $env:npm_config_cache = Join-Path $Work 'npm-cache'
+  $env:PATH = (Split-Path -Parent $Node) + ';' + $env:PATH
   Set-Location -LiteralPath $Repo
   Invoke-NodeCheck 'node-version' @('--version')
   $Npm = Join-Path (Split-Path -Parent $Node) 'node_modules\npm\bin\npm-cli.js'
@@ -92,5 +87,5 @@ try {
 }
 if (@($Results | Where-Object { $_.result -eq 'FAIL' }).Count -gt 0) { exit 1 }
 if (@($Results | Where-Object { $_.result -eq 'NOT_RUN' }).Count -gt 0) { exit 2 }
-Write-Host 'PASS Windows execution/recovery candidate tests. Browser E2E and real Gemini are separate evidence.'
+Write-Host 'PASS Windows execution/recovery candidate tests. Browser E2E, real AI (Codex/Gemini) and full campaign acceptance are separate evidence.'
 exit 0

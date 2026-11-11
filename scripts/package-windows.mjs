@@ -53,13 +53,13 @@ function git(cwd, args) {
   return r.stdout;
 }
 const text = b => b.toString('utf8').trim();
-const top = new Set(['paircoach.config.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
+const top = new Set(['README.md', 'paircoach.config.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
 // Allow tracked test sources/support, never raw QA output or local runtime data.
 function allowed(name) {
   const parts = name.toLowerCase().split('/');
   if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || name.startsWith('src/') || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || name === 'scripts/clean.mjs' ||
+  return top.has(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 // Deliberately finite contract, not a shell parser. Unknown/changed scripts require
@@ -123,13 +123,18 @@ function main() {
     return { mode: match[1], type: match[2], oid: match[3], path: match[4] };
   });
   const selected = entries.filter(e => allowed(e.path)).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  const portablePaths = new Set();
   for (const e of selected) {
-    if (!['100644', '100755'].includes(e.mode) || e.type !== 'blob' || !/^[A-Za-z0-9._/-]+$/.test(e.path) || e.path.split('/').includes('..')) {
-      throw new Error('Niedozwolony typ/ścieżka w allowlist (np. symlink/submodule).');
+    const folded = e.path.toLowerCase();
+    if (!['100644', '100755'].includes(e.mode) || e.type !== 'blob' || !/^[A-Za-z0-9._/-]+$/.test(e.path) ||
+        e.path.length > 240 || portablePaths.has(folded) ||
+        e.path.split('/').some(p => !p || p === '.' || p === '..' || /[. ]$/.test(p) || /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(?:\.|$)/i.test(p))) {
+      throw new Error('Niedozwolony typ/ścieżka w allowlist (np. symlink/submodule/alias Windows).');
     }
+    portablePaths.add(folded);
   }
   const paths = new Set(selected.map(e => e.path));
-  for (const name of [...top, 'src/server/index.ts', 'docs/windows-start.md', 'docs/windows-package.md', 'scripts/package-windows.mjs', 'scripts/clean.mjs']) {
+  for (const name of [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs']) {
     if (!paths.has(name)) throw new Error(`Brak wymaganego pliku: ${name}`);
   }
   const pkg = JSON.parse(git(root, ['show', `${commit}:package.json`]).toString('utf8'));
@@ -142,6 +147,17 @@ function main() {
   });
   const plan = { status: 'MVP2_SOURCE_RUNTIME_ACCEPTANCE_SEPARATE', packageId, sourceCommit: commit,
     releaseScope: 'MVP2 source candidate: snapshot/recovery/run/report; packaging does not establish Windows, GUI, recovery or final acceptance',
+    sourceVerification: {
+      policy: 'paircoach-source-v1', archiveBytes: 'EXACT_MANIFEST_BYTES',
+      trust: 'External manifest SHA256 from K/operator trusted channel; colocated SHA256SUMS is not trust',
+      requiredFiles: ['README.md', 'paircoach.config.json', 'docs/WINDOWS.md', 'docs/windows-start.md',
+        'docs/windows-package.md', 'docs/windows-coach-report-solarized.md',
+        'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'],
+      commands: [
+        'powershell.exe -NoProfile -File scripts/windows-verify.ps1 -Source <source> -Revision <40SHA> [-TrustedManifest <external-manifest> -ManifestSha256 <trusted64SHA>]',
+        'node scripts/verify-source-revision.mjs --source <source> --revision <40SHA> --destination <new-copy> --evidence <new-evidence-file> [--trusted-manifest <external-manifest> --manifest-sha256 <trusted64SHA>]',
+      ], execution: 'NOT_RUN_BY_PACKAGER',
+    },
     format: 'git-archive-zip', prefix: `${packageId}/`, commands, files };
   if (mode === 'dry-run') { process.stdout.write(JSON.stringify(plan, null, 2) + '\n'); return; }
   const destination = path.resolve(output);

@@ -1,3 +1,9 @@
+> **HISTORYCZNY dokument / dowody dokładnie ówczesnych rewizji.** Ten plik nie
+> opisuje bieżącego providera ani statusu wydania. Aktualne: [README](../README.md),
+> [Windows start (w tym raport §7)](../docs/windows-start.md). ETAP8 IMPLEMENTED /
+> PENDING_FINAL_QA; pełna kampania po implementacji9. Poniższe oryginalne wyniki,
+> w tym FAIL/NOT_RUN, pozostają bez zmian i nie są nowym PASS.
+
 # PairCoach v3 — integration contract, K, 2026-11-10
 
 Source: HUMAN 36e83cce-325e-4da4-b447-9faeb53e8816; full pasted-text-1.txt governs. Files 2/3 context only. Wire types in src/shared/protocol.ts copied verbatim from file 1. HTTP/WS payloads and statuses from file 1 §4.2/4.3, no renaming.

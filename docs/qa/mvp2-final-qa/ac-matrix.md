@@ -1,3 +1,9 @@
+> **HISTORYCZNY dokument / dowody dokładnie ówczesnych rewizji.** Ten plik nie
+> opisuje bieżącego providera ani statusu wydania. Aktualne: [README](../../../README.md),
+> [Windows start (w tym raport §7)](../../../docs/windows-start.md). ETAP8 IMPLEMENTED /
+> PENDING_FINAL_QA; pełna kampania po implementacji9. Poniższe oryginalne wyniki,
+> w tym FAIL/NOT_RUN, pozostają bez zmian i nie są nowym PASS.
+
 # Macierz końcowa AC/TEST001..027 — stan przygotowania, nie certyfikat
 
 Kryterium: oryginalny pasted-text-1.txt §5..7 oraz HUMAN67ce0485 (AC027/file2§9),

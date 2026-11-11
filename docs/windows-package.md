@@ -1,6 +1,11 @@
 # PairCoach MVP2 — archiwum exact Git, nie deklaracja odbioru
 
-Zakres P4: `docs/windows*.md` i `scripts/package-windows.mjs`. Package/lock/core
+> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
+> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
+> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
+> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+
+Bieżący zakres ETAP8: aktualne docs, weryfikator Windows i skończona selekcja pakietera. Package/lock/core
 nie są zmieniane przez pakowanie. Instrukcja dotyczy MVP2 po wznowieniu przez
 HUMAN dae99189; stare odroczenie G3/19/100 dotyczyło **tylko MVP1**, nie MVP2.
 Przygotowanie jest **NOT_FINAL**, dopóki K nie rozliczy pełnego właściwego zakresu.
@@ -44,9 +49,9 @@ Git, nie build, runtime, niezacommitowany plik ani zewnętrzny node_modules.
 
 ## 2. Zawartość / źródłowe command closure
 
-Allowlist: package.json, package-lock.json, tsconfig.json, vite.config.ts,
-index.html, metadata.json, playwright.config.ts, `src/**`, `docs/windows*.md`,
-`scripts/package*.mjs`, **istniejący `scripts/clean.mjs`** i śledzone źródła/support
+Allowlist: README.md, paircoach.config.json, package.json, package-lock.json, tsconfig.json, vite.config.ts,
+index.html, metadata.json, playwright.config.ts, `src/**`, `docs/windows*.md`, `docs/WINDOWS.md`,
+`scripts/package*.mjs`, **scripts/clean.mjs, scripts/windows-verify.ps1, scripts/verify-source-revision.mjs** i śledzone źródła/support
 `tests/**` (TS/TSX/JS/JSX/MJS/CJS/JSON/XML/TXT/MD/PY/JAVA/PS1, tests/qa/.gitignore).
 Denylist nadal wyklucza .git, node_modules, .env*, klucze PEM/KEY/PFX/P12,
 credentials/secrets, .paircoach, runtime/.runtime, tmp/.tmp, dist, artifacts,
@@ -72,7 +77,10 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run preview` | Najpierw build; frontend preview bez API, nie odbiór produktu. |
 | `npm.cmd test` | Źródła testów są w ZIP; tsx --test tests/**/*.test.ts. Nie uruchamiaj całych historycznych kampanii podczas smoke. |
 
-Manifest.commands zawiera wszystkie 10 scripts, requiredFiles/dependencies,
+Manifest.sourceVerification opisuje dodatkowe skończone komendy operatora (PowerShell/portable Node),
+wymagane docs/config/helper i zaufanie do zewnętrznego manifestu; te wejścia są obowiązkowe
+w list/dry-run/output. Helper nie poszerza selekcji do wszystkich scripts ani raw QA.
+Manifest.commands zawiera wszystkie 10 npm scripts, requiredFiles/dependencies,
 prerequisite i NOT_RUN_BY_PACKAGER. Źródła lokalnych importów/helperów trzeba
 sprawdzić względem finalnego drzewa, a operacyjne ci/build/start/API/GUI —
 z rzeczywiście rozpakowanej paczki. Koffi 3.3.7 pochodzi z istniejącego lockfile;
@@ -85,7 +93,9 @@ Nowy katalog wyniku zawiera:
 - `paircoach-v3-mvp2-<pełny40SHA>.zip` z jednym korzeniem o tym samym ID;
 - `manifest.json`: status **MVP2_SOURCE_RUNTIME_ACCEPTANCE_SEPARATE**, sourceCommit,
   packageId, ZIP bytes/SHA256, ścieżki/bytes/SHA256 źródeł, wersje Node/Git/OS;
-- `SHA256SUMS`: hash ZIP i manifestu. Manifest nie hashuje sam siebie.
+- `SHA256SUMS`: hash ZIP i manifestu. Manifest nie hashuje sam siebie. K przekazuje jego SHA256 niezależnym zaufanym kanałem;
+  sąsiedni SHA256SUMS sam nie ustanawia zaufania. Zewnętrzny manifest + zaufany digest
+  umożliwia Git-less weryfikację rozpakowanych źródeł przed npm (docs/WINDOWS.md).
 
 Status oznacza wyłącznie archiwum źródeł; nie PASS Windows ani zgoda na publikację.
 Brak kontenera/digestu obrazu: N/A. ZIP powstaje przez Git archive STORE (-0),

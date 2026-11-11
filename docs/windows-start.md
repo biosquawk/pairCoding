@@ -1,5 +1,10 @@
 # PairCoach MVP2 — Windows: instalacja i praca
 
+> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
+> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
+> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
+> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+
 MVP2 rozszerza MVP1 o snapshot/recovery, Run/Test i raport. Ten dokument opisuje
 obsługę, **nie zastępuje odbioru**. Przed dystrybucją K wiąże instrukcję, ZIP
 i wyniki Windows z jednym finalnym SHA. Dopóki nie ma tych wyników, kandydat
@@ -12,8 +17,8 @@ PASS/FAIL/NOT_RUN oraz ograniczenia są w raporcie dostawy K.
 Wymagane: Windows, PowerShell, Node.js **>=22.22.0** z npm, Edge/Chrome,
 internet do instalacji i AI oraz natywny `codex.exe` zalogowany na **Twoim**
 koncie. Nie kopiuj node_modules z WSL ani auth.json. Nie potrzebujesz dodatkowego
-klucza API dla wariantu Codex z logowaniem ChatGPT. Nie instaluj dodatkowych
-usług Thalamusa, Dockera, Mavena ani Pythona.
+klucza API dla wariantu Codex z logowaniem ChatGPT. Dla obecnej ścieżki Node nie instaluj dodatkowych usług Thalamusa ani toolchainów.
+Przyszłe wymagania Docker/polyglot ETAP9 będą miały osobny kontrakt i dowody.
 
 Z katalogu dostawy K skopiuj **razem** ZIP, `manifest.json` i `SHA256SUMS` do
 nowego folderu w Eksploratorze. Otwórz w nim PowerShell. Porównaj zaufany hash
@@ -21,7 +26,12 @@ ZIP z raportem K; sam manifest nie potwierdza zaufania do nadawcy. Wykonaj:
 
 ```powershell
 $ErrorActionPreference = 'Stop'
-$manifest = Get-Content .\manifest.json -Raw | ConvertFrom-Json
+$manifestPath = (Resolve-Path .\manifest.json).Path
+# Hash manifestu otrzymaj niezależnie z zaufanego raportu/kanału K, nie z tego ZIP/SHA256SUMS.
+$trustedManifestSha = Read-Host 'Wklej zaufany SHA256 manifest.json od K (64 male znaki hex)'
+if ($trustedManifestSha -cnotmatch '^[a-f0-9]{64}$') { throw 'Brak zaufanego SHA256 manifestu' }
+if ((Get-FileHash -LiteralPath $manifestPath -Algorithm SHA256).Hash.ToLower() -ne $trustedManifestSha) { throw 'Niezaufany manifest' }
+$manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
 $zip = Join-Path (Get-Location) $manifest.archive.name
 if ((Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLower() -ne $manifest.archive.sha256) { throw 'Hash ZIP niezgodny' }
 $mh = (Get-FileHash .\manifest.json -Algorithm SHA256).Hash.ToLower()
@@ -37,6 +47,16 @@ foreach ($file in $manifest.files) {
     $actual = (Get-FileHash -LiteralPath (Join-Path $app $file.path) -Algorithm SHA256).Hash.ToLower()
     if ($actual -ne $file.sha256) { throw ('Niezgodny plik: ' + $file.path) }
 }
+# Powyższe hashe obejmują też helper przed jego wykonaniem. Pełna walidacja
+# zestawu/ścieżek/bajtów i nowej kopii następuje PRZED npm.
+$verifiedApp = Join-Path $destination 'verified-source'
+$identity = Join-Path $destination 'source-verification.json'
+node .\scripts\verify-source-revision.mjs --source $app --revision $manifest.sourceCommit `
+  --destination $verifiedApp --evidence $identity `
+  --trusted-manifest $manifestPath --manifest-sha256 $trustedManifestSha
+if ($LASTEXITCODE -ne 0) { throw 'Weryfikacja źródeł FAIL — npm NOT_RUN; zachowaj dowody' }
+$app = $verifiedApp
+Set-Location $app
 node --version
 npm.cmd --version
 npm.cmd ci
@@ -99,7 +119,7 @@ hasłem użytkownika do wpisania. Serwer ma pozostać wyłącznie na loopback.
 
 ## Model Codex
 
-W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-sol` i `reasoning_effort: "medium"`. Trener i raport korzystają z tych samych ustawień lokalnego Codex CLI. Po edycji pliku zrestartuj serwer. Opcjonalne nadpisania to `PAIRCOACH_CODEX_MODEL`, `PAIRCOACH_CODEX_REASONING_EFFORT` oraz `PAIRCOACH_CONFIG` (pełna ścieżka innego JSON). Nie są potrzebne dodatkowy klucz ani URL API.
+W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-sol` i `reasoning_effort: "medium"`. Trener i raport uruchamiają lokalną instancję `codex exec --ephemeral --model gpt-6.1-sol` z `model_reasoning_effort="medium"`, używając własnego logowania ChatGPT. ComputerUse jest jawnie wyłączone (`features.computer_use=false`); aplikacja nie dopuszcza wykonywania narzędzi modelu ani interakcji z komputerem. `--ephemeral` dotyczy plików sesji CLI, nie usuwa danych raportu aplikacji. Po edycji pliku zrestartuj serwer. Opcjonalne nadpisania to `PAIRCOACH_CODEX_MODEL`, `PAIRCOACH_CODEX_REASONING_EFFORT` oraz `PAIRCOACH_CONFIG` (pełna ścieżka innego JSON). Nie są potrzebne dodatkowy klucz ani URL API.
 
 ## 3. Start → zgoda AI → edytuj/czat
 
@@ -152,7 +172,8 @@ procesu; zgłoś konflikt. W feedbacku podaj commit z manifestu, wersje Node/Cod
 krótką czynność i błąd, bez tokenów, kluczy i prywatnych logów.
 
 Dokumentacja OpenAI: [logowanie](https://developers.openai.com/codex/auth),
-[CLI i login status](https://developers.openai.com/codex/cli/reference).
+[tryb exec/--ephemeral](https://learn.chatgpt.com/docs/non-interactive-mode),
+[modele](https://learn.chatgpt.com/docs/models).
 Procedura odbioru odrębnej instalacji MVP2 z ZIP: `windows-zip-smoke.md`.
 
 ## 5. Zatwierdź RunProfile w GUI → Run Main / Run Tests / Stop
@@ -229,10 +250,18 @@ Przy SESSION_REPLACED zachowaj ID poprzedniej sesji; nie uznawaj nowej za jej wy
 READY dotyczy zamrożonego materiału i faktycznie wykonanych uruchomień,
 nie przyszłych edycji. Przy FAILED zachowane są pliki/fakty; wybierz jawnie
 **Ponów generowanie raportu** (ponawiasz raport, nie finish i nie snapshot).
-**Codex jako CoachProvider nie oznacza Codex do raportu**: aktualny standardowy
-start używa dla raportu Gemini, jeśli skonfigurowano klucz i zgodę; w przeciwnym
-razie lokalnego podsumowania faktów bez oceny AI. Nie dodawaj sekretów do GUI.
+Przy `PAIRCOACH_COACH_PROVIDER=codex` **zarówno trener, jak i raport używają Codexa**:
+`gpt-6.1-sol` / `medium`, lokalne `codex exec --ephemeral`, własne logowanie
+ChatGPT, bez dodatkowego klucza lub URL API; ComputerUse wyłączone.
+Zgoda AI jest utrwalona w faktach; bez niej lub bez generatora powstaje jawne lokalne
+podsumowanie faktów, nie odpowiedź AI. Błąd wybranego dostawcy daje FAILED,
+nie ciche przełączenie na Gemini ani lokalny sukces. Gemini pozostaje osobną opcją.
+Nie dodawaj sekretów do GUI.
 Nie opisuj lokalnego raportu jako potwierdzonej odpowiedzi zewnętrznego modelu.
+Raport wcześniejszej sesji wybierz w zakładce **Raport**, sekcja **Poprzednie raporty**: wybierz **Odśwież listę**, potem sesję;
+odczyt historii nie zastępuje raportu bieżącej sesji ani nie wykonuje finish.
+Po restarcie przerwane PENDING ma FAILED/REPORT_INTERRUPTED; wymaga jawnego Ponów.
+Dostępność modelu zależy od konta; samo logowanie nie jest odpowiedzią AI.
 
 ## 8. Po przerwaniu/awarii — zachowaj oba magazyny i restartuj tę samą instalację
 
