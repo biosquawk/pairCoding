@@ -1,5 +1,5 @@
 import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync,
-  renameSync, unlinkSync, writeFileSync } from 'node:fs';
+  realpathSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
 import { NodeLanguageJournalDurability, type LanguageJournalDurability } from './LanguageJournalDurability';
@@ -41,33 +41,54 @@ export const receiptHash = (receipt: LanguageProcessReceipt): string => sha256(J
 export function assertLaunchId(id: string): void {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(id)) throw new Error('Invalid server launch ID');
 }
-/** Reject all ancestor links too, not just the final path. Root must be backend-controlled. */
-export function assertRealDirectory(path: string): void {
+/** Trusted unit-IO seam only. Production always uses actual native platform/FD/path primitives. */
+export interface LanguageReadIO {
+  lstat(path: string): BigIntStats; realpath(path: string): string;
+  open(path: string, flags: number): number; stat(fd: number): BigIntStats;
+  read(fd: number, buffer: Buffer, offset: number, length: number, position: number | null): number;
+  close(fd: number): void;
+}
+const nativeReadIO: LanguageReadIO = { lstat: p => lstatSync(p, { bigint: true }), realpath: p => realpathSync.native(p),
+  open: openSync, stat: fd => fstatSync(fd, { bigint: true }), read: readSync, close: closeSync };
+const stamp = (s: BigIntStats): string => [s.dev, s.ino, s.size, s.mtimeNs, s.ctimeNs, s.mode, s.nlink].join(':');
+/** Reject EVERY ancestor link/junction and realpath alias, including the filesystem root. */
+export function assertRealDirectory(path: string, io: Pick<LanguageReadIO, 'lstat' | 'realpath'> = nativeReadIO): void {
   if (!isAbsolute(path) || resolve(path) !== path) throw new Error('Directory must be absolute/canonical');
   let current = parse(path).root;
-  for (const segment of relative(current, path).split(sep).filter(Boolean)) {
-    current = join(current, segment);
-    const stat = lstatSync(current);
+  const check = (): void => {
+    const stat = io.lstat(current);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error('Unsafe directory/link');
-  }
+    if (io.realpath(current) !== current) throw new Error('Unsafe directory canonical alias');
+  };
+  check();
+  for (const segment of relative(current, path).split(sep).filter(Boolean)) { current = join(current, segment); check(); }
 }
-export function readRegular(path: string, limit: number): Buffer {
-  assertRealDirectory(dirname(path));
-  const before = lstatSync(path, { bigint: true });
+/** POSIX boundary of EACH generated private launch/journal subtree. Win32 trusts inherited private-parent ACLs,
+ * exactly as SnapshotStorage: mode bits are NOT evidence of an ACL and are never used to claim Windows privacy.
+ * The caller must own/control the parent; no ACL reconfiguration or malicious same-user host guarantee. */
+export function assertPrivateLanguageDirectory(path: string): void {
+  assertRealDirectory(path);
+  if (process.platform !== 'win32' && (lstatSync(path, { bigint: true }).mode & 0o077n) !== 0n)
+    throw new Error('Language launch directory must be private');
+}
+export function readRegular(path: string, limit: number, io: LanguageReadIO = nativeReadIO): Buffer {
+  if (!Number.isSafeInteger(limit) || limit < 0 || limit > 256 * 1024 * 1024) throw new Error('Invalid bounded file read budget');
+  assertRealDirectory(dirname(path), io);
+  const before = io.lstat(path);
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1n || before.size > BigInt(limit)) throw new Error('Unsafe/oversize file');
-  // Windows may lack O_NOFOLLOW: independent lstat + BigInt opened identity remains mandatory.
-  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  // Windows may lack O_NOFOLLOW: initial/final lstat plus exact BigInt opened/post-read fstat are mandatory.
+  const fd = io.open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
-    const opened = fstatSync(fd, { bigint: true });
-    if (!opened.isFile() || opened.nlink !== 1n || opened.ino !== before.ino || opened.dev !== before.dev || opened.size > BigInt(limit))
-      throw new Error('File changed while opening');
+    const opened = io.stat(fd);
+    if (!opened.isFile() || stamp(opened) !== stamp(before)) throw new Error('File changed while opening');
     const buffer = Buffer.alloc(limit + 1); let size = 0, n: number;
-    do { n = readSync(fd, buffer, size, buffer.length - size, null); size += n; } while (n && size < buffer.length);
-    const after = fstatSync(fd, { bigint: true });
-    if (size > limit || BigInt(size) !== opened.size || after.size !== opened.size || after.mtimeNs !== opened.mtimeNs || after.ctimeNs !== opened.ctimeNs)
-      throw new Error('File changed/oversize during read');
+    do { n = io.read(fd, buffer, size, buffer.length - size, null); size += n; } while (n && size < buffer.length);
+    const after = io.stat(fd), final = io.lstat(path);
+    if (size > limit || BigInt(size) !== before.size || !after.isFile() || !final.isFile() || final.isSymbolicLink() ||
+      stamp(after) !== stamp(before) || stamp(final) !== stamp(before)) throw new Error('File changed/oversize during read');
+    assertRealDirectory(dirname(path), io);
     return buffer.subarray(0, size);
-  } finally { closeSync(fd); }
+  } finally { io.close(fd); }
 }
 const absent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
 /**
@@ -81,7 +102,7 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
   private directory(id: string): string {
     assertLaunchId(id); const path = join(this.root, id);
     try { mkdirSync(path, { mode: 0o700 }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
-    assertRealDirectory(path); this.durability.directory(this.root); return path;
+    assertPrivateLanguageDirectory(path); this.durability.directory(this.root); return path;
   }
   private put(id: string, name: string, bytes: Buffer): void {
     const dir = this.directory(id), destination = join(dir, name);
@@ -91,8 +112,10 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
       const existing = openSync(destination, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
       try {
         const opened = fstatSync(existing, { bigint: true });
-        if (!before.isFile() || before.isSymbolicLink() || opened.nlink !== 1n || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== BigInt(bytes.length)) throw new Error('Durable record changed while opening writable flush handle');
+        if (!before.isFile() || before.isSymbolicLink() || opened.nlink !== 1n || stamp(opened) !== stamp(before) || opened.size !== BigInt(bytes.length)) throw new Error('Durable record changed while opening writable flush handle');
         this.durability.file(existing);
+        const after = fstatSync(existing, { bigint: true }), final = lstatSync(destination, { bigint: true });
+        if (!final.isFile() || final.isSymbolicLink() || stamp(after) !== stamp(before) || stamp(final) !== stamp(before)) throw new Error('Durable record changed during flush');
       } finally { closeSync(existing); }
       this.durability.directory(dir);
       if (!readRegular(destination, bytes.length).equals(bytes)) throw new Error('Durable record changed after flush');
@@ -101,15 +124,23 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
     // Single backend owner/phase admission serializes this journal. No shared multiwriter directory.
     const temporary = join(dir, `.${randomUUID()}.tmp`);
     const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
-    try { writeFileSync(fd, bytes); this.durability.file(fd); }
+    let created: BigIntStats;
+    try {
+      writeFileSync(fd, bytes); this.durability.file(fd); created = fstatSync(fd, { bigint: true });
+      const named = lstatSync(temporary, { bigint: true });
+      if (!created.isFile() || created.nlink !== 1n || created.size !== BigInt(bytes.length) || stamp(named) !== stamp(created)) throw new Error('Durable output changed while writing');
+    }
     catch (error) { try { unlinkSync(temporary); } catch {} throw error; }
     finally { closeSync(fd); }
     try { renameSync(temporary, destination); this.durability.directory(dir); }
     catch (e) { try { unlinkSync(temporary); } catch {} throw e; }
-    if (!readRegular(destination, bytes.length).equals(bytes)) throw new Error('Durable readback mismatch');
+    const final = lstatSync(destination, { bigint: true });
+    if (!final.isFile() || final.isSymbolicLink() || final.dev !== created.dev || final.ino !== created.ino ||
+      !readRegular(destination, bytes.length).equals(bytes)) throw new Error('Durable identity/readback mismatch');
   }
   private json(id: string, name: string, limit = 256 * 1024): any {
-    assertLaunchId(id); return JSON.parse(readRegular(join(this.root, id, name), limit).toString('utf8'));
+    assertLaunchId(id); assertPrivateLanguageDirectory(join(this.root, id));
+    return JSON.parse(readRegular(join(this.root, id, name), limit).toString('utf8'));
   }
   assertIsolated(mounts: readonly string[]): void {
     assertRealDirectory(this.root);

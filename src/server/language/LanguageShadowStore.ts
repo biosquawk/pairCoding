@@ -1,9 +1,10 @@
-import { constants, closeSync, chmodSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, chmodSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DocumentStamp } from '../../shared/language-v2';
 import { LANGUAGE_LIMITS } from '../../shared/language-v2';
-import { assertRealDirectory, readRegular, sha256 } from './LanguageProcessJournal';
+import { assertPrivateLanguageDirectory, assertRealDirectory, readRegular, sha256 } from './LanguageProcessJournal';
+import { NodeLanguageJournalDurability, type LanguageJournalDurability } from './LanguageJournalDurability';
 
 /** Inject these SAME central src/language/uriCodec exports at composition; never supply a second mapper. */
 export interface LanguageShadowCodec {
@@ -70,7 +71,8 @@ const byPath = (a: ShadowFile, b: ShadowFile): number => a.path < b.path ? -1 : 
  */
 export class LanguageShadowStore {
   private records = new Map<string, RecordState>();
-  constructor(readonly ownedRoot: string, private readonly codec: LanguageShadowCodec) { assertRealDirectory(ownedRoot); }
+  constructor(readonly ownedRoot: string, private readonly codec: LanguageShadowCodec,
+    private readonly durability: LanguageJournalDurability = new NodeLanguageJournalDurability(assertRealDirectory)) { assertRealDirectory(ownedRoot); }
   private path(path: string): void {
     this.codec.assertRelativePath(path);
     // Target Windows filesystem policy, NOT an alternate URI mapper. Preserve case/Unicode spelling.
@@ -173,12 +175,19 @@ export class LanguageShadowStore {
   }
   private atomicFile(path: string, bytes: Buffer): void {
     assertRealDirectory(dirname(path)); const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
-    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o644);
-    try { writeFileSync(fd, bytes); const stat = fstatSync(fd); if (!stat.isFile() || stat.nlink !== 1) throw new Error('Invalid copy output'); }
-    finally { closeSync(fd); }
-    try { renameSync(temporary, path); chmodSync(path, 0o444); }
-    catch (error) { try { rmSync(temporary); } catch {} throw error; }
-    if (!readRegular(path, bytes.length).equals(bytes)) throw new Error('Language copy readback mismatch');
+    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+    let written: import('node:fs').BigIntStats | undefined;
+    try {
+      try {
+        writeFileSync(fd, bytes); fchmodSync(fd, 0o444); this.durability.file(fd);
+        written = fstatSync(fd, { bigint: true });
+        if (!written.isFile() || written.nlink !== 1n || written.size !== BigInt(bytes.length)) throw new Error('Invalid copy output');
+      } finally { closeSync(fd); }
+      assertRealDirectory(dirname(path)); renameSync(temporary, path); this.durability.directory(dirname(path));
+      const final = lstatSync(path, { bigint: true });
+      if (!final.isFile() || final.isSymbolicLink() || final.dev !== written!.dev || final.ino !== written!.ino ||
+        !readRegular(path, bytes.length).equals(bytes)) throw new Error('Language copy identity/readback mismatch');
+    } catch (error) { try { chmodSync(temporary, 0o600); rmSync(temporary); } catch {} throw error; }
   }
   private writeTree(workspace: string, manifest: ShadowManifest, contents: Map<string, Buffer>): void {
     for (const dir of [...manifest.directories].sort((a,b) => a.split('/').length - b.split('/').length)) {
@@ -212,7 +221,7 @@ export class LanguageShadowStore {
     if (phase !== 'completion' && phase !== 'diagnostics') throw new Error('Invalid shadow phase');
     const captured = this.capture(authority), launchId = randomUUID(), root = join(this.ownedRoot, launchId);
     const { manifest, contents } = this.plan(captured.snapshot, captured.source, captured.deps, launchId, phase);
-    mkdirSync(root, { mode: 0o700 });
+    mkdirSync(root, { mode: 0o700 }); assertPrivateLanguageDirectory(root);
     try {
       const workspaceDirectory = join(root, 'workspace'), bootDirectory = join(root, 'boot'), stateDirectory = join(root, 'state');
       mkdirSync(workspaceDirectory, { mode: 0o755 });
@@ -228,7 +237,8 @@ export class LanguageShadowStore {
   }
   private record(shadow: LanguageShadow): RecordState {
     const record = this.records.get(shadow.launchId);
-    if (!record || record.shadow !== shadow || record.poisoned) throw new Error('Unknown/stale/poisoned language shadow'); return record;
+    if (!record || record.shadow !== shadow || record.poisoned) throw new Error('Unknown/stale/poisoned language shadow');
+    assertPrivateLanguageDirectory(dirname(shadow.workspaceDirectory)); return record;
   }
   assertIntegrity(shadow: LanguageShadow): void {
     const record = this.record(shadow);
