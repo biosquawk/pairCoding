@@ -12,6 +12,7 @@ import { LanguageFeatureRegistry } from './LanguageFeatureRegistry';
 
 const activeRoots = new Set<string>(); // guard shared by all instances, held across async operations
 const activeAsyncRoots = new Set<string>();
+const openWorkspaces = new Map<string, Set<WorkspaceService>>();
 const MAX_BYTES = 1048576;
 const MAX_FILES = 1000;
 const EXCLUDED = new Set(['.git', 'node_modules', 'target', '__pycache__', '.venv', 'dist', '.paircoach']);
@@ -43,6 +44,7 @@ export class WorkspaceService extends EventEmitter {
   private poll: ReturnType<typeof setInterval>;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private backgroundScan: { steps: Generator<void, void, void>; immediate: ReturnType<typeof setImmediate> | null } | null = null;
 
   constructor(rootPath: string, dataDir?: string) {
     super();
@@ -76,6 +78,8 @@ export class WorkspaceService extends EventEmitter {
     this.refreshWatchers();
     this.poll = setInterval(() => this.watchScan(), 500);
     this.poll.unref();
+    if (!openWorkspaces.has(this.rootPath)) openWorkspaces.set(this.rootPath, new Set());
+    openWorkspaces.get(this.rootPath)!.add(this);
   }
 
   /** All API paths are relative POSIX; use this before *every* filesystem effect. */
@@ -256,14 +260,57 @@ export class WorkspaceService extends EventEmitter {
   }
 
   private scanInternal(): void {
+    this.cancelRootBackgroundScans();
     if (this.recoveryRequired) throw snapshotFailure('Workspace has pending snapshot recovery; construct WriteGate before publishing state.');
     this.scan(); this.refreshWatchers();
   }
 
+  /** Background observation is incremental, NOT an async drain of scanSteps' frozen results.
+   * Read + publish each path in one turn; never infer deletion from an old collected tree.
+   * Structural mutations/full scans cancel the traversal across instances of the same root.
+   * No root/mutation lock is held across yields, so autosave remains available. */
+  private *backgroundScanSteps(): Generator<void, void, void> {
+    const previousDirectories = this.directories;
+    const { files, dirs } = yield* this.collectSteps();
+    for (const file of new Set([...files, ...this.records.keys()])) {
+      this.external(file, this.disk(file));
+      yield;
+    }
+    // A normal WRITE may refresh directories without changing structure. Keep that
+    // newer list, but do not restart the scan on every autosave (tail starvation).
+    if (this.directories === previousDirectories) this.directories = dirs;
+    this.refreshWatchers();
+  }
+
+  private cancelRootBackgroundScans(): void {
+    this.cancelBackgroundScan(); // also safe before constructor registration
+    for (const workspace of openWorkspaces.get(this.rootPath) ?? []) workspace.cancelBackgroundScan();
+  }
+
+  private cancelBackgroundScan(): void {
+    if (this.backgroundScan?.immediate) clearImmediate(this.backgroundScan.immediate);
+    // No descriptor/lock spans a yield. Do not call generator.return(): a synchronous
+    // external listener may cancel while next() itself is still executing.
+    this.backgroundScan = null;
+  }
+
   private watchScan(): void {
-    if (this.closed || activeRoots.has(this.rootPath) || this.recoveryRequired) return;
-    try { this.scanExternal(); }
-    catch (error) { this.emit('watcherError', error instanceof AppError ? error : new AppError(503, 'WATCHER_FAILED', 'Reload workspace; watcher could not scan safely.')); }
+    if (this.closed || activeRoots.has(this.rootPath) || this.recoveryRequired || this.backgroundScan) return;
+    const scan = { steps: this.backgroundScanSteps(), immediate: null as ReturnType<typeof setImmediate> | null };
+    this.backgroundScan = scan;
+    const advance = () => {
+      if (this.backgroundScan !== scan) return;
+      if (this.closed || activeRoots.has(this.rootPath) || this.recoveryRequired) { this.cancelBackgroundScan(); return; }
+      try {
+        if (scan.steps.next().done) { this.cancelBackgroundScan(); return; }
+      } catch (error) {
+        this.cancelBackgroundScan();
+        this.emit('watcherError', error instanceof AppError ? error : new AppError(503, 'WATCHER_FAILED', 'Reload workspace; watcher could not scan safely.'));
+        return;
+      }
+      if (this.backgroundScan === scan) scan.immediate = setImmediate(advance);
+    };
+    scan.immediate = setImmediate(advance);
   }
 
   private refreshWatchers(): void {
@@ -403,6 +450,7 @@ export class WorkspaceService extends EventEmitter {
 
   _create(relative: string, content: string, actor: string, authorize: () => void): Document {
     this._assertWritable();
+    this.cancelRootBackgroundScans();
     const absolute = this._safePath(relative, true);
     const bytes = this.encoded(content);
     if (fs.existsSync(absolute)) throw new AppError(409, 'FILE_EXISTS', 'Destination already exists.');
@@ -492,6 +540,7 @@ export class WorkspaceService extends EventEmitter {
 
   _rename(relative: string, newPath: string, baseVersion: number, actor: string, authorize: () => void): void {
     this._assertWritable();
+    this.cancelRootBackgroundScans();
     const before = this._fresh(relative, baseVersion);
     const from = this._safePath(relative), to = this._safePath(newPath, true);
     if (fs.existsSync(to)) throw new AppError(409, 'FILE_EXISTS', 'Destination already exists.');
@@ -621,6 +670,7 @@ export class WorkspaceService extends EventEmitter {
 
   _delete(relative: string, baseVersion: number, actor: string, authorize: () => void): void {
     this._assertWritable();
+    this.cancelRootBackgroundScans();
     const before = this._fresh(relative, baseVersion);
     const absolute = this._safePath(relative);
     // Minimal durable safety copy. Full snapshot/restore journal belongs to GATE003.
@@ -664,6 +714,7 @@ export class WorkspaceService extends EventEmitter {
   async _withMutationAsync<T>(action: () => Promise<T>): Promise<T> {
     if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
     this._assertWritable();
+    this.cancelRootBackgroundScans();
     this.mutationBusy = true; activeRoots.add(this.rootPath); activeAsyncRoots.add(this.rootPath);
     try { return await action(); }
     finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); activeAsyncRoots.delete(this.rootPath); }
@@ -685,6 +736,7 @@ export class WorkspaceService extends EventEmitter {
   /** @internal Called only by the gate constructor, before exposing normal mutation authority. */
   _recoverSnapshots(): void {
     if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Recovery cannot reenter an active workspace operation.');
+    this.cancelRootBackgroundScans();
     this.mutationBusy = true; activeRoots.add(this.rootPath);
     try {
       this.snapshotJournal.recover();
@@ -805,6 +857,10 @@ export class WorkspaceService extends EventEmitter {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    this.cancelBackgroundScan();
+    const instances = openWorkspaces.get(this.rootPath);
+    instances?.delete(this);
+    if (!instances?.size) openWorkspaces.delete(this.rootPath);
     clearInterval(this.poll);
     if (this.scanTimer) clearTimeout(this.scanTimer);
     for (const watcher of this.watchers.values()) watcher.close();
