@@ -307,7 +307,7 @@
       "language": {
         "provider": "jdt",
         "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0"
+        "serverJvm": "27.0.1.0.2"
       },
       "taskFields": [
         {
@@ -402,7 +402,7 @@
       "language": {
         "provider": "jdt",
         "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0"
+        "serverJvm": "27.0.1.0.2"
       },
       "taskFields": [
         {
@@ -497,7 +497,7 @@
       "language": {
         "provider": "jdt",
         "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0"
+        "serverJvm": "27.0.1.0.2"
       },
       "taskFields": [
         {
@@ -597,11 +597,11 @@
         },
         {
           "name": "java",
-          "version": "27.0.1.0"
+          "version": "27.0.1.0.2"
         },
         {
           "name": "javac",
-          "version": "27.0.1.0"
+          "version": "27.0.1.0.2"
         },
         {
           "name": "maven",
@@ -616,7 +616,7 @@
       "language": {
         "provider": "jdt",
         "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0"
+        "serverJvm": "27.0.1.0.2"
       },
       "taskFields": [
         {
