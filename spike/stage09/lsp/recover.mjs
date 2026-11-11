@@ -2,6 +2,7 @@
 import {spawnSync} from 'node:child_process';
 import {readFileSync,appendFileSync,writeFileSync} from 'node:fs';
 import {isAbsolute,join} from 'node:path';
+import {collectBootArtifacts} from './boot-artifacts.mjs';
 const [out]=process.argv.slice(2);
 if(!out||!isAbsolute(out))throw new Error('Usage: node recover.mjs /absolute/owned-spike-output');
 const {nonce}=JSON.parse(readFileSync(join(out,'prepared-images.json'),'utf8'));
@@ -22,11 +23,12 @@ for(const kind of ['java27','java21','python']){
   if(container.Config.Labels?.['paircoach.owner']!==owner||container.Config.Labels?.['paircoach.nonce']!==nonce)throw new Error('Foreign resource; STOP recovery');
   if(container.State.Running)docker(['stop','--time','3',name]);
   const final=docker(['inspect',name]);
-  let stopped=false;try{stopped=JSON.parse(final.stdout)[0].State.Running===false;}catch{}
-  docker(['logs','--timestamps',name]);
-  if(kind.startsWith('java'))docker(['cp',`${name}:/work/.jdt-data/.metadata/.log`,join(out,`${kind}-recovered-jdt.log`)]);
-  writeFileSync(join(out,`recovery-${kind}.json`),JSON.stringify({name,stopConfirmed:stopped,status:stopped?'PASS':'BLOCKED',scope:'Owned LSP recovery only; NOT completion/diagnostics proof',containerRetained:true},null,2)+'\n');
-  if(!stopped)failed=true;
+  let stopped=false,finalOwned=false;try{const [data]=JSON.parse(final.stdout);finalOwned=data.Config.Labels?.['paircoach.owner']===owner&&data.Config.Labels?.['paircoach.nonce']===nonce;stopped=finalOwned&&data.State.Running===false;}catch{}
+  const logs=finalOwned?docker(['logs','--timestamps',name]):null;
+  const bootArtifacts=stopped&&kind.startsWith('java')?collectBootArtifacts(out,kind):null;
+  const collected=logs?.exit===0&&(!kind.startsWith('java')||bootArtifacts?.status==='PASS');
+  writeFileSync(join(out,`recovery-${kind}.json`),JSON.stringify({name,stopConfirmed:stopped,collectionComplete:collected,bootArtifacts,status:stopped&&collected?'PASS':'BLOCKED',scope:'Owned LSP recovery only; NOT completion/diagnostics proof',containerRetained:true},null,2)+'\n');
+  if(!stopped||!collected)failed=true;
 }
 // Does not rm: operator verifies collected evidence and explicitly removes only confirmed stopped names.
 process.exitCode=failed?2:0;

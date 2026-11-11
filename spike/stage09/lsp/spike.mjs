@@ -6,6 +6,7 @@ import {resolve,join,dirname,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {Rpc} from './rpc.mjs';
+import {javaLaunch,prepareBootDirectory,readJavaVersions,collectBootArtifacts} from './boot-artifacts.mjs';
 
 const here=dirname(fileURLToPath(import.meta.url));
 const lock=JSON.parse(await readFile(join(here,'upstream.lock.json'),'utf8'));
@@ -71,7 +72,7 @@ async function prepare(){
     await writeFile(join(out,'prepared-images.json'),JSON.stringify(images,null,2)+'\n');
   }
 }
-const containerFlags=(name,shadow,imageId)=>['create','-i','--name',name,'--label',`paircoach.owner=${owner}`,'--label',`paircoach.nonce=${nonce}`,'--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10001:10001','--memory=2048m','--cpus=2','--pids-limit=192','--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--tmpfs','/tmp:rw,nosuid,nodev,size=768m,mode=1777','--mount',`type=bind,src=${shadow},dst=/work`,'--workdir=/work',imageId];
+const containerFlags=(name,shadow,imageId,boot)=>['create','-i','--name',name,'--label',`paircoach.owner=${owner}`,'--label',`paircoach.nonce=${nonce}`,'--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10001:10001','--memory=2048m','--cpus=2','--pids-limit=192','--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--tmpfs','/tmp:rw,nosuid,nodev,size=768m,mode=1777','--mount',`type=bind,src=${shadow},dst=/work`,'--workdir=/work',...(boot?['--mount',`type=bind,src=${boot},dst=/artifacts`]:[]),imageId];
 async function writeShadow(root,path,text){const file=join(root,path);await mkdir(dirname(file),{recursive:true,mode:0o777});await chmod(dirname(file),0o777);await writeFile(file,text,{mode:0o666});return file;}
 const javaText=(method,bad=false)=>`import java.lang.ScopedValue;\r\npublic class Demo {\r\n  static class Helper { public String ${method}() { return "żółć 😀"; } }\r\n  ScopedValue<String> scoped = ScopedValue.newInstance();\r\n  void demo() { Helper h = new Helper(); h.${method}(); ${bad?'int broken = "not-int";':''} }\r\n}\r\n`;
 const pythonText=(method,bad=false)=>`class Calculator:\r\n    def ${method}(self):\r\n        return "żółć 😀"\r\n\r\ncalc = Calculator()\r\ncalc.${method}()\r\n${bad?'unknown_paircoach_symbol\r\n':''}`;
@@ -92,10 +93,12 @@ async function exercise(language,target,imageId){
   const method='pairCoachUniqueMethod',renamed='pairCoachRenamedMethod';
   const makeText=language==='java'?javaText:pythonText;
   let text=makeText(method);await writeShadow(shadow,relative,text);
-  const server=language==='java'?['sh','-c',`cp -r /opt/jdt/config_linux /tmp/jdt-config && exec /opt/java/openjdk/bin/java -Declipse.application=org.eclipse.jdt.ls.core.id1 -Dosgi.bundles.defaultStartLevel=4 -Declipse.product=org.eclipse.jdt.ls.core.product -Xmx1024m --add-modules=ALL-SYSTEM --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED -jar /opt/jdt/plugins/${lock.jdt.launcher} -configuration /tmp/jdt-config -data /work/.jdt-data`]:["sh","-c","python -m pip install --no-index --no-deps --require-hashes --find-links=/wheels --target=/tmp/pylsp -r /requirements.lock >&2 && exec python -m pylsp"];
-  await command([...containerFlags(name,shadow,imageId),...server]);
-  let child,rpc,failure,summary={kind,name,imageId,target:target??'3.13',serverJVM:language==='java'?21:null,status:'NOT_RUN',originalWorkspaceMount:false,shadow,uri};
+  const launch=language==='java'?javaLaunch(target,lock.jdt.launcher):null;
+  const boot=launch?prepareBootDirectory(out,kind):null;
+  const server=launch?launch.argv:["sh","-c","python -m pip install --no-index --no-deps --require-hashes --find-links=/wheels --target=/tmp/pylsp -r /requirements.lock >&2 && exec python -m pylsp"];
+  let child,rpc,failure,summary={kind,name,imageId,target:target??'3.13',serverJVM:launch?{executable:launch.serverJava,expectedMajor:launch.serverExpectedMajor,observed:null}:null,analysisRelease:target??null,status:'NOT_RUN',originalWorkspaceMount:false,shadow,boot,uri};
   try{
+    await command([...containerFlags(name,shadow,imageId,boot),...server]);
     child=spawn('docker',['start','--attach','--interactive',name],{shell:false,stdio:['pipe','pipe','pipe']});
     child.stderr.on('data',chunk=>appendFileSync(join(out,`${kind}-transport.stderr`),chunk));
     let wireBytes=0;
@@ -103,12 +106,23 @@ async function exercise(language,target,imageId){
     const settings=language==='java'?{java:{configuration:{runtimes:[{name:'JavaSE-21',path:'/opt/java/openjdk',default:target===21},{name:'JavaSE-27',path:'/opt/jdk27',default:target===27}]},autobuild:{enabled:true},import:{maven:{enabled:false},gradle:{enabled:false}},completion:{enabled:true}}}:{pylsp:{plugins:{pyflakes:{enabled:true},pycodestyle:{enabled:false},jedi_completion:{enabled:true}}}};
     activeRpc=rpc;rpc.configuration=settings;
     if(interrupted)throw new Error('Execution interrupted');
+    if(launch){
+      // Bootstrap writes actual versions to the durable bind BEFORE launching JDT.
+      // Do not let version output or -consoleLog pollute JSON-RPC stdout.
+      const deadline=Date.now()+10000;
+      for(;;){
+        try{summary.javaVersions=readJavaVersions(boot,target);break;}
+        catch(error){if(error.code!=='ENOENT'||rpc.fatal||interrupted||Date.now()>=deadline)throw rpc.fatal??error;}
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      summary.serverJVM.observed=summary.javaVersions.server;
+    }
+    summary.initializeSentUTC=new Date().toISOString();
     const initialized=await rpc.request('initialize',{processId:null,rootUri:'file:///work',workspaceFolders:[{uri:'file:///work',name:'lsp-probe'}],capabilities:{workspace:{configuration:true,workspaceFolders:true},textDocument:{completion:{completionItem:{snippetSupport:false}},publishDiagnostics:{versionSupport:true}}},initializationOptions:{settings,extendedClientCapabilities:{classFileContentsSupport:false}}},90000);
     summary.capabilities=initialized;
     summary.capabilityObservations={positionEncoding:initialized.capabilities?.positionEncoding??'utf-16 (LSP default)',completionProvider:initialized.capabilities?.completionProvider??null,diagnosticProvider:initialized.capabilities?.diagnosticProvider??null};
     rpc.notify('initialized',{});rpc.notify('workspace/didChangeConfiguration',{settings});
-    const tools=language==='java'?['sh','-c','/opt/java/openjdk/bin/java -version; /opt/java/openjdk/bin/javac --version; /opt/jdk27/bin/java -version; /opt/jdk27/bin/javac --version']:['sh','-c','python --version && python -m pip check && python -c "import importlib.metadata as m; print({n:m.version(n) for n in [\'python-lsp-server\',\'jedi\',\'pyflakes\']})"'];
-    summary.tools=await command(['exec',name,...tools]);
+    if(language==='python')summary.tools=await command(['exec',name,...['sh','-c','python --version && python -m pip check && python -c "import importlib.metadata as m; print({n:m.version(n) for n in [\'python-lsp-server\',\'jedi\',\'pyflakes\']})"']]);
     rpc.notify('textDocument/didOpen',{textDocument:{uri,languageId:language,version:1,text}});
     async function completion(expected,absent,triggerKind=2){
       const positionValue=position(text,language==='java'?'h.':'calc.');
@@ -150,16 +164,25 @@ async function exercise(language,target,imageId){
     // Stop actual owned container, inspect state; killing docker-attach is never stop proof.
     const inspected=await command(['inspect',name],{allowFailure:true});
     let state;try{state=JSON.parse(inspected.stdout)[0];}catch{}
-    if(state?.State.Running)await command(['stop','--time','3',name],{timeout:15000,allowFailure:true});
+    const owned=state?.Config?.Labels?.['paircoach.owner']===owner&&state?.Config?.Labels?.['paircoach.nonce']===nonce;
+    if(owned&&state?.State.Running)await command(['stop','--time','3',name],{timeout:15000,allowFailure:true});
     const final=await command(['inspect',name],{allowFailure:true});
     try{summary.finalInspect=JSON.parse(final.stdout)[0];}catch{}
-    summary.stopConfirmed=summary.finalInspect?.State.Running===false;
-    await command(['logs','--timestamps',name],{allowFailure:true});
-    if(language==='java')await command(['cp',`${name}:/work/.jdt-data/.metadata/.log`,join(out,`${kind}-jdt.log`)],{allowFailure:true});
+    const finalOwned=owned&&summary.finalInspect?.Config?.Labels?.['paircoach.owner']===owner&&summary.finalInspect?.Config?.Labels?.['paircoach.nonce']===nonce;
+    summary.stopConfirmed=finalOwned&&summary.finalInspect?.State.Running===false;
+    if(finalOwned)summary.containerLogs=await command(['logs','--timestamps',name],{allowFailure:true});
+    if(launch&&summary.stopConfirmed){
+      summary.bootArtifacts=collectBootArtifacts(out,kind);
+      // Failure before initialize still records any completed bootstrap observations.
+      try{summary.javaVersions??=readJavaVersions(boot,target);summary.serverJVM.observed=summary.javaVersions.server;}
+      catch(error){summary.versionObservationError=error.message;}
+    }
+    summary.collectionComplete=summary.containerLogs?.exit===0&&(!launch||summary.bootArtifacts?.status==='PASS');
+    if(!summary.collectionComplete){summary.status='FAIL';summary.error=(summary.error??'')+' ARTIFACT_COLLECTION_INCOMPLETE; retained';}
     if(!summary.stopConfirmed){summary.status='FAIL';summary.error=(summary.error??'')+' PROCESS_STOP_UNCONFIRMED';}
     await writeFile(join(out,`${kind}-summary.json`),JSON.stringify(summary,null,2)+'\n');
     // Artifacts and durable summary exist first. Only this nonce-owned, verified stopped name.
-    if(summary.stopConfirmed&&summary.finalInspect.Config.Labels['paircoach.owner']===owner&&summary.finalInspect.Config.Labels['paircoach.nonce']===nonce)await command(['rm',name]);
+    if(summary.stopConfirmed&&summary.collectionComplete)await command(['rm',name]);
     if(child&&!child.killed){child.stdin.end();child.kill('SIGTERM');}
   }
   if(failure||summary.status!=='PASS')throw failure??new Error(summary.error);
