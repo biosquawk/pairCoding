@@ -25,6 +25,9 @@ export function hasDirectMuteRequest(text: string): boolean {
       else if (fence.character === marker[1][0] && marker[1].length >= fence.length && !line.slice(marker[0].length).trim()) fence = null;
       continue;
     }
+    // A mapping key owns its following lines regardless of its name or indentation.
+    // Do not interpret YAML scalars/block literals as independent human commands.
+    if (/^\s*(?:-\s+)?(?:[\p{L}_][\p{L}\p{N}_ .-]*|"[^"]*"|'[^']*'):(?:\s|$)/u.test(line)) dataBlock = true;
     if (/[:：]\s*$/.test(line) && /przykład|cytat|(?:w|z) plik|kod|instrukcj|napis|treść|poleceni|example|quote|file|json|xml/iu.test(line)) dataBlock = true;
     // Do not reclassify a later line of a pasted data block as human prose.
     if (/[<>{}\[\]=;]/.test(line) || /^\s*(?:>|#|\/\/)/.test(line)) dataBlock = true;
@@ -44,28 +47,41 @@ export function hasDirectMuteRequest(text: string): boolean {
   });
 }
 
-/** Exact inline backtick runs and escaped/multiline quotations remain data. */
+/** Exact backtick runs, nested parentheses and multiline quotations remain data. */
 function maskQuotedData(text: string): string {
-  const pairs: Record<string, string> = {'"':'"', "'":"'", '„':'”', '“':'”', '«':'»', '‘':'’'};
+  const pairs: Record<string, string> = {'"':'"', "'":"'", '„':'”', '“':'”', '«':'»', '‘':'’', '’':'’', '”':'”', '»':'»'};
   let safe = '';
   for (let i = 0; i < text.length;) {
-    if (text[i] === '`') {
-      let count = 1;
-      while (text[i + count] === '`') count++;
-      const delimiter = '`'.repeat(count);
-      let end = text.indexOf(delimiter, i + count);
-      while (end >= 0 && (text[end - 1] === '`' || text[end + count] === '`')) end = text.indexOf(delimiter, end + count);
-      safe += ' [DATA] ';
-      i = end < 0 ? text.length : end + count;
-    } else if (pairs[text[i]]) {
-      const close = pairs[text[i]];
-      let end = i + 1;
-      while (end < text.length) {
-        if (text[end] === '\\') { end += 2; continue; }
-        if (text[end++] === close) break;
+    if (text[i] === '(') {
+      let depth = 1, end = i + 1;
+      while (end < text.length && depth) {
+        // A parenthesis inside a quoted/code span cannot close the outer data.
+        if (text[end] === '`' || pairs[text[end]]) end = quotedEnd(end);
+        else if (text[end] === '\\') end += 2;
+        else { if (text[end] === '(') depth++; else if (text[end] === ')') depth--; end++; }
       }
       safe += ' [DATA] '; i = end;
+    } else if (text[i] === '`' || pairs[text[i]]) {
+      safe += ' [DATA] '; i = quotedEnd(i);
     } else safe += text[i++];
   }
   return safe;
+
+  function quotedEnd(start: number): number {
+    if (text[start] === '`') {
+      let count = 1;
+      while (text[start + count] === '`') count++;
+      const delimiter = '`'.repeat(count);
+      let end = text.indexOf(delimiter, start + count);
+      while (end >= 0 && (text[end - 1] === '`' || text[end + count] === '`')) end = text.indexOf(delimiter, end + count);
+      return end < 0 ? text.length : end + count;
+    }
+    const close = pairs[text[start]];
+    let end = start + 1;
+    while (end < text.length) {
+      if (text[end] === '\\') { end += 2; continue; }
+      if (text[end++] === close) break;
+    }
+    return end;
+  }
 }

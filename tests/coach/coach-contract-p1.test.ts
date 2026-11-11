@@ -6,6 +6,7 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {coreFixture} from '../qa/helpers';
 import {CoachAdapter, type CoachProvider} from '../../src/server/CoachAdapter';
+import {hasDirectMuteRequest} from '../../src/server/coach/authorization';
 import {buildContext, contextFingerprint} from '../../src/server/coach/context';
 import type {CoachContext} from '../../src/server/coach/context';
 import {CodexCoachProvider, CODEX_COACH_SCHEMA, codexCoachArgs} from '../../src/server/coach/CodexProvider';
@@ -197,4 +198,53 @@ test('actual adapter RUN evidence is available and valid without fabricating a f
   assert.deepEqual(seen!.allowedEvidenceIds,['actual-run']);
   assert.deepEqual(f.events.find(e=>e.type==='COACH_HINT_BUBBLE')!.payload.evidenceIds,['actual-run']);
   assert.equal(f.events.some(e=>e.type==='ERROR'||e.type==='CONTROL_PREPARE'),false);
+});
+
+
+// Frozen K cases, exercised via the actual adapter as well as the pure grammar.
+const reworkDataCases = [
+  ['YAML literal', 'request: |\n  wycisz trenera'],
+  ['YAML scalar', 'request:\n  wycisz trenera'],
+  ['parenthesized data', '(\nwycisz trenera\n)'],
+  ['curly quoted data', '’\nwycisz trenera\n’'],
+] as const;
+for (const [label, text] of reworkDataCases) test('rework current CHAT data cannot authorize MUTE: '+label, async t=>{
+  const f=await fixture(t,{name:'injected',decide:async()=>mute('current')});
+  const before=f.session.getSession(), version=f.workspace.workspaceVersion;
+  f.adapter.trigger('CHAT',chat('current',text));
+  await until(()=>f.events.some(e=>e.type==='ERROR')||f.session.getSession().coachMode==='MUTED_MANUAL');
+  assert.notEqual(f.session.getSession().coachMode,'MUTED_MANUAL',text);
+  assert.equal(f.events.filter(e=>e.type==='ERROR').length,1);
+  assert.equal(f.events.find(e=>e.type==='ERROR')!.payload.code,'COACH_RESPONSE_REJECTED');
+  assert.equal(f.session.getSession().controlEpoch,before.controlEpoch);
+  assert.equal(f.workspace.workspaceVersion,version);
+  assert.equal(await readFile(path.join(f.rootPath,'main.py'),'utf8'),'value = 1\n');
+  noEffects(f);
+  assert.equal(hasDirectMuteRequest(text),false);
+});
+
+const adjacentDataCases = [
+  'request: >-\n  wycisz trenera', 'request: |2+ # data\n  wycisz trenera',
+  'request:\nwycisz trenera', '- request:\n  wycisz trenera',
+  'żądanie:\n  wycisz trenera', '"request": |\n  wycisz trenera',
+  "'request':\n  wycisz trenera", 'request: metadata\n  wycisz trenera',
+  '(outer (inner)\nwycisz trenera\n)', '("quoted )"\nwycisz trenera\n)',
+  '(\nwycisz trenera', '”\nwycisz trenera\n”', '»\nwycisz trenera\n»',
+];
+test('rework grammar denies data variants and preserves every original positive/negative',()=>{
+  const invalid=[...negativeMute,...reworkDataCases.map(([,text])=>text),...adjacentDataCases];
+  assert.deepEqual(invalid.filter(hasDirectMuteRequest),[]);
+  assert.deepEqual(positiveMute.filter(text=>!hasDirectMuteRequest(text)),[]);
+});
+test('rework adapter rejects adjacent data but permits independent prose after closed quoted/parenthesized data',async t=>{
+  const positive=['(Notatka: wycisz trenera)\nProszę, nie podpowiadaj przez minutę.',
+    '’\nwycisz trenera\n’\nDaj mi chwilę, chcę popracować sam',
+    '(outer (inner))\nChcę chwilę popracować sam, wycisz trenera'];
+  for(const [authorized,inputs] of [[false,adjacentDataCases],[true,positive]] as const)for(const text of inputs){
+    const f=await fixture(t,{name:'injected',decide:async()=>mute('current')});
+    f.adapter.trigger('CHAT',chat('current',text));
+    await until(()=>f.events.some(e=>e.type==='ERROR')||f.session.getSession().coachMode==='MUTED_MANUAL');
+    assert.equal(f.session.getSession().coachMode==='MUTED_MANUAL',authorized,text);
+    assert.equal(f.events.some(e=>e.type==='ERROR'),!authorized,text);noEffects(f);f.adapter.close();
+  }
 });
