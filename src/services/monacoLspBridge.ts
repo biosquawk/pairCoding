@@ -112,8 +112,10 @@ export class MonacoLspBridge {
         if (e.keyCode === monaco.KeyCode.Escape) { this.acceptance.cancel(); return; }
         if (this.widget.key(e.keyCode)) { e.preventDefault(); e.stopPropagation(); }
       }), editor.onDidDispose(() => this.dispose()));
-    this.unsubscribe = binding.subscribe(event => this.receive(event));
-    monaco.editor.getModels().forEach(model => this.attach(model));
+    try {
+      this.unsubscribe = binding.subscribe(event => this.receive(event));
+      monaco.editor.getModels().forEach(model => this.attach(model));
+    } catch (e) { this.problem(e); this.dispose(); } // language setup failure never escapes into the editor's React tree.
   }
   private snapshot(entry: Entry): ModelSnapshot {
     const content = normalizeContent(entry.model.getValue());

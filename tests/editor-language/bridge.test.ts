@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { MonacoLspBridge } from '../../src/services/monacoLspBridge';
 import { harness,Model } from './harness';
 import { result } from './fixtures';
 import type { DiagnosticsResult } from '../../src/shared/language-v2';
@@ -97,4 +98,11 @@ test('new profile/provider/configuration authority opens current buffers; it can
   await h.bridge.requestCompletion(null);assert.equal(h.requests.length,0,'not yet opened in new scope');
   h.revision++;h.emit({type:'AUTHORITY_CHANGED'});assert.equal(h.sync.length,before+2);assert.equal(h.sync.at(-1).kind,'OPEN');
   assert.equal(h.sync.at(-1).document.stamp.profileId,'profile-next');await h.bridge.requestCompletion(null);assert.equal(h.requests.length,1);h.bridge.dispose();
+});
+
+test('language subscription failure is isolated: manual models stay intact, widget/listeners disposed',()=>{
+  const h=harness();h.bridge.dispose();const content=h.primary.content;
+  h.binding.subscribe=()=>{throw new Error('transport unavailable');};
+  assert.doesNotThrow(()=>new MonacoLspBridge(h.monaco,h.editor,h.binding));
+  assert.equal(h.primary.content,content);assert.equal(h.widgets.length,0);assert.equal(h.primary.event.callbacks.size,0);assert.ok(h.problems.includes('transport unavailable'));
 });

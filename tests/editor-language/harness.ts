@@ -64,7 +64,7 @@ export function harness() {
   const monaco:any={typescript:{typescriptDefaults:mode(),javascriptDefaults:mode()},json:{jsonDefaults:mode()},css:{cssDefaults:mode(),lessDefaults:mode(),scssDefaults:mode()},html:{htmlDefaults:mode(),handlebarDefaults:mode(),razorDefaults:mode()},Range,Selection,KeyCode:{Escape:9,Enter:3,Tab:2,DownArrow:18,UpArrow:16},MarkerSeverity:{Error:8,Warning:4,Info:2,Hint:1},
     editor:{getModels:()=>models,onDidCreateModel:create.on,onWillDisposeModel:dispose.on,setModelMarkers:(m:Model,_owner:string,items:any[])=>markers.set(m,items),CursorChangeReason:{ContentFlush:1},ContentWidgetPositionPreference:{BELOW:2,ABOVE:1}}};
   const bridge=new MonacoLspBridge(monaco,editor,binding);
-  return {bridge,binding,primary,inactive,models,markers,widgets,sync,cancelled,requests,problems,flags,dom,editor,
+  return {bridge,binding,monaco,primary,inactive,models,markers,widgets,sync,cancelled,requests,problems,flags,dom,editor,
     emit:(event:BridgeEvent)=>listener(event),key:(keyCode:number)=>{const event={keyCode,preventDefault(){},stopPropagation(){},code:'',ctrlKey:false,metaKey:false};key.fire(event);},
     add:(model:Model)=>{models.push(model);create.fire(model);},switch:(model:Model)=>{active=model;modelEvent.fire({});},
     get position(){return position;},set position(p){position=p;cursor.fire({reason:3});},
