@@ -51,7 +51,8 @@ export interface LanguageShadow {
 }
 type Tree = { files: ShadowFile[]; directories: string[]; contents: Map<string, Buffer> };
 type RecordState = { shadow: LanguageShadow; poisoned: boolean };
-const DEPENDENCIES = '.paircoach-dependencies';
+export const LANGUAGE_DEPENDENCY_DIRECTORY = '.paircoach-dependencies';
+const DEPENDENCIES = LANGUAGE_DEPENDENCY_DIRECTORY;
 const excluded = new Set(['.git', '.paircoach', DEPENDENCIES, 'node_modules', 'target', 'build', 'dist', '__pycache__',
   '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.idea', '.vscode', '.gradle', '.m2', '.npm', '.cache',
   'coverage', 'test-results', 'surefire-reports', 'failsafe-reports']);

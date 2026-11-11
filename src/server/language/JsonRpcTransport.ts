@@ -1,7 +1,7 @@
 import type { Readable, Writable } from 'node:stream';
 import { TextDecoder } from 'node:util';
 
-export type ClientRequestMethod = 'initialize' | 'shutdown' | 'textDocument/completion';
+export type ClientRequestMethod = 'initialize' | 'shutdown' | 'textDocument/completion' | 'workspace/executeCommand';
 export type ClientNotificationMethod = 'initialized' | 'exit' | '$/cancelRequest'
   | 'textDocument/didOpen' | 'textDocument/didChange' | 'textDocument/didClose' | 'workspace/didChangeConfiguration';
 export type ConfigurationRequestMethod = 'workspace/configuration' | 'workspace/workspaceFolders';
@@ -21,7 +21,7 @@ interface Pending {
 }
 const MAX_INCOMING = 256 * 1024, MAX_OUTGOING = 8 * 1024 * 1024;
 const MAX_HEADERS = 8192, MAX_QUEUED = 16 * 1024 * 1024, MAX_PENDING = 128;
-const requests = new Set(['initialize', 'shutdown', 'textDocument/completion']);
+const requests = new Set(['initialize', 'shutdown', 'textDocument/completion', 'workspace/executeCommand']);
 const notifications = new Set(['initialized', 'exit', '$/cancelRequest', 'textDocument/didOpen',
   'textDocument/didChange', 'textDocument/didClose', 'workspace/didChangeConfiguration']);
 const abortError = (message: string) => Object.assign(new Error(message), { name: 'AbortError' });
@@ -34,6 +34,7 @@ export class JsonRpcTransport {
   private serverPending = 0;
   private pending = new Map<string, Pending>();
   private listeners = new Set<(notification: RpcNotification) => void>();
+  private closedListeners = new Set<(error: Error) => void>();
   private queue: Promise<void> = Promise.resolve();
   private queuedBytes = 0;
   private failure: Error | null = null;
@@ -54,9 +55,19 @@ export class JsonRpcTransport {
     if (this.failure) throw this.failure;
     this.listeners.add(listener); return () => this.listeners.delete(listener);
   }
+  subscribeClosed(listener: (error: Error) => void): () => void {
+    if (this.failure) { listener(this.failure); return () => {}; }
+    this.closedListeners.add(listener); return () => this.closedListeners.delete(listener);
+  }
   async request(method: ClientRequestMethod, params: unknown,
-    options: { signal?: AbortSignal; timeoutMs?: number } = {}): Promise<unknown> {
+    options: { signal?: AbortSignal; timeoutMs?: number; onSent?: (id: string) => void } = {}): Promise<unknown> {
     if (!requests.has(method)) throw new Error('Forbidden LSP request method');
+    // The ONLY command is pinned JDT read-only project introspection; never a general command tunnel.
+    if (method === 'workspace/executeCommand') {
+      const p = params as { command?: unknown; arguments?: unknown } | null;
+      if (!p || typeof p !== 'object' || Array.isArray(p) || Object.keys(p).sort().join(',') !== 'arguments,command' ||
+        p.command !== 'java.project.getAll' || !Array.isArray(p.arguments) || p.arguments.length !== 0) throw new Error('Forbidden LSP command');
+    }
     if (this.failure) throw this.failure;
     if (options.signal?.aborted) throw abortError('Cancelled before send');
     const timeout = options.timeoutMs ?? 30000;
@@ -76,13 +87,13 @@ export class JsonRpcTransport {
       options.signal?.addEventListener('abort', onAbort, { once: true });
       void this.write({ jsonrpc: '2.0', id, method, params }, () => {
         const entry = this.pending.get(id); if (!entry) return false;
-        entry.sent = true; return true;
+        entry.sent = true; options.onSent?.(id); return true;
       }).catch(error => { const entry = this.take(id); entry?.reject(error); });
     });
   }
-  notify(method: ClientNotificationMethod, params: unknown): Promise<void> {
+  notify(method: ClientNotificationMethod, params: unknown, onSent?: () => void): Promise<void> {
     if (!notifications.has(method)) return Promise.reject(new Error('Forbidden LSP notification method'));
-    return this.write({ jsonrpc: '2.0', method, params });
+    return this.write({ jsonrpc: '2.0', method, params }, () => { onSent?.(); return true; });
   }
   /** Rejects all pending requests; lifecycle owner must separately stop+inspect+collect its container. */
   close(reason: Error = new Error('RPC transport disposed')): void { this.fail(reason); }
@@ -194,6 +205,8 @@ export class JsonRpcTransport {
     // Keep idempotent error sinks while owner retires the actual process to avoid unhandled pipe errors.
     for (const id of [...this.pending.keys()]) this.take(id)?.reject(error);
     this.buffer = Buffer.alloc(0); this.listeners.clear();
+    for (const listener of this.closedListeners) { try { listener(error); } catch { /* lifecycle observers are isolated */ } }
+    this.closedListeners.clear();
     this.options.onClosed?.(error);
   }
 }

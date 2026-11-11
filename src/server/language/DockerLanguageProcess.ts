@@ -128,6 +128,7 @@ export class DockerLanguageProcess {
       '--cap-drop=ALL', '--security-opt=no-new-privileges', '--user=10001:10001', '--memory=2048m', '--cpus=2', '--pids-limit=192',
       '--log-driver=json-file', '--log-opt=max-size=10m', '--log-opt=max-file=1', '--tmpfs', '/tmp:rw,nosuid,nodev,size=768m,mode=1777',
       '--env', 'HOME=/tmp', '--env', 'XDG_CACHE_HOME=/tmp/cache', '--env', 'PYTHONDONTWRITEBYTECODE=1',
+      ...(i.provider === 'pylsp' ? ['--env', 'PYTHONPATH=/opt/pylsp'] : []),
       ...Object.entries(i.labels).flatMap(([key, value]) => ['--label', `${key}=${value}`]),
       ...mounts.flatMap(([path, dest, ro]) => ['--mount', `type=bind,src=${path},dst=${dest}${ro ? ',readonly' : ''}`]),
       '--workdir=/workspace', '--entrypoint', i.argv[0], i.imageId, ...i.argv.slice(1)];
