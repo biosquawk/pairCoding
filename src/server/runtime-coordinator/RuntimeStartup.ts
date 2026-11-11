@@ -17,6 +17,7 @@ export interface RuntimeStartupArguments {
 }
 export class RuntimeStartupArgumentError extends Error {
   readonly code = 'INVALID_STARTUP_ARGUMENTS';
+  readonly status = 400;
   constructor() { super('Use --runtime-config <absolute-file> at most once and --prepared-runtime <absolute-outputRoot> at most 16 times. Select distinct canonical, non-overlapping output directories.'); }
 }
 const invalid = (): never => { throw new RuntimeStartupArgumentError(); };
@@ -68,6 +69,8 @@ export async function createRuntimeStartup(options: {
   transport: Pick<DockerTransport, 'run'>;
   environment?: RuntimeEnvironment;
   explicitWorkspaceRoot?: string;
+  /** Only exact canonical project .paircoach is accepted; never another authority. */
+  dataDir?: string;
 }): Promise<RuntimeStartup> {
   const args = parseRuntimeStartupArguments(options.argv);
   // Snapshot only the two config inputs; secrets/process environment are never forwarded to Docker.
@@ -91,6 +94,6 @@ export async function createRuntimeStartup(options: {
   // publish a fake session/bootstrap or select/create another project (including a temp one).
   else rootPath = null;
   // Unsafe explicit/env/config project paths refuse, never silently substitute another project.
-  const core = rootPath === null ? null : await createRuntimeWorkspace({ rootPath });
+  const core = rootPath === null ? null : await createRuntimeWorkspace({ rootPath, dataDir:options.dataDir });
   return Object.freeze({ arguments: args, configuration, prepared, core, rootSource, close: () => core?.close() });
 }

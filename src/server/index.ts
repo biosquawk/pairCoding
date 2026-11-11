@@ -3,7 +3,7 @@ import { createPairCoachServer } from './http';
 export { createPairCoachServer } from './http';
 
 async function main() {
-  const app=createPairCoachServer({enableCoach:true,enableExecution:true});
+  const app=createPairCoachServer({enableCoach:true,enableExecution:true,runtimeArguments:process.argv.slice(2)});
   const port=await app.listen();
   console.log(`PairCoach: http://127.0.0.1:${port} (wyłącznie loopback; token nie jest logowany).`);
   let stopping=false;

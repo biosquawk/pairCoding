@@ -62,9 +62,9 @@ export class WriteGate {
   }
 
   /** Ordered server admission path, including writes queued before a Run capture. */
-  writeAsync(input: MutationAuth & { path: string; baseVersion: number; content: string }): Promise<Document> {
+  writeAsync(input: MutationAuth & { path: string; baseVersion: number; content: string }, assertScopeCurrent:()=>void = ()=>{}): Promise<Document> {
     const accepted = structuredClone(input);
-    return this.workspace._withQueuedMutation(async () => this.writeAuthorized(accepted));
+    return this.workspace._withQueuedMutation(async () => this.writeAuthorized(accepted,assertScopeCurrent));
   }
 
   /** Frozen copy-helper signature; implementation stays executor-owned and is injected until reviewed. */
@@ -131,11 +131,11 @@ export class WriteGate {
     }, true);
   }
 
-  private writeAuthorized(input: MutationAuth & { path: string; baseVersion: number; content: string }): Document {
-    this.authorize(input);
+  private writeAuthorized(input: MutationAuth & { path: string; baseVersion: number; content: string }, assertScopeCurrent:()=>void = ()=>{}): Document {
+    assertScopeCurrent();this.authorize(input);
     this.workspace._safePath(input.path);
     if (input.actor === 'COACH') this.coachPath(input.path);
-    const result = this.workspace._replace(input.path, input.baseVersion, input.content, input.actor, () => this.authorize(input));
+    const result = this.workspace._replace(input.path, input.baseVersion, input.content, input.actor, () => {assertScopeCurrent();this.authorize(input);});
     if (input.actor === 'STUDENT') this.session.noteStudentEdit(input.path, result.content);
     return result;
   }
