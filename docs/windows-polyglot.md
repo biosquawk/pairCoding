@@ -52,13 +52,63 @@ dla27 zmień **oba** `java.version` i `maven.compiler.release` na27. Wymagana zg
 release / poziomu analizy / preview; adapter nie zmienia POM i nie obniża wersji po cichu.
 Spring nie jest oddzielnym profilem ani językiem i nie jest wspierany przez profile11/17.
 
+## 1a. Pełne ustawienia projektu — PRZED prepare
+
+CLI czyta **`<kanoniczny-projekt>/.paircoach/settings.json`**, nie `task.v2.json`.
+Najpierw zapisz jawnie pełne ustawienia V2; prepare nigdy ich nie tworzy ani migruje.
+Dla **nowego** `examples/javascript-counter`, przy zamkniętej aplikacji, utwórz
+katalog `.paircoach` i zapisz w nim `settings.json` jako UTF-8 bez BOM:
+
+```json
+{
+  "schemaVersion": 2,
+  "taskFilePath": null,
+  "taskMode": "IMPLEMENTATION",
+  "reviewNotesPath": "review.md",
+  "aiConsent": false,
+  "contextPatterns": [],
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": { "kind": "SCRIPT", "path": "main.js" },
+        "tests": { "paths": [], "names": [] }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": { "kind": "TESTS" },
+        "tests": { "paths": ["counter.test.js"], "names": [] }
+      }
+    }
+  ]
+}
+```
+
+To kompletny przykład **tylko dla świeżego projektu JS**, nie polecenie nadpisania
+istniejących ustawień. Jeśli plik już istnieje, zachowaj jego bajty i użyj jawnego
+zapisu/migracji V2 w ustawieniach aplikacji; zachowaj task, zgodę, kontekst, drafty
+oraz pozostałe dane. Nie zastępuj pliku samym `runProfiles` ani całym `task.v2.json`.
+Dla innych przykładów jawnie ustaw Main/Tests według tabeli i szablonu `task.v2.json`,
+pozostawiając pełną otoczkę SettingsV2. Zgodę AI włączaj osobno i świadomie w GUI.
+Brak/legacy/mixed settings powoduje odmowę z instrukcją jawnego zapisu, bez zgadywania.
+Niestandardowy backend `dataDir` poza tą lokalizacją nie jest obsługiwany przez CLI;
+nie przenoś plików ani nie wybieraj innego katalogu na próbę.
+Dwa różne `task.workingDirectory` Main/Tests są w tym CLI jawnie odrzucane;
+jedno wspólne niekropkowe `workingDirectory` ma być zachowane, nie zastąpione `.`.
+
 ## 2. Jawne prepare (bez domyślnego wykonania)
 
 Z katalogu aplikacji, po instalacji zależności zgodnie z windows-start:
 
 ```powershell
-$project = (Resolve-Path '.\examples\java-pattern').Path
-$profile = 'java-maven-21'
+$project = (Resolve-Path '.\examples\javascript-counter').Path
+$profile = 'javascript-node'
 # Istniejący prywatny rodzic, NOWE różne katalogi wyniku; nie repo/workspace/home/cache innej aplikacji.
 $planOut = Read-Host 'Pelna sciezka NOWEGO prywatnego katalogu dla planu'
 npm.cmd run runtime:prepare -- --project $project --profile $profile --output $planOut
@@ -72,7 +122,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Prepare FAIL/nieznany: zachowaj receipts i uzg
 W WSL odpowiednikiem jest `npm run runtime:prepare -- --project <absolutna-sciezka-WSL>
 --profile <ID-z-tabeli> --output <NOWY-prywatny-katalog-WSL> [--execute]`.
 Nie przekazuj ścieżki `C:\…` do klienta Node uruchomionego w WSL ani odwrotnie.
-Domyślny plan **nie przygotowuje** obrazów/cache. Brak zatwierdzonych pinów/assets,
+Domyślny wynik JSON `PLAN_ONLY` **nie przygotowuje** obrazów/cache i nie tworzy
+nawet katalogu `$planOut`: brak zapisu, sieci i wywołań Docker. Po odczycie planu
+wykonanie wymaga osobnego `--execute` i INNEGO nowego prywatnego outputu. Brak zatwierdzonych pinów/assets,
 obrazu, daemona lub zależności ma dać błąd/NOTREADY, bez host/mock fallbacku.
 Prepare ma używać wyłącznie package-relative pinów i skryptów; żadnych operator-only request paths.
 Nie montuje home, prywatnego `.m2`, docker.sock ani sekretów i nie przyjmuje flag Docker z zadania.
@@ -80,36 +132,57 @@ Po `pom.xml`, `requirements.txt`, `package.json` lub lock/config zmienionym wzgl
 przygotowanego projektu wykonaj nowe jawne prepare; zwykła edycja źródła nie zmienia zależności.
 Run/Test używają później wyłącznie przypiętych lokalnych obrazów `--pull=never` i zarządzanych cache.
 
-**Przekazanie wyniku do aplikacji: wybrany kontrakt, JESZCZE NIE ZINTEGROWANY.**
-Po wdrożeniu faktycznego CLI i konsumenta backendu start wybiera wyniki jawnie:
+**Przekazanie wyniku do aplikacji: wstępny freeze P1_4, JESZCZE NIE ZINTEGROWANY.**
+Poniższe nazwy/statusy pochodzą z wstępnego kontraktu CLI; ich działanie musi jeszcze
+potwierdzić frozen źródło CLI i faktyczny konsument backendu. Nie jest to gotowe wydanie.
+Execute zwraca `PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE` albo `NOTREADY`, nigdy
+status końcowy `READY`. Sam exit0, receipt lub wygenerowany config nie dowodzi gotowości.
+Przy `NOTREADY` zachowaj output/diagnostykę; nie dopisuj locka i nie ponawiaj na ślepo.
+Dopiero przy potwierdzonym wygenerowaniu konfiguracji pod NOWYM `$executeOut` będą:
+
+- `runtime-config.json` — istniejący format RuntimeConfigV1 z rzeczywistym projektem;
+- `catalog.json` — dokładnie jeden zatwierdzony wybrany profil;
+- `images.lock.json` — rzeczywiste pomiary obrazów/narzędzi;
+- `jobs/<profile>/receipt.json` i związany cache — wybierany jest **rodzic tego receipt**,
+  nie zewnętrzny `$executeOut`.
+
+Docelowy start z katalogu aplikacji (PowerShell, obie ścieżki absolutne):
 
 ```powershell
-npm.cmd start -- --prepared-runtime $executeOut
-# Można powtórzyć --prepared-runtime <ABSOLUTNY-outputRoot> dla innych przygotowań (max16).
+$runtimeConfig = (Resolve-Path (Join-Path $executeOut 'runtime-config.json')).Path
+$preparedRoot = (Resolve-Path (Join-Path (Join-Path $executeOut 'jobs') $profile)).Path
+npm.cmd start -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot
+# Dodatkowe --prepared-runtime <ABSOLUTNY-rodzic-receipt> tylko dla rzeczywistych innych przygotowan (max16).
 ```
 
-`npm.cmd run server -- --prepared-runtime $executeOut` przekazuje ten sam parametr.
-To nie pole `paircoach.runtime.json`, nowa zmienna env ani automatyczne wyszukiwanie cache.
-Źródłem jest `receipt.json` we wskazanym outputRoot i związany cache
-`cache/<family>/<toolchainHash>/<dependencySha256>`; ich istnienie/status NIE wystarcza
-za dowód gotowości. Konsument ma ponownie potwierdzić bieżący projekt/zależności/task,
-rzeczywisty engine/obraz/narzędzia i kompletność cache. `imageLock` w istniejącym pliku
-konfiguracji musi wskazywać rzeczywisty zmierzony imageId **oraz prawdziwy** OCI manifest
-/Descriptor/RepoDigest; imageId nie może udawać digestu. Pusty lock nadal blokuje wykonanie.
-CLI ma czytać pełne ustawienia V2 projektu i rzeczywiste task.workingDirectory; dla różnych
-katalogów Main/Tests potrzebne są osobne związane outputy albo jawna odmowa, nigdy zgadnięte `.`.
+Dla samego serwera: `npm.cmd run server -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot`.
+W WSL użyj `npm start -- --runtime-config <ABS-WSL-runtime-config.json>
+--prepared-runtime <ABS-WSL-jobs/profile>`; oba selektory muszą pochodzić z tego samego
+środowiska przygotowania, nie mieszanego Windows/WSL. Jawny `--runtime-config` wybiera
+wygenerowany config zamiast domyślnego `paircoach.runtime.json`; CLI nie przepisuje
+zainstalowanego rootconfig/catalog/lock. Nie dopisuj nowego pola RuntimeConfigV1 ani env.
 
-W tej rewizji CLI nadal nie istnieje i konsument nie jest zintegrowany: nie uruchamiaj
-powyższego jako instrukcji gotowego wydania. Zachowaj output; dostawa K z frozen faktycznym
-CLI/consumer musi potwierdzić cały przebieg i dokładne źródło prawdziwego image lock.
-Do tego czasu kandydat **nie spełnia całego AC112**. Nie obchodź odmowy przez ręczne
-docker run, receipt-presence ani fikcyjny lock. Pozostaje osobno wymagany offline proof
-po prepare; samo pobranie obrazów i zależności/tiny tool probe go nie zastępuje.
+Konsument ma niezależnie potwierdzić bieżący projekt/zależności/task,
+rzeczywisty engine/obraz/narzędzia i kompletność cache
+`cache/<family>/<toolchainHash>/<dependencySha256>`. `imageLock` wymaga zmierzonego
+imageId **oraz prawdziwego** OCI manifest/INDEX Descriptor lub RepoDigest; samo imageId
+nie jest dowodem digestu. W Docker Desktop obie wartości mogą być równe, jeśli istnieje
+rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty lock blokuje Run.
+CLI czyta rzeczywiste pełne SettingsV2 i wspólne task.workingDirectory, a backend ponownie
+sprawdza aktualny stan; staging/receipt CLI nie zastępuje WriteGate ani aktualnego źródła.
+
+W tej rewizji źródło CLI nadal jest osobną niezakończoną dostawą i konsument nie jest
+zintegrowany. Publiczny plan-only/Gitless smoke pozostaje NOT_RUN; wcześniejsza odmowa
+pakietera na brakującym CLI nie stała się PASS. Kandydat **nie spełnia całego AC112**.
+Nie obchodź odmowy przez ręczne docker run, receipt-presence ani fikcyjny lock.
+Offline proof pozostaje osobno wymagany po prepare; samo pobranie obrazów i zależności
+lub tiny tool probe go nie zastępuje.
 
 ## 3. Jeden scenariusz po integracji prepare i backendu
 
 1. Wybierz zgodny profil i przykład, przygotuj go, uruchom aplikację według windows-start,
-   otwórz katalog przykładu w GUI, jawnie zapisz jego dwa ustawienia V2. Oczekuj
+   otwórz ten sam katalog przykładu w GUI. Pełne ustawienia V2 muszą być zapisane
+   **przed prepare** (sekcja1a), nie dopiero po starcie. Oczekuj
    właściwego profilu i osobnej gotowości Main/Tests; `INDEXING` nie jest `ON` LSP.
 2. Run Tests: przykłady celowo odejmują zamiast dodawać, oczekiwany **FAILED**.
    Zmień samą logikę odejmowania na dodawanie w `main.js`, `main.ts`, `calculator.py`,
