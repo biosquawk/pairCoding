@@ -32,11 +32,16 @@ export function validateRequest(name: string, value: unknown): boolean {
 export function apiError(error: unknown, requestId: string | null = null): ApiError {
   const candidate = error as { status?: number; code?: string; message?: string; currentVersion?: number };
   const safe = typeof candidate?.status === 'number' && candidate.status >= 400 && candidate.status < 500;
-  return { code: candidate?.code || 'INTERNAL_ERROR', message: safe ? candidate.message || 'Żądanie odrzucone.' : 'Błąd operacji lokalnej. Dane nie zostały potwierdzone.', retryable: !safe, requestId, currentVersion: candidate?.currentVersion ?? null };
+  return { code: candidate?.code || 'INTERNAL_ERROR', message: safe ? candidate.message || 'Żądanie odrzucone.' :
+    (candidate instanceof TransportError && candidate.status===503 && Object.hasOwn(ledgerMessages,candidate.code) ? ledgerMessages[candidate.code] : undefined) || 'Błąd operacji lokalnej. Dane nie zostały potwierdzone.', retryable: !safe, requestId, currentVersion: candidate?.currentVersion ?? null };
 }
 export class TransportError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
+const ledgerMessages:Record<string,string>={
+  COMMAND_RESULT_UNAVAILABLE:'Operacja mogła zostać wykonana, ale wynik przekroczył budżet rejestru. Zsynchronizuj stan; nie ponawiaj z nowym ID.',
+  COMMAND_STORAGE_UNAVAILABLE:'Rejestr komend jest niedostępny. Zachowaj dane i zsynchronizuj stan; nie ponawiaj operacji z nowym ID.',
+};
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
@@ -83,7 +88,7 @@ export class CommandLedger {
   }
   private storageFailure() {
     this.failed=true;
-    return new TransportError(503,'COMMAND_STORAGE_UNAVAILABLE','Rejestr komend jest niedostępny. Zachowaj dane i zsynchronizuj stan; nie ponawiaj operacji z nowym ID.');
+    return new TransportError(503,'COMMAND_STORAGE_UNAVAILABLE',ledgerMessages.COMMAND_STORAGE_UNAVAILABLE);
   }
   private ensureStorage() {
     if(this.journal) return;
@@ -155,7 +160,7 @@ export class CommandLedger {
   }
   private safeFailure(error:unknown):SafeFailure {
     const status=(error as {status?:number})?.status;
-    const safeStatus=Number.isInteger(status) && status!>=400 && status!<=599 ? status! : 500;
+    const safeStatus=typeof status==='number' && Number.isInteger(status) && status>=400 && status<=599 ? status : 500;
     const publicError=apiError(error);
     const code=typeof publicError.code==='string' ? publicError.code.slice(0,128) : 'INTERNAL_ERROR';
     // No arbitrary Error object, cause, stack or custom payload survives settlement.
@@ -208,7 +213,7 @@ export class CommandLedger {
       } catch {
         this.failed=true;
         outcome={ok:false,error:{status:503,code:'COMMAND_RESULT_UNAVAILABLE',currentVersion:null,
-          message:'Operacja mogła zostać wykonana, ale wynik przekroczył budżet rejestru. Zsynchronizuj stan; nie ponawiaj z nowym ID.'}};
+          message:ledgerMessages.COMMAND_RESULT_UNAVAILABLE}};
         record=this.encode({fingerprint,outcome});
       }
       try {this.write(key,record);}

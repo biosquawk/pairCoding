@@ -165,3 +165,18 @@ test('P1 real HTTP: closing during deferred project adoption never installs a fr
   const response=await pending;assert.equal(response.status,503);assert.equal(response.body.code,'SESSION_CLOSED');
   await closing;assert.equal(f.app.workspace.rootPath,f.roots[0]);assert.deepEqual(fs.readdirSync(f.tempRoot),[]);
 });
+
+test('P1 real HTTP: oversize after-effect warns publicly, identical retry stays failed without another effect',async t=>{
+  let effects=0;
+  const f=await fixture(t,{ledgerOptions:{maxOutcomeBytes:1024},executionFactory:()=>({
+    runner:{setApprovedProfiles(){},start(){throw new Error('unused');},get(){throw new Error('unused');},list(){return [];},stopAll(){return Promise.resolve();},
+      stop(){effects++;return Promise.resolve({runId:'large',outputTail:'x'.repeat(2048)} as any);}},
+    reports:{finish(){throw new Error('unused');},get(){throw new Error('unused');},retry(){throw new Error('unused');},close(){}}
+  })});
+  await f.peer();
+  const command={requestId:'oversize',clientId:'p1-client',sessionId:f.initial.sessionId};
+  const first=await f.request('/api/run/large/stop',command),duplicate=await f.request('/api/run/large/stop',command);
+  assert.equal(first.status,503);assert.equal(first.body.code,'COMMAND_RESULT_UNAVAILABLE');
+  assert.match(first.body.message,/mogła zostać wykonana/);assert.match(first.body.message,/nie ponawiaj z nowym ID/);
+  assert.deepEqual(duplicate,first);assert.equal(effects,1);
+});
