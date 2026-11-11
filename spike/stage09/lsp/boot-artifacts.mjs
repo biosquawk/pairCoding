@@ -16,7 +16,7 @@ export function javaLaunch(target, launcher) {
     "printf 'ready\\n' > /artifacts/versions-ready.tmp",
     'mv /artifacts/versions-ready.tmp /artifacts/versions-ready.txt',
     'cp -r /opt/jdt/config_linux /artifacts/jdt-config',
-    `exec ${serverJava} -Declipse.application=org.eclipse.jdt.ls.core.id1 -Dosgi.bundles.defaultStartLevel=4 -Declipse.product=org.eclipse.jdt.ls.core.product -Dosgi.logfile=/artifacts/osgi.log -XX:ErrorFile=/artifacts/hs_err_pid%p.log -Xmx1024m --add-modules=ALL-SYSTEM --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED -jar /opt/jdt/plugins/${launcher} -configuration /artifacts/jdt-config -data /work/.jdt-data`
+    `exec ${serverJava} -Declipse.application=org.eclipse.jdt.ls.core.id1 -Dosgi.bundles.defaultStartLevel=4 -Declipse.product=org.eclipse.jdt.ls.core.product -Dosgi.logfile=/artifacts/osgi.log -XX:ErrorFile=/artifacts/hs_err_pid%p.log -Xmx1024m --add-modules=ALL-SYSTEM --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.lang=ALL-UNNAMED -jar /opt/jdt/plugins/${launcher} -configuration /artifacts/jdt-config -data /jdt-state`
   ].join(' && ');
   return {serverJava,serverExpectedMajor:27,targetHome,targetRelease:target,argv:['sh','-c',script]};
 }
@@ -24,6 +24,32 @@ export function prepareBootDirectory(out,kind) {
   if(!/^java(?:21|27)$/.test(kind))throw new Error('Invalid Java case');
   const path=join(out,`boot-${kind}`);
   mkdirSync(path,{mode:0o777});chmodSync(path,0o777);return path;
+}
+// JDT workspace metadata must not contain or be inside the imported project.
+// This generated bind is a sibling of shadow-/boot-<case> on the host too.
+export function prepareJdtStateDirectory(out,kind) {
+  if(!/^java(?:21|27)$/.test(kind))throw new Error('Invalid Java case');
+  const path=join(out,`jdt-state-${kind}`);
+  mkdirSync(path,{mode:0o777});chmodSync(path,0o777);return path;
+}
+// Pinned JDT java.project.getAll with arguments:[] returns Java project URIs.
+// A completion alone is not proof of import: default/non-project mode can complete.
+export function assertJavaProjectImported(status,projects) {
+  if(status?.type!=='Started')throw new Error(`JDT project initialization failed: ${JSON.stringify(status)}`);
+  if(!Array.isArray(projects)||!projects.every(uri=>typeof uri==='string'))throw new Error('Invalid JDT project list');
+  const imported=projects.some(uri=>{
+    try{const u=new URL(uri);return u.protocol==='file:'&&!u.host&&!u.search&&!u.hash&&u.pathname.replace(/\/$/,'')==='/work';}
+    catch{return false;}
+  });
+  if(!imported)throw new Error(`Imported Java project /work missing: ${JSON.stringify(projects)}`);
+  return {status:'PASS',initialization:status,projectUris:projects,importedProject:'file:///work'};
+}
+export function assertJavaProjectDiagnostics(history,uri) {
+  const warnings=history.filter(event=>event.message.method==='textDocument/publishDiagnostics'&&event.message.params.uri===uri)
+    .flatMap(event=>event.message.params.diagnostics)
+    .filter(d=>/non-project file|not on the classpath|only syntax errors/i.test(d.message));
+  if(warnings.length)throw new Error(`JDT non-project/classpath diagnostics: ${JSON.stringify(warnings)}`);
+  return {status:'PASS',scope:'No non-project/classpath warnings in observed document diagnostics; not version correlation proof'};
 }
 export function readBoundedFile(path,limit=bootLimits.fileBytes) {
   const before=lstatSync(path);
@@ -52,7 +78,7 @@ export function readJavaVersions(boot,target) {
 // Hash bounded config/log evidence, not binary index caches. Never follow links.
 export function collectBootArtifacts(out,kind) {
   if(!/^java(?:21|27)$/.test(kind))throw new Error('Invalid Java case');
-  const boot=join(out,`boot-${kind}`),shadow=join(out,`shadow-${kind}`);
+  const boot=join(out,`boot-${kind}`),state=join(out,`jdt-state-${kind}`);
   const result={status:'PASS',scope:'Bounded boot/config/log collection only; NOT LSP PASS',kind,root:boot,limits:bootLimits,entries:0,totalBytes:0,files:[],missing:[],errors:[]};
   const add=(path,relative)=>{
     const bytes=readBoundedFile(path,Math.min(bootLimits.fileBytes,bootLimits.totalBytes-result.totalBytes));
@@ -73,15 +99,15 @@ export function collectBootArtifacts(out,kind) {
   };
   try {
     if(!lstatSync(boot).isDirectory())throw new Error('Unsafe boot artifact root');
-    // Workspace log lives on the existing owned shadow bind, not ephemeral tmpfs.
-    const metadata=join(shadow,'.jdt-data','.metadata');
+    // Read ONLY this log from the dedicated metadata bind, never walk binary indexes.
+    const metadata=join(state,'.metadata');
     try {
-      for(const dir of [shadow,join(shadow,'.jdt-data'),metadata])if(!lstatSync(dir).isDirectory())throw new Error('Unsafe JDT metadata directory');
+      for(const dir of [state,metadata])if(!lstatSync(dir).isDirectory())throw new Error('Unsafe JDT metadata directory');
       const bytes=readBoundedFile(join(metadata,'.log'));
       const destination=join(boot,'jdt-workspace.log');
       try{writeFileSync(destination,bytes,{flag:'wx',mode:0o600});}
       catch(error){if(error.code!=='EEXIST'||!readBoundedFile(destination).equals(bytes))throw error;}
-    }catch(error){if(error.code==='ENOENT')result.missing.push('shadow/.jdt-data/.metadata/.log');else throw error;}
+    }catch(error){if(error.code==='ENOENT')result.missing.push('jdt-state/.metadata/.log');else throw error;}
     walk(boot);
   }catch(error){result.status='FAIL';result.errors.push(error.message);}
   writeFileSync(join(out,`${kind}-boot-artifacts.json`),JSON.stringify(result,null,2)+'\n');

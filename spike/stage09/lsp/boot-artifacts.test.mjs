@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,symlinkSync,rmSync,truncateSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {javaLaunch,prepareBootDirectory,readJavaVersions,readBoundedFile,collectBootArtifacts,bootLimits} from './boot-artifacts.mjs';
+import {javaLaunch,prepareBootDirectory,prepareJdtStateDirectory,readJavaVersions,readBoundedFile,collectBootArtifacts,bootLimits,assertJavaProjectImported,assertJavaProjectDiagnostics} from './boot-artifacts.mjs';
 const launcher='org.eclipse.equinox.launcher_1.8.0.v20260804-1928.jar';
 function fixture(t,kind='java27'){
   const out=mkdtempSync(join(process.env.PAIRCOACH_TEST_TMP??tmpdir(),'paircoach-boot-test-'));
@@ -47,15 +47,16 @@ test('bootstrap failure logs survive without workspace metadata (not inferred LS
   versions(boot);
   const result=collectBootArtifacts(out,kind);
   assert.equal(result.status,'PASS');assert.match(result.scope,/NOT LSP PASS/);
-  assert.deepEqual(result.missing,['shadow/.jdt-data/.metadata/.log']);
+  assert.deepEqual(result.missing,['jdt-state/.metadata/.log']);
   assert.ok(result.files.some(file=>file.path==='jdt-config/123.log'&&file.sha256.length===64));
   assert.equal(readFileSync(join(boot,'jdt-config','123.log'),'utf8'),'Unresolved requirement: JavaSE-25\n');
   assert.deepEqual(JSON.parse(readFileSync(join(out,`${kind}-boot-artifacts.json`))),result);
 });
 test('workspace log bounded collection is repeatable for post-timeout recovery',t=>{
   const {out,boot,kind}=fixture(t);
-  mkdirSync(join(out,`shadow-${kind}`,'.jdt-data','.metadata'),{recursive:true});
-  writeFileSync(join(out,`shadow-${kind}`,'.jdt-data','.metadata','.log'),'workspace failure\n');
+  const state=prepareJdtStateDirectory(out,kind);
+  mkdirSync(join(state,'.metadata'));
+  writeFileSync(join(state,'.metadata','.log'),'workspace failure\n');
   for(let i=0;i<2;i++){
     const result=collectBootArtifacts(out,kind);assert.equal(result.status,'PASS');
     assert.ok(result.files.some(file=>file.path==='jdt-workspace.log'));
@@ -71,4 +72,74 @@ test('artifact bounds and symlinks fail closed; no reading link target',t=>{
   const result=collectBootArtifacts(out,kind);assert.equal(result.status,'FAIL');assert.equal(result.totalBytes,0);
   assert.equal(result.files.length,0);assert.match(result.errors[0],/oversize/);
   assert.throws(()=>prepareBootDirectory(out,'../foreign'));assert.throws(()=>collectBootArtifacts(out,'../foreign'));
+});
+
+test('JDT data bind is disjoint from imported project; binary metadata never crawled',t=>{
+  const {out,boot,kind}=fixture(t);
+  const state=prepareJdtStateDirectory(out,kind);
+  assert.equal(state,join(out,`jdt-state-${kind}`));
+  assert.notEqual(state,boot);assert.notEqual(state,join(out,`shadow-${kind}`));
+  for(const target of [21,27]){
+    const script=javaLaunch(target,launcher).argv[2];
+    assert.ok(script.endsWith('-data /jdt-state'));
+    assert.equal(script.includes('-data /work'),false);
+    assert.equal(script.includes('-data /artifacts'),false);
+  }
+  mkdirSync(join(state,'.metadata','.plugins'),{recursive:true});
+  writeFileSync(join(state,'.metadata','.log'),'Workspace initialized in 15ms\n');
+  // Even a symlink/oversized binary cache must never be traversed or collected.
+  writeFileSync(join(out,'foreign-index'),'');truncateSync(join(out,'foreign-index'),bootLimits.fileBytes+1);
+  symlinkSync(join(out,'foreign-index'),join(state,'.metadata','.plugins','index'));
+  const result=collectBootArtifacts(out,kind);assert.equal(result.status,'PASS');
+  assert.deepEqual(result.missing,[]);
+  assert.deepEqual(result.files.map(file=>file.path),['jdt-workspace.log']);
+  assert.equal(readFileSync(join(boot,'jdt-workspace.log'),'utf8'),'Workspace initialized in 15ms\n');
+  assert.throws(()=>prepareJdtStateDirectory(out,kind),/EEXIST/);
+  assert.throws(()=>prepareJdtStateDirectory(out,'../foreign'));
+});
+test('dedicated state and metadata symlinks fail closed without copying foreign logs',t=>{
+  const {out,boot,kind}=fixture(t);
+  const foreign=join(out,'foreign');mkdirSync(join(foreign,'.metadata'),{recursive:true});
+  writeFileSync(join(foreign,'.metadata','.log'),'not owned evidence');
+  const state=join(out,`jdt-state-${kind}`);symlinkSync(foreign,state);
+  assert.equal(collectBootArtifacts(out,kind).status,'FAIL');
+  assert.throws(()=>readFileSync(join(boot,'jdt-workspace.log')),/ENOENT/);
+  rmSync(state);mkdirSync(state);symlinkSync(join(foreign,'.metadata'),join(state,'.metadata'));
+  assert.equal(collectBootArtifacts(out,kind).status,'FAIL');
+  assert.throws(()=>readFileSync(join(boot,'jdt-workspace.log')),/ENOENT/);
+  assert.equal(readFileSync(join(foreign,'.metadata','.log'),'utf8'),'not owned evidence');
+});
+test('actual imported Java project and Started status required, not completion/default workspace',()=>{
+  for(const uri of ['file:///work','file:/work/']){
+    const result=assertJavaProjectImported({type:'Started',message:'Ready'},[uri]);
+    assert.equal(result.status,'PASS');assert.equal(result.importedProject,'file:///work');
+  }
+  for(const projects of [[],['file:///jdt-state/jdt.ls-java-project'],['file:///work/nested'],['file:///work2'],['https://host/work'],['file://host/work'],['file:///work?x=1'],[null]]){
+    assert.throws(()=>assertJavaProjectImported({type:'Started'},projects),/missing|Invalid/);
+  }
+  for(const type of ['Starting','Error',undefined])assert.throws(()=>assertJavaProjectImported({type,message:'Invalid project description'},['file:///work']),/initialization failed/);
+});
+test('non-project and classpath warnings fail semantic guard without filtering real diagnostics',()=>{
+  const uri='file:///work/src/Demo.java';
+  const event=(message,severity=2,path=uri)=>({message:{method:'textDocument/publishDiagnostics',params:{uri:path,diagnostics:[{message,severity}]}}});
+  const real=event('Type mismatch: cannot convert from String to int',1);
+  assert.equal(assertJavaProjectDiagnostics([real],uri).status,'PASS');
+  assert.equal(real.message.params.diagnostics[0].severity,1); // never hide required type/release checks
+  for(const message of ['Demo.java is a non-project file, only syntax errors are reported','Demo.java is not on the classpath of project lsp-probe','Only syntax errors are reported']){
+    assert.throws(()=>assertJavaProjectDiagnostics([real,event(message)],uri),/non-project\/classpath diagnostics/);
+  }
+  assert.equal(assertJavaProjectDiagnostics([event('non-project file',2,'file:///unrelated.java')],uri).status,'PASS');
+});
+
+test('state log symlink or oversized log retains evidence and fails collection',t=>{
+  const {out,boot,kind}=fixture(t),state=prepareJdtStateDirectory(out,kind);
+  mkdirSync(join(state,'.metadata'));
+  const log=join(state,'.metadata','.log'),foreign=join(out,'foreign.log');
+  writeFileSync(foreign,'not owned evidence');symlinkSync(foreign,log);
+  assert.equal(collectBootArtifacts(out,kind).status,'FAIL');
+  assert.throws(()=>readFileSync(join(boot,'jdt-workspace.log')),/ENOENT/);
+  rmSync(log);writeFileSync(log,'');truncateSync(log,bootLimits.fileBytes+1);
+  assert.equal(collectBootArtifacts(out,kind).status,'FAIL');
+  assert.throws(()=>readFileSync(join(boot,'jdt-workspace.log')),/ENOENT/);
+  assert.equal(readFileSync(foreign,'utf8'),'not owned evidence');
 });

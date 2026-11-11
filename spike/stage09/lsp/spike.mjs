@@ -6,7 +6,7 @@ import {resolve,join,dirname,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {Rpc} from './rpc.mjs';
-import {javaLaunch,prepareBootDirectory,readJavaVersions,collectBootArtifacts} from './boot-artifacts.mjs';
+import {javaLaunch,prepareBootDirectory,prepareJdtStateDirectory,readJavaVersions,collectBootArtifacts,assertJavaProjectImported,assertJavaProjectDiagnostics} from './boot-artifacts.mjs';
 
 const here=dirname(fileURLToPath(import.meta.url));
 const lock=JSON.parse(await readFile(join(here,'upstream.lock.json'),'utf8'));
@@ -72,7 +72,7 @@ async function prepare(){
     await writeFile(join(out,'prepared-images.json'),JSON.stringify(images,null,2)+'\n');
   }
 }
-const containerFlags=(name,shadow,imageId,boot)=>['create','-i','--name',name,'--label',`paircoach.owner=${owner}`,'--label',`paircoach.nonce=${nonce}`,'--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10001:10001','--memory=2048m','--cpus=2','--pids-limit=192','--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--tmpfs','/tmp:rw,nosuid,nodev,size=768m,mode=1777','--mount',`type=bind,src=${shadow},dst=/work`,'--workdir=/work',...(boot?['--mount',`type=bind,src=${boot},dst=/artifacts`]:[]),imageId];
+const containerFlags=(name,shadow,imageId,boot,jdtState)=>['create','-i','--name',name,'--label',`paircoach.owner=${owner}`,'--label',`paircoach.nonce=${nonce}`,'--pull=never','--network=none','--read-only','--cap-drop=ALL','--security-opt=no-new-privileges','--user=10001:10001','--memory=2048m','--cpus=2','--pids-limit=192','--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--tmpfs','/tmp:rw,nosuid,nodev,size=768m,mode=1777','--mount',`type=bind,src=${shadow},dst=/work`,'--workdir=/work',...(boot?['--mount',`type=bind,src=${boot},dst=/artifacts`]:[]),...(jdtState?['--mount',`type=bind,src=${jdtState},dst=/jdt-state`]:[]),imageId];
 async function writeShadow(root,path,text){const file=join(root,path);await mkdir(dirname(file),{recursive:true,mode:0o777});await chmod(dirname(file),0o777);await writeFile(file,text,{mode:0o666});return file;}
 const javaText=(method,bad=false)=>`import java.lang.ScopedValue;\r\npublic class Demo {\r\n  static class Helper { public String ${method}() { return "żółć 😀"; } }\r\n  ScopedValue<String> scoped = ScopedValue.newInstance();\r\n  void demo() { Helper h = new Helper(); h.${method}(); ${bad?'int broken = "not-int";':''} }\r\n}\r\n`;
 const pythonText=(method,bad=false)=>`class Calculator:\r\n    def ${method}(self):\r\n        return "żółć 😀"\r\n\r\ncalc = Calculator()\r\ncalc.${method}()\r\n${bad?'unknown_paircoach_symbol\r\n':''}`;
@@ -95,10 +95,11 @@ async function exercise(language,target,imageId){
   let text=makeText(method);await writeShadow(shadow,relative,text);
   const launch=language==='java'?javaLaunch(target,lock.jdt.launcher):null;
   const boot=launch?prepareBootDirectory(out,kind):null;
+  const jdtState=launch?prepareJdtStateDirectory(out,kind):null;
   const server=launch?launch.argv:["sh","-c","python -m pip install --no-index --no-deps --require-hashes --find-links=/wheels --target=/tmp/pylsp -r /requirements.lock >&2 && exec python -m pylsp"];
-  let child,rpc,failure,summary={kind,name,imageId,target:target??'3.13',serverJVM:launch?{executable:launch.serverJava,expectedMajor:launch.serverExpectedMajor,observed:null}:null,analysisRelease:target??null,status:'NOT_RUN',originalWorkspaceMount:false,shadow,boot,uri};
+  let child,rpc,failure,summary={kind,name,imageId,target:target??'3.13',serverJVM:launch?{executable:launch.serverJava,expectedMajor:launch.serverExpectedMajor,observed:null}:null,analysisRelease:target??null,status:'NOT_RUN',originalWorkspaceMount:false,shadow,boot,jdtState,uri};
   try{
-    await command([...containerFlags(name,shadow,imageId,boot),...server]);
+    await command([...containerFlags(name,shadow,imageId,boot,jdtState),...server]);
     child=spawn('docker',['start','--attach','--interactive',name],{shell:false,stdio:['pipe','pipe','pipe']});
     child.stderr.on('data',chunk=>appendFileSync(join(out,`${kind}-transport.stderr`),chunk));
     let wireBytes=0;
@@ -122,6 +123,18 @@ async function exercise(language,target,imageId){
     summary.capabilities=initialized;
     summary.capabilityObservations={positionEncoding:initialized.capabilities?.positionEncoding??'utf-16 (LSP default)',completionProvider:initialized.capabilities?.completionProvider??null,diagnosticProvider:initialized.capabilities?.diagnosticProvider??null};
     rpc.notify('initialized',{});rpc.notify('workspace/didChangeConfiguration',{settings});
+    if(launch){
+      // Pinned InitHandler emits Started only after successful project import; Error
+      // is a failure, not readiness. Keep raw status and server Java-project URIs.
+      const statusEvent=await rpc.waitFor(event=>event.message.method==='language/status'&&['Started','Error'].includes(event.message.params?.type),0,90000);
+      const status=statusEvent.message.params;
+      summary.projectImport={status:'FAIL',statusEvent};
+      assert.equal(status.type,'Started',`JDT initialization failure: ${JSON.stringify(status)}`);
+      const projects=await rpc.request('workspace/executeCommand',{command:'java.project.getAll',arguments:[]},30000);
+      summary.projectImport.projectUris=projects;
+      summary.projectImport=assertJavaProjectImported(status,projects);
+      summary.projectImport.statusEvent=statusEvent;
+    }
     if(language==='python')summary.tools=await command(['exec',name,...['sh','-c','python --version && python -m pip check && python -c "import importlib.metadata as m; print({n:m.version(n) for n in [\'python-lsp-server\',\'jedi\',\'pyflakes\']})"']]);
     rpc.notify('textDocument/didOpen',{textDocument:{uri,languageId:language,version:1,text}});
     async function completion(expected,absent,triggerKind=2){
@@ -155,11 +168,16 @@ async function exercise(language,target,imageId){
       summary.clearedDiagnostic=await rpc.waitFor(diagnosticEvent(uri,ds=>!isError(ds)),correctedAt,90000);
     }
     summary.diagnosticVersionFields=rpc.history.filter(e=>e.message.method==='textDocument/publishDiagnostics').map(e=>({sequence:e.sequence,uri:e.message.params.uri,hasVersion:Object.hasOwn(e.message.params,'version'),version:e.message.params.version,diagnostics:e.message.params.diagnostics}));
+    if(launch)summary.projectDiagnostics=assertJavaProjectDiagnostics(rpc.history,uri);
     await rpc.request('shutdown',null,10000);rpc.notify('exit',null);
     summary.status='PASS';
   }catch(error){failure=error;summary.status='FAIL';summary.error=error.stack;}
   finally{
     summary.diagnosticVersionFields=(rpc?.history??[]).filter(e=>e.message.method==='textDocument/publishDiagnostics').map(e=>({sequence:e.sequence,uri:e.message.params.uri,hasVersion:Object.hasOwn(e.message.params,'version'),version:e.message.params.version,diagnostics:e.message.params.diagnostics}));
+    if(launch&&rpc){
+      try{summary.projectDiagnostics=assertJavaProjectDiagnostics(rpc.history,uri);}
+      catch(error){summary.projectDiagnostics={status:'FAIL',error:error.message};summary.status='FAIL';summary.error=(summary.error??'')+' '+error.message;}
+    }
     activeRpc=null;
     // Stop actual owned container, inspect state; killing docker-attach is never stop proof.
     const inspected=await command(['inspect',name],{allowFailure:true});

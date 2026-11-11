@@ -25,6 +25,7 @@ for(const kind of ['java27','java21','python']){
   const final=docker(['inspect',name]);
   let stopped=false,finalOwned=false;try{const [data]=JSON.parse(final.stdout);finalOwned=data.Config.Labels?.['paircoach.owner']===owner&&data.Config.Labels?.['paircoach.nonce']===nonce;stopped=finalOwned&&data.State.Running===false;}catch{}
   const logs=finalOwned?docker(['logs','--timestamps',name]):null;
+  // Shared collector reads only jdt-state-<case>/.metadata/.log, never state indexes.
   const bootArtifacts=stopped&&kind.startsWith('java')?collectBootArtifacts(out,kind):null;
   const collected=logs?.exit===0&&(!kind.startsWith('java')||bootArtifacts?.status==='PASS');
   writeFileSync(join(out,`recovery-${kind}.json`),JSON.stringify({name,stopConfirmed:stopped,collectionComplete:collected,bootArtifacts,status:stopped&&collected?'PASS':'BLOCKED',scope:'Owned LSP recovery only; NOT completion/diagnostics proof',containerRetained:true},null,2)+'\n');
