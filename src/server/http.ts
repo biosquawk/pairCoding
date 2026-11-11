@@ -476,7 +476,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(message.sessionId!==session.state.sessionId) fail(409,'SESSION_CONFLICT','Sesja uległa zmianie.');
         if(!session.claimLease(message.clientId)) {ws.close(1008,'Lease conflict');return;}
         // A reconnect invalidates any old in-flight coach intervention, never replays steps.
-        coach?.abort();session.releaseCoach();peer.clientId=message.clientId;peer.authenticated=true;
+        coach?.abort();session.releaseCoach();session.clearEditorView();peer.clientId=message.clientId;peer.authenticated=true;
         snapshot();return;
       }
       if(!peer.authenticated || message.clientId!==peer.clientId) {ws.close(1008,'HELLO required');return;}
@@ -500,8 +500,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             return doc.version;
           }
           case 'VIEW_CHANGED': {
-            if(p.path!==null) workspace.getDocument(p.path);
-            session.state.activeFilePath=p.path;emit('SESSION_STATE',session.getSession());return null;
+            const viewVersion=session.setEditorView(command.clientId,command.sessionId,{path:p.path,documentVersion:p.documentVersion,cursor:p.cursor,selection:p.selection});
+            emit('SESSION_STATE',session.getSession());return viewVersion;
           }
           case 'CONTROL_READY': coach?.controlReady(p);return null;
           case 'STEP_RENDERED': coach?.stepRendered(p);return null;

@@ -1,14 +1,17 @@
 import { createHash } from 'node:crypto';
 import type { ChatEntry, Document, Run, Session, Settings } from '../../shared/protocol';
 import {projectRunFacts, type RunFacts} from './runFacts';
+import { viewOffsets, type VersionedEditorView } from '../EditorView';
 
 export interface ContextWorkspace {
+  projectId?: string;
   workspaceVersion: number;
   settings: Settings;
   listFiles(): { path: string; kind: string }[];
   getDocument(path: string): Document;
 }
 export interface CoachContext {
+  view?: (VersionedEditorView & { selectedText: string | null; selectionTruncated: boolean }) | null;
   workspaceVersion: number;
   controlEpoch: number;
   taskMode: Settings['taskMode'];
@@ -51,21 +54,71 @@ export function matchesContextPattern(path: string, pattern: string): boolean {
   return new RegExp(source + '$').test(path);
 }
 
+const SECRET_REDACTIONS: readonly [RegExp, string][] = [
+  [/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]'],
+  [/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]'],
+  [/\b(?:AIza[A-Za-z0-9_-]{30,}|gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{16,})\b/g, '[REDACTED]'],
+  [/((?:api[_-]?key|access[_-]?token|session[_-]?token|password|secret)\s*["']?\s*[:=]\s*)["']?[^\s,"';]+["']?/gi, '$1[REDACTED]'],
+];
 export function redactSecrets(text: string, sensitiveValues: readonly string[] = []): string {
   let safe = text;
   for (const value of sensitiveValues) if (value.length) safe = safe.split(value).join('[REDACTED]');
-  return safe
-    .replace(/-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----/g, '[REDACTED PRIVATE KEY]')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/gi, 'Bearer [REDACTED]')
-    .replace(/\b(?:AIza[A-Za-z0-9_-]{30,}|gh[pousr]_[A-Za-z0-9_]+|sk-[A-Za-z0-9_-]{16,})\b/g, '[REDACTED]')
-    .replace(/((?:api[_-]?key|access[_-]?token|session[_-]?token|password|secret)\s*["']?\s*[:=]\s*)["']?[^\s,"';]+["']?/gi, '$1[REDACTED]');
+  for (const [pattern, replacement] of SECRET_REDACTIONS) safe = safe.replace(pattern, replacement);
+  return safe;
+}
+
+/** Slice original coordinates, but mask even a PARTIAL selection of a known secret.
+ * Slicing the already-redacted document would shift Monaco's raw coordinates. */
+function redactSelection(content: string, start: number, end: number, sensitiveValues: readonly string[]): string {
+  if (start === end) return '';
+  const spans: { start: number; end: number }[] = [];
+  const add = (a: number, b: number) => {
+    if (a < end && b > start) spans.push({ start: Math.max(start, a), end: Math.min(end, b) });
+  };
+  for (const value of sensitiveValues) if (value.length) {
+    for (let i = content.indexOf(value); i >= 0; i = content.indexOf(value, i + 1)) add(i, i + value.length);
+  }
+  for (const [pattern] of SECRET_REDACTIONS) for (const match of content.matchAll(pattern)) add(match.index!, match.index! + match[0].length);
+  spans.sort((a, b) => a.start - b.start);
+  let offset = start, safe = '';
+  for (const span of spans) {
+    if (span.end <= offset) continue;
+    if (span.start >= offset) safe += content.slice(offset, span.start) + '[REDACTED]';
+    offset = span.end;
+  }
+  return redactSecrets(safe + content.slice(offset, end), sensitiveValues);
+}
+
+function projectView(view: VersionedEditorView | null, workspace: ContextWorkspace, session: Session,
+  rawDocuments: Map<string, Document>, sensitiveValues: readonly string[]): CoachContext['view'] {
+  if (!view || view.projectId !== session.projectId || (workspace.projectId !== undefined && view.projectId !== workspace.projectId) ||
+      view.path !== session.activeFilePath) return null;
+  const document = rawDocuments.get(view.path);
+  if (!document || document.version !== view.documentVersion) return null;
+  try {
+    const offsets = viewOffsets(document.content, view.cursor, view.selection);
+    let selectedText = offsets ? redactSelection(document.content, offsets.start, offsets.end, sensitiveValues) : null;
+    const selectionTruncated = selectedText !== null && selectedText.length > 8192;
+    if (selectionTruncated) {
+      let end = 8192;
+      if (/[\uD800-\uDBFF]/.test(selectedText![end - 1]) && /[\uDC00-\uDFFF]/.test(selectedText![end])) end--;
+      selectedText = selectedText!.slice(0, end);
+    }
+    return { projectId: view.projectId, path: view.path, documentVersion: view.documentVersion,
+      cursor: view.cursor ? { line: view.cursor.line, column: view.cursor.column } : null,
+      selection: view.selection ? { startLine: view.selection.startLine, startColumn: view.selection.startColumn,
+        endLine: view.selection.endLine, endColumn: view.selection.endColumn } : null,
+      selectedText, selectionTruncated };
+  } catch { return null; }
 }
 
 export function buildContext(workspace: ContextWorkspace, session: Session, messages: ChatEntry[], lastRun: Run | null,
-  previousInterventions: CoachContext['previousInterventions'], sensitiveValues: readonly string[] = []): CoachContext {
+  previousInterventions: CoachContext['previousInterventions'], sensitiveValues: readonly string[] = [],
+  view: VersionedEditorView | null = null): CoachContext {
   const settings = workspace.settings;
   if (!settings.aiConsent) throw new Error('AI_CONSENT_REQUIRED');
   const documents: CoachContext['documents'] = [];
+  const rawDocuments = new Map<string, Document>();
   const omittedPaths: string[] = [];
   let bytes = 0;
   const entries = workspace.listFiles().filter(entry => entry.kind === 'FILE' && isContextPathAllowed(entry.path) &&
@@ -80,6 +133,7 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
       // Omit entire documents, never silently truncate code mid-file.
       if (bytes + size > 262144) { omittedPaths.push(entry.path); continue; }
       bytes += size;
+      rawDocuments.set(entry.path, doc);
       documents.push({ path: entry.path, version: doc.version, content });
     } catch { omittedPaths.push(entry.path); }
   }
@@ -91,7 +145,7 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
     reviewNotesPath: isContextPathAllowed(settings.reviewNotesPath) ? settings.reviewNotesPath : '[EXCLUDED]',
     activeFilePath: allowed(session.activeFilePath),
     timer: { status: session.timer.status, elapsedMs: session.timer.elapsedMs, limitMs: session.timer.limitMs },
-    documents, omittedPaths,
+    documents, omittedPaths, view: projectView(view, workspace, session, rawDocuments, sensitiveValues),
     messages: messages.slice(-20).map(message => ({ ...message, text: redact(message.text) })),
     lastRun: lastRun ? projectRunFacts(lastRun) : null,
     previousInterventions: previousInterventions.slice(-20),

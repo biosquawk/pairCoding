@@ -44,6 +44,11 @@ export function codexCoachArgs(schemaPath:string,instruction=INSTRUCTION,configu
 function inputContext(c:Readonly<CoachContext>):CoachContext {
   return {...(c.trigger ? {trigger:{reason:c.trigger.reason,messageId:c.trigger.messageId}} : {}),workspaceVersion:c.workspaceVersion,controlEpoch:c.controlEpoch,taskMode:c.taskMode,
     taskFilePath:c.taskFilePath,reviewNotesPath:c.reviewNotesPath,activeFilePath:c.activeFilePath,
+    view:c.view ? {projectId:c.view.projectId,path:c.view.path,documentVersion:c.view.documentVersion,
+      cursor:c.view.cursor ? {line:c.view.cursor.line,column:c.view.cursor.column} : null,
+      selection:c.view.selection ? {startLine:c.view.selection.startLine,startColumn:c.view.selection.startColumn,
+        endLine:c.view.selection.endLine,endColumn:c.view.selection.endColumn} : null,
+      selectedText:c.view.selectedText,selectionTruncated:c.view.selectionTruncated} : null,
     timer:{status:c.timer.status,elapsedMs:c.timer.elapsedMs,limitMs:c.timer.limitMs},
     documents:c.documents.map(d=>({path:d.path,version:d.version,content:d.content})),omittedPaths:[...c.omittedPaths],
     messages:c.messages.map(m=>({messageId:m.messageId,author:m.author,text:m.text,createdAt:m.createdAt})),
