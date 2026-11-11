@@ -230,3 +230,15 @@ test('real framed pylsp insertText response reaches safe complete result with no
   assert.equal(f.process.frames.filter(v => v.method === 'textDocument/didOpen').length, 1);
   assert.equal(f.process.frames.some(v => /resolve|didSave/.test(v.method ?? '')), false);
 });
+
+test('shadow refresh before didChange cannot expose old buffer/source to a newly queued completion', async t => {
+  const f = fixture(t); await f.session.open(f.doc); const next = document('😀.\nnext2'); next.stamp.localModelVersion = 2; next.stamp.requestGeneration = 2;
+  f.replace(next); assert.equal(f.session.readSource(f.doc.stamp), null);
+  await assert.rejects(f.session.complete(request(f.doc)), /captured shadow overlay/);
+  assert.equal(f.process.frames.some(v => v.method === 'textDocument/completion'), false);
+});
+test('same-tick close cancels complete even before pending RPC registration', async t => {
+  const f = fixture(t); await f.session.open(f.doc); const p = f.session.complete(request(f.doc)); const rejection = assert.rejects(p, /Cancelled/);
+  await f.session.close(f.doc.stamp); await rejection;
+  assert.equal(f.process.frames.some(v => v.method === 'textDocument/completion'), false);
+});

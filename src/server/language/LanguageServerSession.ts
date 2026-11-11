@@ -49,6 +49,7 @@ export class LanguageServerSession {
   private seenRequests = new Set<string>();
   private cancelledRequests = new Set<string>();
   private accepting = true;
+  private documentRevision = 0;
   private initialized = false;
   private started = false;
   private statusStarted = false;
@@ -73,7 +74,7 @@ export class LanguageServerSession {
     if (this.rpc?.closed) throw new Error('Language transport closed; actual process retirement required');
     this.options.assertCurrent(this.shadow);
   }
-  private cancelAll(): void { for (const r of this.requests.values()) r.controller.abort(); this.requests.clear(); }
+  private cancelAll(): void { this.documentRevision++; for (const r of this.requests.values()) r.controller.abort(); this.requests.clear(); }
   /** Synchronous revoke BEFORE any await. Unknown Stop keeps this SAME actual process owner for reconcile. */
   invalidate(problem = 'Language source/scope changed'): void {
     if (!this.accepting) return;
@@ -157,7 +158,7 @@ export class LanguageServerSession {
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation); this.queue = result.then(() => {}, () => {}); return result;
   }
-  open(input: OpenOrChange): Promise<void> { return this.sendDocument(input, false); }
+  open(input: OpenOrChange): Promise<void> { this.cancelAll(); return this.sendDocument(input, false); }
   change(input: OpenOrChange): Promise<void> {
     if (this.shadow.phase === 'diagnostics') return Promise.reject(new Error('Immutable diagnostics never didChange'));
     this.cancelAll(); return this.sendDocument(input, true);
@@ -207,14 +208,15 @@ export class LanguageServerSession {
   }
   async complete(input: CompleteRequest, signal?: AbortSignal): Promise<CompleteResult> {
     if (!validateCompleteRequest(input) || this.shadow.phase !== 'completion') throw new Error('Invalid completion session/request');
-    const request = freeze(copy(input));
+    const request = freeze(copy(input)), revision = this.documentRevision;
     if (this.seenRequests.has(request.requestId) || this.seenRequests.size >= 8192) throw new Error('Duplicate/overflow completion request id');
     this.seenRequests.add(request.requestId);
     await this.queue; this.current();
-    if (this.cancelledRequests.has(request.requestId) || signal?.aborted) throw new Error('Cancelled completion before send');
+    if (revision !== this.documentRevision || this.cancelledRequests.has(request.requestId) || signal?.aborted) throw new Error('Cancelled completion before send');
     const doc = this.documents.get(request.stamp.path);
     if (!this.initialized || !this.rpc || !doc || !same(doc.document.stamp, request.stamp) ||
       this.shadow.manifest.identity.provider === 'jdt' && !this.started) throw new Error('Completion source not sent/semantic server still indexing');
+    this.validateDocument(doc.document);
     // Validate cursor against exact captured normalized UTF16 content before ANY RPC request.
     projectCompletion(null, { request, content: doc.document.content, workspaceUri: doc.uri }, this.options.codec);
     const controller = new AbortController(), abort = () => controller.abort();
@@ -229,7 +231,7 @@ export class LanguageServerSession {
         entry.rpcId = id;
       } });
       this.current();
-      if (controller.signal.aborted || this.requests.get(request.requestId) !== entry || this.documents.get(request.stamp.path) !== doc || !entry.rpcId)
+      if (revision !== this.documentRevision || controller.signal.aborted || this.requests.get(request.requestId) !== entry || this.documents.get(request.stamp.path) !== doc || !entry.rpcId)
         throw new Error('Late/replaced completion');
       const capturedInput = { request: entry.request, content: entry.document.document.content, workspaceUri: entry.document.uri };
       const normalized = this.shadow.manifest.identity.provider === 'pylsp' ? normalizePylspCompletion(raw, capturedInput, this.options.codec) : raw;
@@ -244,7 +246,8 @@ export class LanguageServerSession {
   }
   /** Fixed launch/sent-source reader; never stamps a received diagnostic with the current active model. */
   readSource(stamp: Readonly<DocumentStamp>): Readonly<AnalysisSource> | null {
-    try { this.current(); const doc = this.documents.get(stamp.path); return doc && same(doc.document.stamp, stamp) ? doc.source : null; }
+    try { this.current(); const doc = this.documents.get(stamp.path);
+      if (!doc || !same(doc.document.stamp, stamp)) return null; this.validateDocument(doc.document); return doc.source; }
     catch { return null; }
   }
   private notification = (event: RpcNotification): void => {
