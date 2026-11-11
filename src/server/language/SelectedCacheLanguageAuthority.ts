@@ -31,8 +31,8 @@ const assertRetained = (lease: SelectedLanguageLease): void => { if (lease.asser
 const requireThat: (value: unknown) => asserts value = value => { if (!value) throw new Error('No current selected language lease'); };
 type Selection = { scope: Readonly<LanguageProjectScope>; snapshot: RegistrySnapshot; binding: ProductionLanguageBinding;
   lease: SelectedLanguageLease; inputs: { installationId: string; runtime: ResolvedRuntime; run: RunProfileV2; source: SelectedLanguageLease['source'] }; image: VerifiedLanguageImage; disk: LanguageSourceCapture };
-/** Async preparation is explicitly invoked by the coordinator under the SAME real authority BEFORE
- * publishing registry start/mutation/ACK. Sync factory operations retain and recheck that lease;
+/** Async preparation is invoked under the SAME real backend authority by each registry capture
+ * callback (or explicit manually-held factory caller). Sync copy operations recheck that lease;
  * no cached READY, empty dependency fallback, copied producer hash policy or swallowed cache errors.
  */
 export class SelectedCacheLanguageAuthority implements ProductionLanguageAuthority {
@@ -46,7 +46,10 @@ export class SelectedCacheLanguageAuthority implements ProductionLanguageAuthori
     return { installationId: lease.installationId, runtime: lease.runtime, run: lease.run, source: lease.source };
   }
   async prepare(scopeInput: Readonly<LanguageProjectScope>, snapshotInput: RegistrySnapshot, lease: SelectedLanguageLease): Promise<void> {
-    const request = ++this.request; this.selection = null;
+    // Preserve an independently retained current selection while a same-vector sibling prepares.
+    // Its OWN full-vector/source/image guards still apply; only successful fresh preparation replaces
+    // it. New/changed sources revoke the old lease independently, never through a readiness gap.
+    const request = ++this.request;
     assertLease(lease); const scope = copy(scopeInput), snapshot = copy(snapshotInput), inputs = copy(this.inputs(lease));
     requireThat(inputs.installationId && inputs.source.leaseId === snapshot.revision && inputs.runtime.workspaceRoot === inputs.source.projectRoot &&
       inputs.runtime.configurationGeneration === scope.configurationGeneration && same(inputs.runtime.profile, scope.profile) &&
@@ -83,14 +86,19 @@ export class SelectedCacheLanguageAuthority implements ProductionLanguageAuthori
     } catch { return false; }
   }
 }
-export interface SelectedCacheLanguageFactoryOptions extends Omit<ProductionLanguageRegistryFactoryOptions, 'authority'> {
+export interface SelectedCacheLanguageFactoryOptions extends Omit<ProductionLanguageRegistryFactoryOptions, 'authority' | 'withCaptureLease'> {
+  /** Actual backend-owned FIFO lease acquisition. Required when used by the asynchronous registry.
+   * Omission supports direct manually-held factory use only; registry capture refuses, never bypasses.
+   */
+  withSourceLease?(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot,
+    action: (lease: SelectedLanguageLease) => Promise<void>): Promise<void>;
   preparedOutputRoots: readonly string[];
   /** Explicit actual language tool-probe receipt, NOT a Run image receipt or client upload. */
   languageReceiptPath: string;
   transport: Pick<DockerTransport, 'run'>;
 }
-/** Concrete selected-consumer/OCI-reader -> production shadow/boot/process/session join. The actual
- * backend calls authority.prepare under its current lease, then factory.create/registry mutation.
+/** Concrete selected-consumer/OCI-reader -> production shadow/boot/process/session join. Registry
+ * delayed capture and refresh acquire the actual backend callback, prepare and transfer synchronously.
  * Coordinator HTTP/Runner/wire ownership is deliberately not duplicated in this module.
  */
 export function createSelectedCacheLanguageFactory(options: SelectedCacheLanguageFactoryOptions): {
@@ -101,6 +109,15 @@ export function createSelectedCacheLanguageFactory(options: SelectedCacheLanguag
   const authority = new SelectedCacheLanguageAuthority(createPreparedRuntimeResolver({ outputRoots: options.preparedOutputRoots }, options.transport),
     new PreparedLanguageImageVerifier(options.languageReceiptPath, options.transport), sources);
   const factory = new ProductionLanguageRegistryFactory({ ownedRoot: options.ownedRoot, driver: options.driver, journal: options.journal,
-    admission: options.admission, authority });
+    admission: options.admission, authority, withCaptureLease: async (scope, snapshot, action) => {
+      if (!options.withSourceLease) throw new Error('Actual backend language source FIFO acquisition required');
+      await options.withSourceLease(scope, snapshot, async lease => {
+        assertLease(lease);
+        await authority.prepare(scope, snapshot, lease);
+        assertLease(lease);
+        action(); // Copy/refresh AND registry owner transfer occur before releasing this SAME lease.
+        assertLease(lease);
+      });
+    } });
   return { authority, factory, captureSource: projectRoot => sources.captureSource(projectRoot) };
 }

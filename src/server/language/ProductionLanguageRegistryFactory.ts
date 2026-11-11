@@ -32,6 +32,7 @@ export interface ProductionLanguageAuthority {
 }
 export interface ProductionLanguageRegistryFactoryOptions extends Omit<DockerLanguageProcessOptions, 'rpc' | 'onTransportClosed'> {
   authority: ProductionLanguageAuthority;
+  withCaptureLease?: NonNullable<RegistryFactory['withCaptureLease']>;
 }
 const copy = <T>(v: T): T => { const cloned = structuredClone(v); const freeze = (x: unknown): void => {
   if (x && typeof x === 'object') { Object.values(x).forEach(freeze); Object.freeze(x); }
@@ -53,6 +54,10 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
   bindAckLedger(ledger: LanguageAckLedger): void {
     if (this.ackLedger && this.ackLedger !== ledger) throw new Error('Production language issuer already bound');
     this.ackLedger = ledger;
+  }
+  withCaptureLease(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void): Promise<void> {
+    if (this.options.withCaptureLease) return this.options.withCaptureLease(scope, snapshot, action);
+    action(); return Promise.resolve(); // Legacy authority only; selected composition supplies a required guard.
   }
   private readonly store: LanguageShadowStore;
   private readonly boot: LanguageBootPublisher;

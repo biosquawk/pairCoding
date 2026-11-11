@@ -25,6 +25,12 @@ export interface RegistryCallbacks {
 export type RegistrySession = Pick<LanguageServerSession, 'launchId' | 'start' | 'open' | 'change' | 'close' | 'cancelCompletions' | 'complete' | 'cancel' | 'invalidate' | 'retire'>;
 export interface RegistryLaunch { session: RegistrySession; generation: ImmutableDiagnosticGeneration | null }
 export interface RegistryFactory {
+  /** Reacquire actual backend FIFO and prepare this exact full snapshot, then invoke action ONCE
+   * synchronously while the SAME lease is held. Never start a provider or await inside action.
+   * Registry retains any new owner inside action, including when final lease release fails.
+   * Optional for legacy factories only; selected production composition MUST supply it.
+   */
+  withCaptureLease?(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void): Promise<void>;
   /** Bind once at construction, never chosen by wire/callers of acknowledge. */
   bindAckLedger?(ledger: LanguageAckLedger): void;
   /** Synchronous ownership transfer BEFORE start/any await. Compose actual private shadow/process/session.
@@ -281,15 +287,35 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
       if (l.pending && l.ready && (!l.active || l.phase === 'completion' && !l.active.invalid && l.active.opened)) void this.pump(l);
     }); return l.pumping;
   }
+  private async captureOperation(l: Lane, next: Pending, expected: Slot | null, action: () => void): Promise<boolean> {
+    const scope = this.scope!, epoch = this.epoch;
+    let invoked = false, applied = false, accepting = true;
+    const capture = () => {
+      if (!accepting || invoked) throw new Error('Capture operation must run exactly once within its lease');
+      invoked = true;
+      if (this.disposed || scope !== this.scope || epoch !== this.epoch || l.active !== expected || !this.current(next.snapshot)) return;
+      action(); applied = true;
+    };
+    try {
+      if (this.options.factory.withCaptureLease) await this.options.factory.withCaptureLease(scope, next.snapshot, capture);
+      else capture(); // Legacy factory compatibility, never selected-cache production fallback.
+      if (!invoked) throw new Error('Capture lease omitted synchronous ownership transfer');
+      return applied;
+    } finally { accepting = false; }
+  }
   private async run(l: Lane): Promise<void> {
     if (l.phase === 'completion' && l.active && !l.active.invalid && l.pending && l.ready) {
       const s = l.active, next = l.pending; l.pending = null;
       if (this.current(next.snapshot)) {
         try {
           const previous = s.snapshot;
-          if (!this.options.factory.refreshCompletion(this.scope!, next.snapshot, s.launch)) { s.invalid = true; l.pending = next; }
-          else {
-            s.snapshot = next.snapshot; s.epoch = this.epoch;
+          let refreshed = false;
+          const applied = await this.captureOperation(l, next, s, () => {
+            refreshed = this.options.factory.refreshCompletion(this.scope!, next.snapshot, s.launch);
+            if (refreshed) { s.snapshot = next.snapshot; s.epoch = this.epoch; }
+            else { s.invalid = true; if (!l.pending) l.pending = next; }
+          });
+          if (applied && refreshed) {
             for (const old of previous.documents) {
               if (!this.valid(l, s)) break;
               const replacement = next.snapshot.documents.find(d => d.stamp.path === old.stamp.path);
@@ -309,10 +335,14 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
       const next = l.pending; l.pending = null;
       if (!this.current(next.snapshot)) continue;
       const slot: Slot = { launch: null!, snapshot: next.snapshot, epoch: this.epoch, invalid: false, retiring: false, stopping: null, started: Promise.resolve(), opened: false, cancellation: new AbortController(), analysisTimer: null };
-      slot.launch = this.options.factory.create(this.scope!, l.phase, next.snapshot, this.callbacks(l, () => slot), next.requested);
-      slot.launch = { session: slot.launch.session, generation: slot.launch.generation ? copy(slot.launch.generation) : null };
-      l.active = slot; // Retain actual owner even if descriptor validation/start/open throws.
       try {
+        const applied = await this.captureOperation(l, next, null, () => {
+          slot.launch = this.options.factory.create(this.scope!, l.phase, next.snapshot, this.callbacks(l, () => slot), next.requested);
+          l.active = slot; // Retain BEFORE descriptor copying or async callback/final-release can fail.
+          slot.launch = { session: slot.launch.session, generation: slot.launch.generation ? copy(slot.launch.generation) : null };
+        });
+        if (!applied) continue;
+        if (!this.valid(l, slot)) throw new Error('Capture superseded before provider start');
         if (l.phase === 'diagnostics') {
           slot.analysisTimer = this.clock.set(LANGUAGE_LIMITS.diagnosticAnalysisMs, () => {
             if (l.active !== slot || slot.retiring) return;
@@ -328,8 +358,11 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
           else slot.cancellation.signal.addEventListener('abort', () => resolve(), { once: true });
         })]); slot.opened = !slot.cancellation.signal.aborted;
         if (!this.valid(l, slot)) slot.invalid = true;
-      } catch (e) { slot.invalid = true; slot.launch.session.invalidate(String(e)); this.clear(); this.failed(String(e)); }
-      if (l.active === slot && slot.invalid && !await this.stop(l)) return;
+      } catch (e) {
+        if (!slot.launch) throw e; // Factory contract: no admitted process before ownership transfer.
+        slot.invalid = true; slot.launch.session.invalidate(String(e)); this.clear(); this.failed(String(e));
+      }
+      if (slot.invalid && l.active === slot && !await this.stop(l)) return;
     }
   }
   private async boundedStop(slot: Slot): Promise<LanguageProcessRetirement> {
