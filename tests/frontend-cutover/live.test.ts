@@ -223,3 +223,21 @@ test('malformed ACK shape never grants a language alias while ordinary negative 
   f.acknowledge(save,'OK',{error:{code:'BAD',message:'incomplete legacy error',currentVersion:null}});
   assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source),[f.model]),false);
 });
+
+test('actual LiveBackend wrapper resolves retained old-session exact original through fresh same-project current authority',async t=>{
+  let unknown=true;
+  const f=await fixture(t,(path,body)=>{
+    if(path==='/api/run')throw Error('original s1 unknown');
+    assert.equal(path,'/api/runtime/mutation/reconcile');assert.equal(body.mutation.request.sessionId,'s1');assert.equal(body.mutation.request.clientId,'c1');
+    return unknown?{mutation:body.mutation,state:'UNKNOWN',result:null,current:null}:{mutation:body.mutation,state:'DEFINITIVELY_ABORTED',result:null,current:{project:f.b.project,run:null}};
+  });
+  await f.live.run(true);const original=f.http.find(v=>v.path==='/api/run').body;
+  f.b.project={...f.b.project,sessionId:'s2'};f.b.session={...f.b.session,sessionId:'s2'};
+  f.live.reconnect();f.socket.readyState=1;await f.live.connect();f.receive('SESSION_SNAPSHOT',f.b,{sessionId:'s2'});await setImmediate();
+  assert.equal(f.live.getState().isOffline,false);assert.equal(f.live.getState().runtime?.project?.sessionId,'s2');assert.equal(f.live.getState().runtime?.reconciliationRequired,true);
+  await f.live.run(true);assert.equal((await f.live.saveRuntimeSettings(f.b.project.settings,1)).ok,false);assert.equal(f.http.filter(v=>v.path==='/api/run').length,1);
+  assert.equal(await f.live.reconcileRuntimeMutation(),false);assert.equal(f.live.getState().runtime?.reconciliationRequired,true);
+  unknown=false;assert.equal(await f.live.reconcileRuntimeMutation(),true);assert.equal(f.live.getState().runtime?.project?.sessionId,'s2');assert.equal(f.live.getState().runtime?.reconciliationRequired,false);
+  assert.deepEqual(f.http.filter(v=>v.path==='/api/runtime/mutation/reconcile').map(v=>v.body.mutation.request),[original,original]);
+  assert.equal(f.http.filter(v=>v.path==='/api/run').length,1,'no automatic replay of the original mutation');
+});

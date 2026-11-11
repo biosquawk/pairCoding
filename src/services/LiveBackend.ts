@@ -1026,12 +1026,15 @@ export class LiveBackend {
     } catch(error) {this.fail(error);}
   }
   async reconcileRuntimeMutation():Promise<boolean> {
+    // Select an exact already-retained identity, never rewrite current session authority.
+    const [selected]=this.wiring.runtime.retainedMutations();if(!selected)return false;
     let settledKey:string|undefined;
-    const ok=await this.wiring.runtime.reconcile(async(metadata,signal)=>{
+    const ok=await this.wiring.runtime.reconcileRetained(selected,async(metadata,signal)=>{
       const key=JSON.stringify([metadata.projectId,metadata.sessionId,metadata.clientId,metadata.requestId]);
       const retained=this.runtimeMutations.get(key),project=this.project,session=this.session;
       if(!retained||!project||!session||retained.kind!==metadata.kind||retained.request.expectedWorkspaceVersion!==metadata.expectedWorkspaceVersion||
-        project.projectId!==retained.projectId||session.sessionId!==metadata.sessionId||this.clientId!==metadata.clientId)
+        project.projectId!==retained.projectId||retained.request.sessionId!==metadata.sessionId||retained.request.requestId!==metadata.requestId||
+        retained.request.clientId!==metadata.clientId||this.clientId!==metadata.clientId)
         throw new Error('Brak oryginalnego żądania w bieżącym autoryzowanym zakresie. Blokada zachowana.');
       const mutation=structuredClone(retained),generation=this.generation,connection=this.connectionGeneration,seq=this.lastSeq;
       const value=await this.http<unknown>('/api/runtime/mutation/reconcile','POST',{mutation},true,signal);
