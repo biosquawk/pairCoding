@@ -99,11 +99,8 @@ async function finishStudentWrite(page: Page, marker: string, info: TestInfo, it
   }
 }
 
-/** PW1.65 trace is worker-scoped: a distinct test type, not invalid describe.use(trace).
- * Override the option by a fixture function so the base retain-on-failure default cannot re-enable it.
- * Only AC027 uses this type; AC011 controls remain the original test type and options. */
-const metricTest = test.extend({ trace: async ({}, use) => { await use('off'); } });
-metricTest('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 p95/max', async ({ page, browser }, info) => {
+/** The dedicated performance config disables tracing for this campaign alone. */
+test('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001..004 p95/max', async ({ page, browser }, info) => {
     const recorder = new MetricRecorder(info), conflicts: any[] = [], cutoffPairs: any[] = [];
     let initial: any = null, cutoffStart: number | null = null, observed: any = null, phase = 'setup', startedTrial = -1;
     let completedTrials = 0, calibration: any = null, report: any = null, failure: any = null;

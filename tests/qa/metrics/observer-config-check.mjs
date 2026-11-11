@@ -8,6 +8,7 @@ const result = [];
 for (const [config, file, count] of [
   ['tests/qa/metrics.config.ts', 'tests/qa/metrics/reference.spec.ts', 3],
   ['tests/qa/metrics/calibration.config.ts', 'tests/qa/metrics/calibration.spec.ts', 1],
+  ['tests/qa/metrics/performance.config.ts', 'tests/qa/metrics/reference.spec.ts', 3],
 ]) {
   const resolved = await common.configLoader.loadConfigFromFile(path.resolve(config));
   const project = resolved.projects[0];
@@ -27,13 +28,17 @@ for (const [config, file, count] of [
     const use = { ...project.project.use };
     for (const s of chain) for (const item of s._use) Object.assign(use, item.fixtures);
     const registration = test._pool.resolve('trace');
-    if (typeof registration.fn === 'function') await registration.fn({}, async value => { use.trace = value; });
-    else use.trace = registration.fn;
+    assert.notEqual(typeof registration.fn, 'function', 'The actual Playwright worker rejects function-valued trace options');
+    use.trace = registration.fn;
     use.screenshot = test._pool.resolve('screenshot').fn;
-    const trace = test.title.startsWith('AC-027 ') ? 'off' : 'retain-on-failure';
+    const trace = config.endsWith('/performance.config.ts') ? 'off' : 'retain-on-failure';
     assert.equal(use.trace, trace); assert.equal(use.screenshot, 'only-on-failure');
     return { title: test.title, trace: use.trace, screenshot: use.screenshot };
   }));
+  if (config.endsWith('/performance.config.ts')) {
+    assert.equal(String(project.project.grep), '/AC-027 TEST-027:/');
+    assert.equal(tests.filter(test => project.project.grep.test(test.title)).length, 1);
+  }
   result.push({ config, webServers: resolved.webServers, workers: resolved.config.workers,
     timeout: project.project.timeout, expectTimeout: project.expect.timeout, retries: project.project.retries, tests: effective });
 }

@@ -4,7 +4,7 @@ import type { Page, TestInfo } from '@playwright/test';
 
 export const digest = (content: string | Buffer) => createHash('sha256').update(content).digest('hex');
 export const sourceHashes = () => Object.fromEntries(['reference.spec.ts', 'observer.ts', 'observer-predicates.ts',
-  'observer-recorder.ts', 'calibration.spec.ts', 'calibration.config.ts', '../metrics.config.ts', '../../../playwright.config.ts'].map(file => [file, digest(readFileSync(`tests/qa/metrics/${file}`))]));
+  'observer-recorder.ts', 'calibration.spec.ts', 'calibration.config.ts', 'performance.config.ts', '../metrics.config.ts', '../../../playwright.config.ts'].map(file => [file, digest(readFileSync(`tests/qa/metrics/${file}`))]));
 export const percentile = (values: any[]) => ({ count: values.length,
   missingOrInvalid: values.filter(v => !Number.isFinite(v) || v < 0).length,
   p95: values.length && values.every(v => Number.isFinite(v) && v >= 0)
