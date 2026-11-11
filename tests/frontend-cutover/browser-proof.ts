@@ -1,6 +1,6 @@
 /** Actual App + local Monaco + LiveBackend in Chromium. Authenticated HTTP/WS controlled doubles;
  * NOT real backend/container/LSP/AI/native integration. Reuses existing browser/libs, no installs. */
-import {chromium} from '@playwright/test';
+import {chromium,type Page} from '@playwright/test';
 import {createServer} from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwind from '@tailwindcss/vite';
@@ -11,11 +11,12 @@ import {bundle,doc} from './fixtures';
 const output=process.env.RUNTIME_PROOF_DIR!;if(!output||!process.env.RUNTIME_BROWSER||!process.env.RUNTIME_REVISION)throw new Error('Proof env required');
 await mkdir(output,{recursive:true});
 const server=await createServer({configFile:false,root:process.cwd(),cacheDir:'.tmp/vite-cutover',plugins:[react(),tailwind()],server:{host:'127.0.0.1',port:0},logLevel:'warn'});
+let page:Page|undefined;
 let browser:Awaited<ReturnType<typeof chromium.launch>>|undefined;const errors:string[]=[],requests:any[]=[];
 try {
   await server.listen();const address=server.httpServer!.address();assert.ok(address&&typeof address==='object');
   browser=await chromium.launch({headless:true,executablePath:process.env.RUNTIME_BROWSER,timeout:15000});
-  const page=await browser.newPage({viewport:{width:1365,height:900}});page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+  page=await browser.newPage({viewport:{width:1365,height:900}});page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
   const b=bundle();
   await page.addInitScript('globalThis.__name = (fn) => fn;');
   await page.addInitScript(data=>{
@@ -60,8 +61,8 @@ try {
   await page.getByRole('button',{name:'Połącz ponownie',exact:true}).click();await page.getByText('Połączono z backendem.',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'Run Tests',exact:true}).isDisabled(),true);
   await page.setViewportSize({width:390,height:844});await page.getByRole('button',{name:'Profil i ustawienia wykonania'}).click();await dialog.waitFor();assert.equal(await dialog.getByRole('button',{name:'Zapisz ustawienia',exact:true}).isDisabled(),true);
   const rect=await dialog.boundingBox();assert.ok(rect&&rect.x>=0&&rect.x+rect.width<=390&&rect.y>=0&&rect.y+rect.height<=844);assert.equal(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth),true);
-  await dialog.getByLabel('Ścieżki testów').fill('draft/mobile.txt');await page.screenshot({path:path.join(output,'mobile-fence-draft-390x844.png')});await page.keyboard.press('Escape');
-  const editor=page.locator('.monaco-editor textarea').first();await editor.focus();await page.keyboard.press('Control+End');await page.keyboard.type(' manual');
+  await dialog.getByLabel('Ścieżki testów').fill('draft/mobile.txt');await page.screenshot({path:path.join(output,'mobile-fence-draft-390x844.png')});await page.keyboard.press('Escape');await dialog.waitFor({state:'detached'});
+  await page.locator('.monaco-editor .view-lines').first().click({position:{x:60,y:10}});await page.keyboard.press('Control+End');await page.keyboard.type(' manual');
   await page.waitForFunction(()=>(window as any).cutoverWire.some((m:any)=>m.type==='CODE_CHANGED'&&m.payload.content.endsWith(' manual')));
   await page.getByText('Zapis oczekuje na ACK.',{exact:true}).waitFor({state:'detached'});
   await page.keyboard.press('Control+z');
@@ -70,5 +71,5 @@ try {
   assert.deepEqual(errors,[]);
   await writeFile(path.join(output,'proof.json'),JSON.stringify({status:'PASS_APP_MONACO_CONTROLLED_TRANSPORT_ONLY',revision:process.env.RUNTIME_REVISION,utc:new Date().toISOString(),browser:browser.version(),viewports:['1365x900','390x844'],requests,pageErrors:errors,boundary:'Actual App/Header/ProjectSettings/RuntimeSettings/LiveBackend/Monaco; controlled authenticated HTTP+WS, NOT production backend/LSP/Docker/AI/native.'},null,2));
   console.log('PASS actual App + local Monaco: neutral reachable V2 settings/validation/draft/keyboard/mobile, unknown Save fences Run/reconnect; editing remains. Controlled transport only.');
-} catch(error) {await writeFile(path.join(output,'failure.json'),JSON.stringify({revision:process.env.RUNTIME_REVISION,error:String(error),requests,pageErrors:errors},null,2));throw error;}
+} catch(error) {if(page){await writeFile(path.join(output,'inspection.json'),JSON.stringify(await page.evaluate(()=>(window as any).cutoverInspect?.()),null,2));await page.screenshot({path:path.join(output,'failure.png')});}await writeFile(path.join(output,'failure.json'),JSON.stringify({revision:process.env.RUNTIME_REVISION,error:String(error),requests,pageErrors:errors},null,2));throw error;}
 finally {await browser?.close();await server.close();}
