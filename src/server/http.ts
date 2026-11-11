@@ -11,7 +11,7 @@ import { SessionController } from './SessionController';
 import { WriteGate } from './WriteGate';
 import { CoachAdapter, type CoachProvider } from './CoachAdapter';
 import { Runner } from './Runner';
-import { ReportService, REPORT_SYSTEM_PROMPT, type FrozenFacts } from './ReportService';
+import { ReportService, REPORT_SYSTEM_PROMPT, type FrozenFacts, type ReportSummary } from './ReportService';
 import { isContextPathAllowed, matchesContextPattern, redactSecrets } from './coach/context';
 import type { Settings } from '../shared/protocol';
 import {projectRunFacts, type RunFacts} from './coach/runFacts';
@@ -46,7 +46,7 @@ export interface CoachService {
 }
 export interface ExecutionServices {
   runner: { setApprovedProfiles(profiles: any[]):void; start(profile: any): Run; get(id: string): Run; stop(id:string): Promise<Run>; stopAll():Promise<void>; list():Run[] };
-  reports: { finish(reason: Report['reason'],facts:any):Report; get(sessionId:string):Report; retry(sessionId:string):Report; close():void };
+  reports: { finish(reason: Report['reason'],facts:any):Report; get(sessionId:string):Report; retry(sessionId:string):Report; list?():ReportSummary[]; close():void };
 }
 function fail(status: number, code: string, message: string): never { throw new TransportError(status,code,message); }
 const clone = <T>(value:T):T => structuredClone(value);
@@ -102,6 +102,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   // All authenticated peers see every seq, including targeted ACKs. Payloads contain no credentials.
   function emit(type:string,payload:unknown) {
     if (closing) return;
+    if (type==='SESSION_REPORT' && (payload as Report).sessionId!==session.state.sessionId) return;
     const message = envelope(type,payload), encoded = JSON.stringify(message);
     if (['COACH_STEP_EDIT','CONTROL_STATE'].includes(type)) facts.push(clone(message));
     if (type==='RUN_STATE') {
@@ -157,7 +158,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(options.executionFactory)boundExecution=options.executionFactory(boundContext);
       else if(options.enableExecution) {
         // Prepare fallible persistent storage before creating other execution resources.
-        const reports=new ReportService({dataDir:boundWorkspace.dataDir,emit:(type,payload)=>{
+        const reports=new ReportService({dataDir:boundWorkspace.dataDir,projectId:boundWorkspace.projectId,emit:(type,payload)=>{
           if(!persistingFinish)publish(type,payload);
         },generate:reportGenerator()});
         try {boundExecution={reports,runner:new Runner({rootPath:boundWorkspace.rootPath,
@@ -314,9 +315,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         else if(url.pathname==='/api/file') value=workspace.getDocument(url.searchParams.get('path')||'');
         else if(url.pathname==='/api/snapshots') value=workspace.listSnapshots();
         else if(url.pathname==='/api/session/report') {
-          if(url.searchParams.get('sessionId')!==session.state.sessionId) fail(404,'SESSION_NOT_FOUND','Nie znaleziono sesji.');
-          value=execution?.reports.get(session.state.sessionId) ?? report;
+          const requestedId=url.searchParams.get('sessionId') ?? '';
+          if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(requestedId)) fail(400,'INVALID_ID','Niepoprawny identyfikator sesji.');
+          value=execution ? execution.reports.get(requestedId) : (requestedId===session.state.sessionId ? report : null);
           if(!value) fail(404,'REPORT_NOT_FOUND','Brak raportu tej sesji.');
+        } else if(url.pathname==='/api/session/reports') {
+          if(!execution?.reports.list) fail(503,'GATE003_NOT_ENABLED','Historia raportów nie jest jeszcze włączona.');
+          value={reports:execution.reports.list()};
         } else if(/^\/api\/run\/[A-Za-z0-9._:-]+$/.test(url.pathname)) {
           if(!execution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.'); value=execution.runner.get(url.pathname.split('/')[3]);
         } else fail(404,'NOT_FOUND','Nieznany endpoint.');

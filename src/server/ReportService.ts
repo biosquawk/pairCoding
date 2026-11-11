@@ -1,9 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
-  realpathSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
+  readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 import type { ChatEntry, Report, Run, Session, Snapshot } from '../shared/protocol';
 import { AppError } from './errors';
+import { validateRequest } from './transport';
 
 export const REPORT_SYSTEM_PROMPT = 'Podsumuj utrwaloną próbę według DATA-007. Oddziel fakty od oceny. Uwzględnij pomoc AI i granice dostępnych dowodów. Nie dopisuj nieprzeprowadzonych testów, diagnoz psychologicznych ani wyniku samodzielności bez danych. Maksymalnie 800 słów, jedna rekomendacja dalszej nauki.';
 
@@ -11,6 +12,7 @@ export type FrozenFacts = {
   session: Session; snapshot: Snapshot; runs: Run[]; chat: ChatEntry[]; events: unknown[];
   [key: string]: unknown;
 };
+export type ReportSummary = Pick<Report, 'reportId'|'sessionId'|'status'|'reason'|'sourceWorkspaceVersion'|'snapshotId'|'generatedAt'>;
 type Entry = { report: Report; facts: FrozenFacts; hash: string; generation?: symbol; abort?: AbortController };
 const copy = <T>(v: T): T => structuredClone(v);
 const hash = (s: string) => createHash('sha256').update(s).digest('hex');
@@ -30,13 +32,14 @@ export class ReportService {
   private entries = new Map<string, Entry>();
   private closed = false;
   constructor(private options: {
-    dataDir: string; emit: (type: string, payload: unknown) => void;
+    dataDir: string; projectId?: string; emit: (type: string, payload: unknown) => void;
     generate?: (facts: FrozenFacts, signal: AbortSignal) => Promise<string>;
   }) {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
     this.directory = path.join(realpathSync(options.dataDir), 'reports');
     mkdirSync(this.directory, { recursive: true, mode: 0o700 });
     if (lstatSync(this.directory).isSymbolicLink()) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Niedozwolony magazyn raportów.');
+    this.directory = realpathSync(this.directory);
   }
 
   finish(reason: Report['reason'], facts: FrozenFacts): Report {
@@ -48,6 +51,7 @@ export class ReportService {
         facts.runs.some(r => r.status === 'RUNNING' || r.status === 'QUEUED')) {
       throw new AppError(409, 'REPORT_FACTS_NOT_FINAL', 'Najpierw zatrzymaj Run i utrwal końcowy snapshot zamkniętej sesji.');
     }
+    this.assertProject(facts);
     const sessionId = facts.session.sessionId;
     const dir = this.sessionDir(sessionId);
     let serialized: string;
@@ -86,6 +90,26 @@ export class ReportService {
   }
 
   get(sessionId: string): Report { return copy(this.load(sessionId).report); }
+  list(): ReportSummary[] {
+    this.assertStorage();
+    const reports: ReportSummary[] = [];
+    for (const item of readdirSync(this.directory, { withFileTypes: true })) {
+      if (!item.isDirectory() || !/^[a-f0-9]{64}$/.test(item.name)) continue;
+      try {
+        const reportPath = path.join(this.directory, item.name, 'report.json');
+        this.assertFile(reportPath);
+        const candidate = JSON.parse(readFileSync(reportPath, 'utf8')) as Report;
+        if (id(candidate.sessionId) !== item.name) continue;
+        const { reportId, sessionId, status, reason, sourceWorkspaceVersion, snapshotId, generatedAt } = this.get(candidate.sessionId);
+        reports.push({ reportId, sessionId, status, reason, sourceWorkspaceVersion, snapshotId, generatedAt });
+      } catch (error) {
+        // No guessed ownership, adoption of orphan facts, or disclosure of unsafe/corrupt entries.
+        if (!(error instanceof AppError || error instanceof SyntaxError ||
+            ['ENOENT', 'ENOTDIR', 'ELOOP'].includes((error as NodeJS.ErrnoException).code ?? ''))) throw error;
+      }
+    }
+    return reports.sort((a, b) => (b.generatedAt ?? '').localeCompare(a.generatedAt ?? '') || a.sessionId.localeCompare(b.sessionId));
+  }
   retry(sessionId: string): Report {
     this.assertOpen();
     const entry = this.load(sessionId);
@@ -111,10 +135,27 @@ export class ReportService {
   private assertOpen(): void {
     if (this.closed) throw new AppError(503, 'REPORT_SERVICE_CLOSED', 'Usługa raportowania została zamknięta.');
   }
-  private sessionDir(sessionId: string): string {
-    const dir = path.join(this.directory, id(sessionId));
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-    if (lstatSync(dir).isSymbolicLink()) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Dowiązanie w magazynie raportów.');
+  private assertProject(facts: FrozenFacts): void {
+    if (!facts?.session || !facts.snapshot || facts.session.projectId !== facts.snapshot.projectId ||
+        (this.options.projectId !== undefined && facts.session.projectId !== this.options.projectId)) {
+      throw new AppError(404, 'REPORT_NOT_FOUND', 'Nie znaleziono raportu w bieżącym projekcie.');
+    }
+  }
+  private assertStorage(): void {
+    const stat = lstatSync(this.directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || realpathSync(this.directory) !== this.directory) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Niedozwolony magazyn raportów.');
+  }
+  private assertFile(file: string): void {
+    const stat = lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Niedozwolony plik raportu.');
+  }
+  private sessionDir(sessionId: string, create = true): string {
+    const name = id(sessionId);
+    this.assertStorage();
+    const dir = path.join(this.directory, name);
+    if (create) mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const stat = lstatSync(dir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Dowiązanie w magazynie raportów.');
     return dir;
   }
   private removeOwnFile(file: string, identity: BigIntStats, exactContent?: string): void {
@@ -158,17 +199,29 @@ export class ReportService {
     }
   }
   private load(sessionId: string): Entry {
-    if (this.entries.has(sessionId)) return this.entries.get(sessionId)!;
-    const dir = this.sessionDir(sessionId);
-    if (!existsSync(path.join(dir, 'report.json'))) throw new AppError(404, 'REPORT_NOT_FOUND', 'Nie znaleziono raportu sesji.');
+    let dir: string;
+    try { dir = this.sessionDir(sessionId, false); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new AppError(404, 'REPORT_NOT_FOUND', 'Nie znaleziono raportu sesji.');
+      throw error;
+    }
     const factsPath = path.join(dir, 'facts.json'), reportPath = path.join(dir, 'report.json');
-    if ([factsPath, reportPath].some(f => lstatSync(f).isSymbolicLink())) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Dowiązanie w magazynie raportów.');
+    if (!existsSync(reportPath)) throw new AppError(404, 'REPORT_NOT_FOUND', 'Nie znaleziono raportu sesji.');
+    this.assertFile(factsPath); this.assertFile(reportPath);
     const stored = JSON.parse(readFileSync(factsPath, 'utf8'));
     if (typeof stored.serialized !== 'string' || hash(stored.serialized) !== stored.sha256) throw new AppError(500, 'REPORT_FACTS_CORRUPTED', 'Integralność materiału raportu jest niepoprawna.');
     const facts = freeze(JSON.parse(stored.serialized) as FrozenFacts);
+    this.assertProject(facts);
     const report = JSON.parse(readFileSync(reportPath, 'utf8')) as Report;
-    if (report.sessionId !== sessionId || facts.session.sessionId !== sessionId || report.snapshotId !== facts.snapshot.snapshotId ||
+    if (!validateRequest('Report', report) || report.sessionId !== sessionId || facts.session.sessionId !== sessionId || report.snapshotId !== facts.snapshot.snapshotId ||
         report.sourceWorkspaceVersion !== facts.snapshot.workspaceVersion) throw new AppError(500, 'REPORT_FACTS_CORRUPTED', 'Metadane nie odpowiadają materiałowi raportu.');
+    // Check persisted ownership/containment BEFORE reusing even an in-flight cached generation.
+    const cached = this.entries.get(sessionId);
+    if (cached) {
+      this.assertProject(cached.facts);
+      if (cached.hash !== stored.sha256 || cached.report.reportId !== report.reportId) throw new AppError(500, 'REPORT_FACTS_CORRUPTED', 'Zmieniono tożsamość utrwalonego raportu.');
+      return cached;
+    }
     const entry: Entry = { facts, report, hash: stored.sha256 };
     this.entries.set(sessionId, entry);
     if (report.status === 'PENDING') this.fail(entry, 'REPORT_INTERRUPTED', 'Przerwano poprzednią próbę generowania. Fakty zachowano; wybierz Ponów.');
