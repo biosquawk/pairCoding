@@ -51,3 +51,8 @@ test('UNIT finish negative control: explicit409 remains a definite rejection, co
   assert.equal(f.requests.filter(r=>r.path==='/api/session/report').length,0);
   await f.client.finishSession('COMPLETED');assert.equal(f.posts().length,2);assert.notEqual(f.posts()[0].body.requestId,f.posts()[1].body.requestId);
 });
+for(const code of ['COMMAND_RESULT_UNAVAILABLE','COMMAND_STORAGE_UNAVAILABLE'])test(`UNIT critical control ${code}: an explicit503 must not release finish permission for a fresh-IDPOST`,async t=>{
+  const f=await fixture(code,503);t.after(()=>f.client.close());
+  await f.client.finishSession('COMPLETED');await f.client.finishSession('ABANDONED');await f.client.finishSession('COMPLETED');
+  assert.equal(f.posts().length,1,'503 ambiguous is not definite rejection: three clicks must create only one HTTP mutation');
+});
