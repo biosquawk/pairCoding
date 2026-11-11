@@ -279,9 +279,11 @@ export const observeMetrics = (page: Page) => page.addInitScript({ content: metr
 /** Outside measured windows: actual rendered marker, never a model/API read or body scan. */
 export function calibrationMarkerEvidence({ marker, baseline }: { marker: string; baseline: any }) {
   const state = (window as any).__qaMetric.snapshot();
+  const inputs = document.querySelectorAll('.monaco-editor [role="textbox"][aria-label="Edytor pliku main.py"]');
+  const editor = inputs.length === 1 ? inputs[0].closest('.monaco-editor') : null;
   let renderedMarker = false;
-  for (const line of document.querySelectorAll('.monaco-editor .view-lines .view-line')) {
-    if (!line.textContent?.includes(`# ${marker}`)) continue;
+  for (const line of editor?.querySelectorAll('.view-lines .view-line') || []) {
+    if (!line.textContent?.replace(/\u00a0/g, ' ').includes(`# ${marker}`)) continue;
     let lineVisible = line.isConnected && line.getClientRects().length > 0;
     for (let n: Element | null = line; n; n = n.parentElement) {
       const style = getComputedStyle(n);
