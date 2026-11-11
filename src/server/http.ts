@@ -16,7 +16,7 @@ import { isContextPathAllowed, matchesContextPattern, redactSecrets } from './co
 import type { Settings } from '../shared/protocol';
 import {projectRunFacts, type RunFacts} from './coach/runFacts';
 import type { ChatEntry, CoachDecision, Proposal, Report, Run, SessionBundle } from '../shared/protocol';
-import { apiError, CommandLedger, TransportError, validateMessage, validateRequest, type ClientMessage } from './transport';
+import { apiError, CommandLedger, TransportError, validateMessage, validateRequest, type CommandLedgerOptions, type ClientMessage } from './transport';
 
 /** Network AI receives structural Run facts, never local stdout/stderr or future Run fields. */
 export type ReportAIFacts = Pick<FrozenFacts, 'session'|'snapshot'|'chat'|'events'> & {
@@ -25,6 +25,7 @@ export type ReportAIFacts = Pick<FrozenFacts, 'session'|'snapshot'|'chat'|'event
 };
 export interface ServerOptions {
   rootPath?: string; dataDir?: string; token?: string; port?: number;
+  ledgerOptions?: CommandLedgerOptions; openLedgerOptions?: CommandLedgerOptions;
   devBootstrap?: boolean; staticDir?: string; enableCoach?: boolean; enableExecution?: boolean;
   reportGenerate?: (facts: ReportAIFacts, signal: AbortSignal) => Promise<string>;
   coachProvider?: CoachProvider;
@@ -74,9 +75,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       return {workspace:nextWorkspace,session:nextSession,gate:nextGate};
     } catch(error) { nextSession?.close();nextWorkspace.close();throw error; }
   }
+  const sessionLedgerOptions={...options.ledgerOptions};
+  const makeLedgers=()=>({ledger:new CommandLedger(sessionLedgerOptions),proposalOutcomes:new CommandLedger(sessionLedgerOptions)});
+  let {ledger,proposalOutcomes}=makeLedgers();
+  // OpenProjectRequest has no old sessionId: never forget an open receipt on adoption.
+  const openLedger=new CommandLedger({...options.openLedgerOptions,
+    limitMessage:options.openLedgerOptions?.limitMessage ?? 'Osiągnięto budżet otwarć projektów tego serwera. Zachowaj dane i uruchom ponownie lokalny serwer.'});
   let {workspace,session,gate}=makeCore(rootPath);
-  const ledger = new CommandLedger();
-  const proposalOutcomes = new CommandLedger();
   let chat:ChatEntry[] = [], proposals:Proposal[] = [], report:Report|null = null, lastRun:Run|null = null;
   const facts:unknown[] = [];
   let seq = 0, closing = false, transitioning = false, persistingFinish = false;
@@ -253,6 +258,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   async function veto(id:string,clientId:string,sessionId:string,payload:any) {
     session.assertClient(clientId,sessionId);
     return ledger.run(vetoKey(id),{clientId,sessionId,...payload},()=>{
+      session.assertClient(clientId,sessionId);
       // The cutoff is synchronous, before any provider abort await.
       const previousEpoch=session.state.controlEpoch;
       const result=session.veto();
@@ -330,10 +336,14 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         respond(res,route[1],await op.result);return;
       }
       if(url.pathname!=='/api/project/open') session.assertClient(body.clientId,body.sessionId);
-      const operation=ledger.run(`HTTP:${body.requestId}`,{route:key,body},async()=>{
+      const commandLedger=url.pathname==='/api/project/open' ? openLedger : ledger;
+      const operation=commandLedger.run(`HTTP:${body.requestId}`,{route:key,body},async()=>{
+        if(closing) fail(503,'SESSION_CLOSED','Serwer zamyka sesję.');
+        if(url.pathname!=='/api/project/open') session.assertClient(body.clientId,body.sessionId);
         if(transitioning && !stopMatch) fail(409,'SESSION_TRANSITION','Trwa bezpieczna zmiana sesji; zachowaj draft.');
         if(url.pathname==='/api/project/open') {
           if(session.leaseClientId && session.leaseClientId!==body.clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
+          const nextLedgers=makeLedgers();
           const next=makeCore(body.rootPath);
           let prepared:ReturnType<typeof prepareBinding>|undefined;
           let project:ReturnType<WorkspaceService['getProject']>;
@@ -351,8 +361,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           try {
             // Every fallible new-binding preparation completed before touching the current session.
             await execution?.runner.stopAll();
-            const previous=binding;
-            ({workspace,session,gate}=next);binding=prepared;adopted=true;
+            if(closing) fail(503,'SESSION_CLOSED','Serwer zamyka sesję; projekt nie został przełączony.');
+            const previous=binding, previousLedger=ledger, previousProposals=proposalOutcomes;
+            ({workspace,session,gate}=next);binding=prepared;
+            ({ledger,proposalOutcomes}=nextLedgers);adopted=true;
+            // Auth rejects the old session; old issued promises may settle, never re-run.
+            previousLedger.retire();previousProposals.retire();
             chat=[];proposals=[];report=null;lastRun=null;facts.length=0;seq=0;
             // Old close/abort callbacks cannot publish against the new core or revoke its lease.
             try {previous.dispose();} catch { /* cleanup continued through core close; do not undo adoption */ }
@@ -463,8 +477,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(message.type==='VETO_ESCAPE') {
         const op=await veto(message.messageId,message.clientId,message.sessionId,p);await op.result;ack(message,op.duplicate?'DUPLICATE':'OK');return;
       }
+      // Heartbeat is effect-free. Keep validation/auth/session checks above, but no history.
+      if(message.type==='PING') {ack(message,'OK');return;}
       const command=message;
-      const op=ledger.run(`WS:${message.messageId}`,message,async()=>{
+      const commandLedger=ledger;
+      const op=commandLedger.run(`WS:${message.messageId}`,message,async()=>{
+        if(closing) fail(503,'SESSION_CLOSED','Serwer zamyka sesję.');
+        session.assertClient(command.clientId,command.sessionId);
         if(transitioning && !['PING','PROPOSAL_RESPONSE','WINDOW_STATE','TIMER_ACTION'].includes(command.type)) fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
         switch(command.type) {
           case 'CODE_CHANGED': {
@@ -472,7 +491,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             coach?.trigger('EDIT');
             return doc.version;
           }
-          case 'PING': return null;
           case 'VIEW_CHANGED': {
             if(p.path!==null) workspace.getDocument(p.path);
             session.state.activeFilePath=p.path;emit('SESSION_STATE',session.getSession());return null;
@@ -537,6 +555,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     async listen():Promise<number> { await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',()=>{server.off('error',reject);resolve();});});return currentPort(); },
     async close():Promise<void> {
       closing=true;clearInterval(heartbeat);
+      ledger.close();proposalOutcomes.close();openLedger.close();
       try {await execution?.runner.stopAll();} finally {
         try {binding.dispose();} finally {
           for(const ws of peers.keys())ws.terminate();wss.close();
