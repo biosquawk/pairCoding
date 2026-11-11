@@ -25,6 +25,8 @@ export interface DockerLanguageDriverOptions {
   /** Trusted installation configuration, NEVER supplied by task, client or AI. */
   executable: string; dockerConfigDirectory: string;
   context?: string;
+  /** Explicit approved local endpoint; never task/profile/client configuration. Mutually exclusive with context. */
+  host?: string;
   /** Dependency seam for unit tests only. Default uses real Node spawn(shell:false). */
   spawn?: LanguageDockerSpawner;
 }
@@ -39,7 +41,9 @@ export class DockerLanguageDriver implements LanguageDockerDriver {
     if (!isAbsolute(options.executable) || /[\0\r\n]/.test(options.executable)) throw new Error('Docker executable must be absolute');
     assertRealDirectory(options.dockerConfigDirectory);
     if (options.context && !/^[A-Za-z0-9_.-]{1,100}$/.test(options.context)) throw new Error('Invalid trusted Docker context');
-    this.prefix = options.context ? ['--context', options.context] : [];
+    if (options.host !== undefined && (options.context || options.host !== (process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock')))
+      throw new Error('Only the approved explicit local Docker endpoint is allowed');
+    this.prefix = options.host !== undefined ? ['--host', options.host] : options.context ? ['--context', options.context] : [];
     this.env = { DOCKER_CONFIG: options.dockerConfigDirectory };
     // Native CLI requires OS DLL discovery, but never HOME/credentials/task environment.
     if (process.platform === 'win32' && process.env.SystemRoot) this.env.SystemRoot = process.env.SystemRoot;
