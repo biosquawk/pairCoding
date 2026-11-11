@@ -48,6 +48,8 @@ export function RuntimeSettingsV2(props: RuntimeSettingsV2Props) {
   useEffect(() => { if (error) { errorElement.current?.focus(); errorElement.current?.scrollIntoView({block:'nearest'}); } }, [error]);
   if (!open) return null;
   const validExecution = execution && validateExecutionView(execution) ? execution : null;
+  const migrationRequired = validExecution?.runtime.state === 'CONFIG_ERROR'
+    && validExecution.runtime.problem?.code === 'LEGACY_RUN_PROFILE_REQUIRES_MIGRATION';
   const fields = validExecution?.runtime.taskFields ?? [];
   const conflict = version !== expectedWorkspaceVersion || generation !== validExecution?.runtime.configurationGeneration;
   const setField = (mode: RunKind, key: TaskFieldKey, value: string) => setDraft(d => ({ ...d, [mode]: { ...d[mode], fields: { ...d[mode].fields, [key]: value } } }));
@@ -66,6 +68,10 @@ export function RuntimeSettingsV2(props: RuntimeSettingsV2Props) {
     <div ref={dialog} role="dialog" aria-modal="true" aria-busy={saving} aria-labelledby={`${id}-title`} tabIndex={-1} className="bg-zinc-950 text-zinc-300 border border-zinc-700 rounded-xl p-4 w-full max-w-xl max-h-[90dvh] overflow-y-auto min-w-0 [overflow-wrap:anywhere]">
       <h2 id={`${id}-title`} className="font-bold">Ustawienia wykonania V2</h2>
       <p>Profil: {validExecution?.runtime.label || 'nieustalony'}. Zapis wymaga potwierdzenia serwera; nie zmienia sposobu ręcznej edycji.</p>
+      {base && migrationRequired && <div role="alert">
+        <p>LEGACY_RUN_PROFILE_REQUIRES_MIGRATION. Oryginalne ustawienia (raw) pozostają bez zmian.</p>
+        <p>Otwarcie i edycja formularza nie wykonują migracji ani nie odblokowują Run/Test. Migracja następuje dopiero po jawnym, potwierdzonym zapisie przyciskiem „Zapisz ustawienia”.</p>
+      </div>}
       {!base ? <div role="alert"><p>LEGACY_RUN_PROFILE_REQUIRES_MIGRATION. Stare lub nieznane ustawienia pozostają bez zmian. Nie przepisujemy poleceń automatycznie.</p>
         <p>Przygotuj jawny profil zadania. Kopia zapasowa i migracja następują dopiero przy potwierdzonym zapisie.</p>
         {migrationDraft && validateSettingsV2(migrationDraft) ? <button type="button" onClick={() => { setBase(clone(migrationDraft)); setDraft(createRuntimeSettingsDraftV2(migrationDraft)); }}>Przygotuj migrację V2</button> : <p>Brak bezpiecznego szkicu migracji. Odczytaj go z ustawień projektu po połączeniu.</p>}
