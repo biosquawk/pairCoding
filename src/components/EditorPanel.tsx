@@ -8,6 +8,8 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monacoType from 'monaco-editor';
 import { observeMonacoViewP2 } from '../services/editorViewP2';
+import { CoachHintBubble as HintBubble } from './CoachHintBubble';
+import type { HintRect } from './hintBubbleGeometryP2';
 import { client } from '../services/PairCoachClient';
 import {
   ActionProposal,
@@ -21,10 +23,7 @@ import {
 import {
   AlertTriangle,
   Bot,
-  CheckCircle2,
-  GripHorizontal,
   Info,
-  Lightbulb,
   ShieldAlert,
   X,
 } from 'lucide-react';
@@ -84,15 +83,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   const decorationsRef = useRef<string[]>([]);
   const viewStatesRef = useRef<Map<string, monacoType.editor.ICodeEditorViewState | null>>(new Map());
 
-  // Bubble dragging state
-  const [bubblePos, setBubblePos] = useState<{ x: number; y: number }>({ x: 20, y: 40 });
-  const [isDraggingBubble, setIsDraggingBubble] = useState(false);
-  const dragStartRef = useRef<{ mouseX: number; mouseY: number; startX: number; startY: number }>({
-    mouseX: 0,
-    mouseY: 0,
-    startX: 0,
-    startY: 0,
-  });
+  const contentContainerRef = useRef<HTMLDivElement>(null);
+  const [hintContainer, setHintContainer] = useState({ width: 0, height: 0 });
+  const [protectedCode, setProtectedCode] = useState<HintRect | null>(null);
 
   const [selectionNotice, setSelectionNotice] = useState<string | null>(null);
 
@@ -381,44 +374,29 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   }, [activePointer, activePath, editorGeneration]);
 
-  // Bubble dragging handlers
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDraggingBubble(true);
-    dragStartRef.current = {
-      mouseX: e.clientX,
-      mouseY: e.clientY,
-      startX: bubblePos.x,
-      startY: bubblePos.y,
+  // Protect the whole active line/selection band (including wrapped lines), not only
+  // a one-pixel caret. Selection, scroll and splitter/layout changes all invalidate it.
+  useLayoutEffect(() => {
+    const container = contentContainerRef.current;
+    if (!container) return;
+    const editor = editorRef.current;
+    const update = () => {
+      const bounds = container.getBoundingClientRect();
+      setHintContainer(old => old.width === bounds.width && old.height === bounds.height ? old : { width: bounds.width, height: bounds.height });
+      const selection = editor?.getSelection();
+      const node = editor?.getDomNode();
+      if (!editor || !selection || !node || !editor.getModel()) { setProtectedCode(null); return; }
+      const offset = node.getBoundingClientRect().top - bounds.top;
+      const top = Math.max(0, offset + editor.getTopForLineNumber(selection.startLineNumber) - editor.getScrollTop());
+      const bottom = Math.min(bounds.height, offset + editor.getBottomForLineNumber(selection.endLineNumber) - editor.getScrollTop());
+      const next = bottom > top ? { left: 0, top, width: bounds.width, height: bottom - top } : null;
+      setProtectedCode(old => JSON.stringify(old) === JSON.stringify(next) ? old : next);
     };
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isDraggingBubble) return;
-      const dx = e.clientX - dragStartRef.current.mouseX;
-      const dy = e.clientY - dragStartRef.current.mouseY;
-      // Item 1: Correct formula for right-anchored position (dx > 0 reduces right, moving element right)
-      const newX = Math.max(10, Math.min(window.innerWidth - 390, dragStartRef.current.startX - dx));
-      const newY = Math.max(10, Math.min(window.innerHeight - 200, dragStartRef.current.startY + dy));
-      setBubblePos({ x: newX, y: newY });
-      onBubblePosChange(newX, newY);
-    };
-
-    const handleMouseUp = () => {
-      if (isDraggingBubble) {
-        setIsDraggingBubble(false);
-      }
-    };
-
-    if (isDraggingBubble) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-    }
-    return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
-    };
-  }, [isDraggingBubble]);
+    const observer = new ResizeObserver(update); observer.observe(container);
+    const disposables = editor ? [editor.onDidChangeCursorSelection(update), editor.onDidScrollChange(update), editor.onDidLayoutChange(update), editor.onDidChangeModel(update), editor.onDidChangeModelContent(update)] : [];
+    window.addEventListener('resize', update); update();
+    return () => { observer.disconnect(); disposables.forEach(d => d.dispose()); window.removeEventListener('resize', update); };
+  }, [editorGeneration, activePath]);
 
   // Frame styling based on WriteOwner (4px solid)
   const getBorderColor = () => {
@@ -532,9 +510,12 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       )}
 
       {/* Editor Body */}
-      <div className="flex-1 relative overflow-hidden">
+      <div ref={contentContainerRef} data-testid="editor-content-container" className="flex-1 min-h-0 relative overflow-hidden flex flex-col">
+        {activeHintBubble && activeHintBubble.path === activePath && hintContainer.width > 0 && hintContainer.height > 0 && (
+          <HintBubble key={activeHintBubble.id} hint={activeHintBubble} container={hintContainer} protectedCode={protectedCode} onDismiss={onDismissBubble} onPosition={onBubblePosChange} />
+        )}
         {/* Keep one editor instance across loading/resnapshot/project-open transitions. */}
-        <div className="h-full" hidden={!editorRef.current || !activeFile || activeFile.loaded === false}>
+        <div className="flex-1 min-h-0" hidden={!editorRef.current || !activeFile || activeFile.loaded === false}>
           <Editor
             height="100%"
             defaultLanguage={activeFile ? getLanguageForPath(activeFile.path) : 'plaintext'}
@@ -583,70 +564,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-950/90 border border-amber-600 text-amber-200 text-xs px-3 py-1.5 rounded shadow-lg flex items-center gap-2 animate-fade-in z-20">
             <Info className="w-4 h-4 text-amber-400" />
             <span>{selectionNotice}</span>
-          </div>
-        )}
-
-        {/* Coach Hint Bubble (Draggable, max 400 chars, 3 severities) */}
-        {activeHintBubble && activeHintBubble.path === activePath && (
-          <div
-            style={{
-              position: 'absolute',
-              top: `${bubblePos.y}px`,
-              right: `${bubblePos.x}px`,
-              zIndex: 30,
-              maxWidth: '380px',
-            }}
-            className={`rounded-lg shadow-2xl border text-xs p-3 transition-shadow select-none ${
-              activeHintBubble.severity === 'POSITIVE'
-                ? 'bg-emerald-950/95 border-emerald-600 text-emerald-100 shadow-emerald-950/50'
-                : activeHintBubble.severity === 'WARNING'
-                ? 'bg-rose-950/95 border-rose-600 text-rose-100 shadow-rose-950/50'
-                : 'bg-yellow-950/95 border-yellow-600 text-yellow-100 shadow-yellow-950/50'
-            }`}
-          >
-            {/* Handle & Close Header */}
-            <div
-              onMouseDown={handleMouseDown}
-              className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-white/10 cursor-move"
-            >
-              <div className="flex items-center gap-1.5 font-bold tracking-wide text-[11px]">
-                {activeHintBubble.severity === 'POSITIVE' && (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    <span className="text-emerald-300">Dobry kierunek</span>
-                  </>
-                )}
-                {activeHintBubble.severity === 'NEUTRAL' && (
-                  <>
-                    <Lightbulb className="w-3.5 h-3.5 text-yellow-400" />
-                    <span className="text-yellow-300">Wskazówka trenera</span>
-                  </>
-                )}
-                {activeHintBubble.severity === 'WARNING' && (
-                  <>
-                    <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />
-                    <span className="text-rose-300">Uwaga / Ryzyko błędu</span>
-                  </>
-                )}
-                <span className="opacity-60 text-[10px] ml-1 font-normal">(linia {activeHintBubble.line})</span>
-              </div>
-
-              <div className="flex items-center gap-1">
-                <GripHorizontal className="w-3.5 h-3.5 opacity-50" />
-                <button
-                  onClick={onDismissBubble}
-                  className="p-0.5 rounded hover:bg-black/30 text-white/70 hover:text-white"
-                  title="Zamknij dymek"
-                >
-                  <X className="w-3 h-3" />
-                </button>
-              </div>
-            </div>
-
-            {/* Bubble Content */}
-            <div className="text-xs leading-relaxed select-text font-sans">
-              {activeHintBubble.text}
-            </div>
           </div>
         )}
 
