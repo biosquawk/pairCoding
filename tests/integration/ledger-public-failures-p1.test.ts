@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { once } from 'node:events';
+import http from 'node:http';
 import { WebSocket } from 'ws';
 import { apiError, CommandLedger, TransportError } from '../../src/server/transport';
 import { createPairCoachServer } from '../../src/server/http';
@@ -140,4 +141,45 @@ test('P1 real REST→LiveBackend finish storage503 retains UNKNOWN; repeat click
   assert.equal(posts().length,1);assert.equal(posts()[0].body.requestId,original);
   assert.match(client.getState().connectionError!,/nieznany/);
   evidence(t,'REAL finish503→UNKNOWN→reconnect GET-only',{payloads,connectionError:client.getState().connectionError,requests});
+});
+
+test('P1 real503headers then response.destroy: LiveBackend keeps UNKNOWN and original ID; reclick/reconnect GET-only',async t=>{
+  const f=await fixture(t,true);f.ws.terminate();await until(()=>f.ws.readyState===WebSocket.CLOSED);
+  const requests:{method:string;path:string;status?:number;body?:any}[]=[],upstreamErrors:string[]=[];
+  const proxy=http.createServer((req,res)=>{
+    const upstream=http.request(new URL(req.url!,f.baseUrl),{method:req.method,headers:{...req.headers,host:new URL(f.baseUrl).host}},response=>{
+      if(req.url==='/api/session/finish'&&response.statusCode===503) {
+        response.resume();res.writeHead(503,{'Content-Type':'application/json','Content-Length':'2048'});
+        res.write('{"code":');res.flushHeaders();setTimeout(()=>res.destroy(),25);
+      } else {res.writeHead(response.statusCode!,response.headers);response.pipe(res);}
+    });
+    upstream.on('error',error=>{upstreamErrors.push(error.message);res.destroy();});req.pipe(upstream);
+  });
+  await new Promise<void>(resolve=>proxy.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise<void>(resolve=>proxy.close(()=>resolve())));
+  const baseUrl=`http://127.0.0.1:${(proxy.address() as any).port}`;
+  const client=new LiveBackend({baseUrl,token:'public-test-token',clientId:'public-client',fetch:async(url,options)=>{
+    const entry={method:options?.method??'GET',path:new URL(String(url)).pathname,body:options?.body?JSON.parse(String(options.body)):null,status:undefined as number|undefined};requests.push(entry);
+    const response=await fetch(url,options);entry.status=response.status;return response;
+  },socket:url=>{
+    // WS is not faulted: the deliberate proxy cuts only the real REST error body.
+    const ws=new WebSocket(url.replace(new URL(baseUrl).host,new URL(f.baseUrl).host));f.sockets.push(ws);
+    const socket:any={get readyState(){return ws.readyState;},send:(raw:string)=>ws.send(raw),close:()=>ws.close()};
+    ws.on('open',()=>socket.onopen?.({}));ws.on('message',data=>socket.onmessage?.({data:String(data)}));
+    ws.on('close',()=>socket.onclose?.({}));ws.on('error',()=>socket.onerror?.({}));return socket;
+  }});t.after(()=>client.close());
+  await client.connect();await until(()=>!client.getState().isOffline);
+  await client.finishSession('COMPLETED');
+  const posts=()=>requests.filter(r=>r.method==='POST'),original=posts()[0].body.requestId;
+  assert.equal(posts()[0].status,503,'fetch really received503 headers before body loss');
+  assert.match(client.getState().connectionError!,/Wynik zakończenia jest nieznany/);
+  assert(client.getState().connectionError!.includes(original));
+  await until(()=>requests.find(r=>r.path==='/api/session/report'));
+  await client.finishSession('ABANDONED');const reads=requests.filter(r=>r.path==='/api/session/report').length;
+  client.reconnect();await until(()=>!client.getState().isOffline);
+  await until(()=>requests.filter(r=>r.path==='/api/session/report').length>reads);
+  await client.finishSession('COMPLETED');assert.equal(posts().length,1);assert.equal(posts()[0].body.requestId,original);
+  assert.equal(f.app.session.state.lifecycle,'READY');assert.equal(f.app.workspace.listSnapshots().length,0);
+  assert.deepEqual(upstreamErrors,[]);
+  evidence(t,'REAL unreadable503headers→UNKNOWN→GET-only',{requests,connectionError:client.getState().connectionError});
 });

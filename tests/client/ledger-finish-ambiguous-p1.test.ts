@@ -69,3 +69,20 @@ test('P1 ambiguous classification is status+code, never message text; ordinary r
     assert.notEqual(f.posts()[0].body.requestId,f.posts()[1].body.requestId);
   }
 });
+
+test('P1 unreadable503body (json reject or truncated JSON) retains UNKNOWN/original ID; only GET reconciliation and no new POST',async t=>{
+  for(const post of [async()=>new Response('{truncated',{status:503}),async()=>Object.assign(new Response(null,{status:503}),{json:async()=>{throw new Error('PRIVATE_PARSE_OR_SOCKET_SECRET');}})]) {
+    const f=await fixture(post);t.after(()=>f.client.close());
+    await f.client.finishSession('COMPLETED');await turn();
+    const requestId=f.posts()[0].body.requestId;
+    assert.match(f.client.getState().connectionError!,/Wynik zakończenia jest nieznany/);
+    assert(f.client.getState().connectionError!.includes(requestId));
+    assert(!f.client.getState().connectionError!.includes('PRIVATE_PARSE_OR_SOCKET_SECRET'));
+    assert.equal(f.requests.filter(r=>r.path==='/api/session/report').length,1);
+    await f.client.finishSession('ABANDONED');assert.equal(f.posts().length,1);
+    f.sockets.at(-1).close();await f.connect();await turn();
+    await f.client.finishSession('COMPLETED');assert.equal(f.posts().length,1);
+    f.bundle.session.lifecycle='FINISHED';f.report(readyReport());await turn();await turn();
+    assert.equal(f.client.getState().connectionError,null);assert.equal(f.client.getState().report?.status,'READY');
+  }
+});

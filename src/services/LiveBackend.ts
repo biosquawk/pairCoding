@@ -30,9 +30,9 @@ class HttpDeadlineError extends Error {}
 // ambiguous ledger503 codes. Those are not proof that the effect was rejected.
 // Fetch failures and successful responses with unreadable bodies are NOT rejections.
 class HttpRejectedError extends Error {
-  constructor(message: string, readonly status: number, readonly code?: string) { super(message); }
+  constructor(message: string, readonly status: number, readonly code?: string, readonly bodyUnreadable = false) { super(message); }
   get ambiguous() {
-    return this.status === 503 && (this.code === 'COMMAND_RESULT_UNAVAILABLE' || this.code === 'COMMAND_STORAGE_UNAVAILABLE');
+    return this.status === 503 && (this.bodyUnreadable || this.code === 'COMMAND_RESULT_UNAVAILABLE' || this.code === 'COMMAND_STORAGE_UNAVAILABLE');
   }
 }
 const id = () => globalThis.crypto.randomUUID();
@@ -154,8 +154,12 @@ export class LiveBackend {
       }, ...(body ? { body: JSON.stringify(body) } : {}) });
       if (!response.ok) {
         let data: { code?: string; message?: string } | null = null;
-        try { data = await response.json(); } catch { /* status still proves rejection */ }
-        throw new HttpRejectedError(`${data?.code ?? response.status}: ${data?.message ?? 'Żądanie odrzucone'}`, response.status, data?.code);
+        let bodyUnreadable = false;
+        try { data = await response.json(); } catch { bodyUnreadable = true; }
+        // Lost503 bodies can hide an effect-ambiguous ledger receipt. The status
+        // alone cannot release a finish attempt; readable ordinary rejections can.
+        const fallback = response.status === 503 && bodyUnreadable ? 'Nie odczytano odpowiedzi błędu serwera.' : 'Żądanie odrzucone';
+        throw new HttpRejectedError(`${data?.code ?? response.status}: ${data?.message ?? fallback}`, response.status, data?.code, bodyUnreadable);
       }
       return await response.json() as T;
     } catch (error) {
