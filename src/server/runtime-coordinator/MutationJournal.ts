@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { SettingsTransactionIdentity } from '../settings-v2';
 import { AppError } from '../errors';
 import { JournalLease } from './JournalLease';
 import { canonical, createRecord, privateDirectory, readRecord, replaceRecord, SerialQueue, sha256 } from './storage';
@@ -12,7 +13,18 @@ export interface MutationIdentity {
 export type MutationOutcome<T> = { state: 'UNKNOWN'; result: null } |
   { state: 'COMMITTED'; result: T } | { state: 'DEFINITIVELY_ABORTED'; result: null };
 export type DefinitiveOutcome<T> = Exclude<MutationOutcome<T>, { state: 'UNKNOWN' }>;
-type RecordBody = { version: 1; identity: MutationIdentity; fingerprint: string; outcome: MutationOutcome<unknown> };
+export interface SettingsResultStage<T> { identity: SettingsTransactionIdentity; result: T }
+type RecordBody = { version: 1; identity: MutationIdentity; fingerprint: string; outcome: MutationOutcome<unknown>; settingsStage?: SettingsResultStage<unknown> };
+const validStage = (body: RecordBody): boolean => {
+  const s = body.settingsStage;
+  if (!s) return true;
+  return body.identity.kind === 'SAVE' && !!s.identity && s.result !== undefined &&
+    (['requestId','clientId','sessionId'] as const).every(k => s.identity[k] === body.identity[k]) &&
+    Number.isSafeInteger(s.identity.expectedWorkspaceVersion) && s.identity.expectedWorkspaceVersion >= 0 &&
+    !!body.identity.payload && typeof body.identity.payload === 'object' &&
+    s.identity.expectedWorkspaceVersion === (body.identity.payload as { expectedWorkspaceVersion?: unknown }).expectedWorkspaceVersion &&
+    /^[a-f0-9]{64}$/.test(s.identity.payloadSha256);
+};
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const MAX_RECORD = 8 * 1024 * 1024;
 const fail = (code: string, message: string): never => { throw new AppError(409, code, message); };
@@ -75,7 +87,7 @@ export class DurableMutationJournal {
       const body = stored.body as RecordBody;
       if (!body || body.version !== 1 || stored.sha256 !== sha256(canonical(body)) ||
           body.fingerprint !== sha256(canonical(body.identity)) || this.key(body.identity) + '.json' !== name ||
-          !body.outcome || !['UNKNOWN','COMMITTED','DEFINITIVELY_ABORTED'].includes(body.outcome.state) ||
+          !validStage(body) || !body.outcome || !['UNKNOWN','COMMITTED','DEFINITIVELY_ABORTED'].includes(body.outcome.state) ||
           (body.outcome.state !== 'COMMITTED' && body.outcome.result !== null)) throw Error('Invalid mutation journal record');
       this.records.set(name.slice(0, -5), body); this.bytes += bytes.length;
     }
@@ -107,6 +119,25 @@ export class DurableMutationJournal {
     try { replaceRecord(path.join(this.directory, key + '.json'), bytes); }
     catch (e) { this.poisoned = true; throw e; }
     this.records.set(key, body); this.bytes = total;
+  }
+  /** INTERNAL synchronous pre-effect stage. Called only inside the actual settings lease,
+   * after durable mutation reservation, before the authority/Store effect can begin. No await
+   * can interleave settlement. Repetition/replacement is forbidden; failed fsync poisons owner.
+   */
+  stageSettings<T>(original: MutationIdentity, stage: SettingsResultStage<T>): void {
+    this.assertOwner();
+    const identity = snapshot(original), key = this.key(identity), prior = this.existing(key, identity);
+    const body: RecordBody = { ...prior!, settingsStage: snapshot(stage) };
+    if (!prior || prior.outcome.state !== 'UNKNOWN' || prior.settingsStage || !this.activeEffects || !validStage(body))
+      fail('INVALID_SETTINGS_STAGE', 'Original SAVE result must be staged once before its actual effect.');
+    this.settle(key, body);
+  }
+  /** Trusted recovery consumes the retained original result + exact Store-generated identity,
+   * never regenerates a payload hash from reordered JSON or a later current Project snapshot. */
+  readSettingsStage<T>(original: MutationIdentity): SettingsResultStage<T> | null {
+    this.assertOwner();
+    const prior = this.existing(this.key(original), original);
+    return prior?.settingsStage ? snapshot(prior.settingsStage) as SettingsResultStage<T> : null;
   }
   /** Reservation is durable before the callback; callback MUST NOT return abort after an uncertain effect. */
   async execute<T>(original: MutationIdentity, effect: () => Promise<DefinitiveOutcome<T>>): Promise<MutationOutcome<T>> {

@@ -142,6 +142,14 @@ export class DurableWorkspaceVersions {
     if (original && canonical(original) !== canonical(identity)) fail('IDEMPOTENCY_CONFLICT', 'Settings request is bound to different immutable input.');
     return stored ? copy(stored.outcome) : original ? { state: 'UNKNOWN' } : null;
   }
+  /** Internal provenance check: an unstaged public mutation must not hide a preexisting
+   * direct Store transaction with the same key. This does not infer any committed response.
+   */
+  hasSettingsRequest(identity: Pick<SettingsTransactionIdentity, 'sessionId' | 'clientId' | 'requestId'>): boolean {
+    this.assertCurrent();
+    const matches = (i: SettingsTransactionIdentity) => i.sessionId === identity.sessionId && i.clientId === identity.clientId && i.requestId === identity.requestId;
+    return !!this.state.pending && matches(this.state.pending) || this.state.outcomes.some(r => matches(r.identity));
+  }
   pendingSettings(): SettingsTransactionIdentity | null { this.assertCurrent(); return copy(this.state.pending); }
   beginSettings(identity: SettingsTransactionIdentity): void {
     this.assertWritable();

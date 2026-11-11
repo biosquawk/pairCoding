@@ -115,7 +115,7 @@ export class WriteGate {
 
   /** @internal Settings use the SAME FIFO/root exclusion as writes and immutable Run capture.
    * Recovery is trusted server work, not browser authority to mutate an old session. */
-  _withSettingsLease<T>(identity: Readonly<SettingsTransactionIdentity>, recovery: boolean,
+  _withSettingsLease<T>(identity: Readonly<Pick<SettingsTransactionIdentity, 'clientId' | 'sessionId'>>, recovery: boolean,
       action: (lease: SettingsWriteLease) => T): Promise<T> {
     const accepted = structuredClone(identity);
     const auth: MutationAuth = { clientId: accepted.clientId, sessionId: accepted.sessionId,

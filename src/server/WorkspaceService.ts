@@ -415,6 +415,10 @@ export class WorkspaceService extends EventEmitter {
 
   listFiles(): FileEntry[] {
     this.assertReadable();
+    return this.fileProjection();
+  }
+
+  private fileProjection(): FileEntry[] {
     return [...this.directories.map(p => ({ path: p, kind: 'DIRECTORY' as const, version: null })),
       ...[...this.records].map(([p, record]) => ({ path: p, kind: 'FILE' as const, version: record.version }))]
       .sort((a, b) => a.path.localeCompare(b.path));
@@ -790,6 +794,15 @@ export class WorkspaceService extends EventEmitter {
   }
   /** @internal Only under the actual gate lease. Read current disk before expected-version admission. */
   _scanSettingsVersion(): void { this.scanInternal(); }
+  /** @internal Exact settings response files under the ALREADY held actual settings lease.
+   * Public readers retain BUSY refusal; no snapshot/read barrier is weakened.
+   */
+  _settingsFileProjection(lease: { assertCurrent(): void }): FileEntry[] {
+    lease.assertCurrent();
+    if (!this.mutationBusy || !activeAsyncRoots.has(this.rootPath)) throw Error('Actual held settings mutation required');
+    this._settingsVersionStore().assertCurrent();
+    return this.fileProjection();
+  }
   /** @internal The ledger receipt is durable BEFORE its new version is published to listeners. */
   _publishSettingsReceipt(receipt: SettingsSaveReceipt): void {
     const snapshot = this._settingsVersionStore().snapshot();
