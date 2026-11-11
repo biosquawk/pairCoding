@@ -80,13 +80,31 @@ Po `pom.xml`, `requirements.txt`, `package.json` lub lock/config zmienionym wzgl
 przygotowanego projektu wykonaj nowe jawne prepare; zwykła edycja źródła nie zmienia zależności.
 Run/Test używają później wyłącznie przypiętych lokalnych obrazów `--pull=never` i zarządzanych cache.
 
-**Przekazanie wyniku do aplikacji: JESZCZE NIE ZINTEGROWANE.** Publiczna nazwa i argumenty
-powyżej są zarezerwowanym kontraktem; w tej rewizji brak jeszcze frozen CLI i backendowego
-readiness/output handoff. Nie wskazujemy zgadywanego pola config/env, ścieżki cache ani
-nie nazywamy receipts plikiem images.lock. Zachowaj output; dopiero dostawa K łącząca
-faktyczny CLI z backendem musi podać konkretną procedurę wyboru wyniku i obserwowalny
-stan gotowości. Do tego czasu ten kandydat **nie spełnia całego AC112** i nie jest instrukcją
-wydania do uruchomienia. Nie obchodź odmowy przez ręczne docker run lub fikcyjny lock.
+**Przekazanie wyniku do aplikacji: wybrany kontrakt, JESZCZE NIE ZINTEGROWANY.**
+Po wdrożeniu faktycznego CLI i konsumenta backendu start wybiera wyniki jawnie:
+
+```powershell
+npm.cmd start -- --prepared-runtime $executeOut
+# Można powtórzyć --prepared-runtime <ABSOLUTNY-outputRoot> dla innych przygotowań (max16).
+```
+
+`npm.cmd run server -- --prepared-runtime $executeOut` przekazuje ten sam parametr.
+To nie pole `paircoach.runtime.json`, nowa zmienna env ani automatyczne wyszukiwanie cache.
+Źródłem jest `receipt.json` we wskazanym outputRoot i związany cache
+`cache/<family>/<toolchainHash>/<dependencySha256>`; ich istnienie/status NIE wystarcza
+za dowód gotowości. Konsument ma ponownie potwierdzić bieżący projekt/zależności/task,
+rzeczywisty engine/obraz/narzędzia i kompletność cache. `imageLock` w istniejącym pliku
+konfiguracji musi wskazywać rzeczywisty zmierzony imageId **oraz prawdziwy** OCI manifest
+/Descriptor/RepoDigest; imageId nie może udawać digestu. Pusty lock nadal blokuje wykonanie.
+CLI ma czytać pełne ustawienia V2 projektu i rzeczywiste task.workingDirectory; dla różnych
+katalogów Main/Tests potrzebne są osobne związane outputy albo jawna odmowa, nigdy zgadnięte `.`.
+
+W tej rewizji CLI nadal nie istnieje i konsument nie jest zintegrowany: nie uruchamiaj
+powyższego jako instrukcji gotowego wydania. Zachowaj output; dostawa K z frozen faktycznym
+CLI/consumer musi potwierdzić cały przebieg i dokładne źródło prawdziwego image lock.
+Do tego czasu kandydat **nie spełnia całego AC112**. Nie obchodź odmowy przez ręczne
+docker run, receipt-presence ani fikcyjny lock. Pozostaje osobno wymagany offline proof
+po prepare; samo pobranie obrazów i zależności/tiny tool probe go nie zastępuje.
 
 ## 3. Jeden scenariusz po integracji prepare i backendu
 

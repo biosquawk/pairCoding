@@ -7,7 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { requiredFiles as oldRequired } from '../../scripts/verify-source-revision.mjs';
+import { requiredFiles as oldRequired, allowedSource, verifyAndCopy, verifyCopiedInputs } from '../../scripts/verify-source-revision.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
 const scripts = ['prepare-cli','prepare','language-prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates'].map(n => `scripts/runtime-${n}.mjs`);
@@ -70,6 +70,8 @@ test('list/dry-run: complete finite polyglot source closure, exact SHA256 of eve
   const list=pack(f,['--list']).stdout.trim().split('\n');
   for(const name of [...oldRequired,...runtimeRequired,...extraSources])assert.ok(list.includes(name),name);
   for(const name of excluded)assert.ok(!list.includes(name),name);
+  const tracked=git(f.root,'ls-tree','-r','--name-only',f.revision).split('\n');
+  assert.deepEqual(list,tracked.filter(allowedSource).sort(),'packager/verifier exact finite selection parity');
   const plan=JSON.parse(pack(f,['--dry-run']).stdout);
   assert.deepEqual(plan.files.map(f=>f.path),list);assert.equal(plan.sourceCommit,f.revision);
   assert.equal(plan.commands.length,11);const cmd=plan.commands.find(c=>c.name==='runtime:prepare');
@@ -113,4 +115,43 @@ test('selected runtime submodule, wrong SHA and mismatched policy fail closed',t
   assert.match(pack(f,['--list'],1).stderr,/Niedozwolony typ/);
   pack({...f,revision:'0'.repeat(40)},['--dry-run'],1);
   fs.appendFileSync(path.join(f.root,'scripts/package-windows.mjs'),'\n// changed policy\n');assert.match(pack(f,['--list'],1).stderr,/Skrypt musi być zgodny/);
+});
+
+test('expanded verifier: actual Git -> disposable copy and synthetic ZIP -> Gitless trusted copy retain every source byte',t=>{
+  const f=fixture(t),gitCopy=path.join(f.base,'git-copy');
+  const identity=verifyAndCopy({source:f.root,revision:f.revision,destination:gitCopy});
+  assert.equal(identity.trustMode,'GIT_HEAD');assert.equal(identity.byteVerification,'PASS');
+  for(const file of identity.files)assert.deepEqual(fs.readFileSync(path.join(gitCopy,file.path)),fs.readFileSync(path.join(f.root,file.path)));
+  for(const name of excluded)assert.equal(fs.existsSync(path.join(gitCopy,name)),false,name);
+  const out=path.join(f.base,'archive');pack(f,['--output',out]);
+  const manifest=path.join(out,'manifest.json'),raw=fs.readFileSync(manifest),m=JSON.parse(raw);
+  const entries=readZip(fs.readFileSync(path.join(out,m.archive.name))),extracted=path.join(f.base,'extracted');fs.mkdirSync(extracted);
+  for(const file of m.files)write(extracted,file.path,entries.get(m.prefix+file.path));
+  assert.equal(fs.existsSync(path.join(extracted,'.git')),false);
+  const copy=path.join(f.base,'trusted-copy'),result=verifyAndCopy({source:extracted,revision:f.revision,destination:copy,trustedManifest:manifest,manifestSha256:sha(raw)});
+  assert.equal(result.trustMode,'EXTERNAL_MANIFEST_SHA256');assert.equal(result.manifestDigest,sha(raw));assert.equal(result.byteVerification,'PASS');
+  assert.deepEqual(result.files.map(f=>f.path),m.files.map(f=>f.path));
+  for(const file of m.files)assert.equal(sha(fs.readFileSync(path.join(copy,file.path))),file.sha256);
+  // Existing independent trust/revision/source identity protections apply to NEW roots too.
+  const rejected=path.join(f.base,'no-copy');
+  for(const mutation of [
+    ()=>({revision:'0'.repeat(40)}),
+    ()=>({manifestSha256:'0'.repeat(64)}),
+  ]) {
+    assert.throws(()=>verifyAndCopy({source:extracted,revision:f.revision,destination:rejected,trustedManifest:manifest,manifestSha256:sha(raw),...mutation()}));
+    assert.equal(fs.existsSync(rejected),false);
+  }
+  write(extracted,'runtimes/source-metadata.json','TAMPER');
+  assert.throws(()=>verifyCopiedInputs(extracted,m.files),/COPIED_BYTES_MISMATCH/);
+  assert.throws(()=>verifyAndCopy({source:extracted,revision:f.revision,destination:rejected,trustedManifest:manifest,manifestSha256:sha(raw)}),/COPIED_BYTES_MISMATCH/);
+  assert.equal(fs.existsSync(rejected),false);
+});
+for(const [label,mutate,expected] of [
+  ['new source omitted from manifest',root=>write(root,'examples/other-project/extra.py','untrusted'),/SOURCE_SET_MISMATCH/],
+  ['new runtime source symlink',root=>{fs.unlinkSync(path.join(root,'runtimes/catalog.json'));fs.symlinkSync('images.lock.json',path.join(root,'runtimes/catalog.json'));},/SYMLINK_OR_REPARSE_PATH/],
+]) test(`expanded Gitless verification rejects ${label}`,t=>{
+  const f=fixture(t),m=JSON.parse(pack(f,['--dry-run']).stdout),out=path.join(f.base,'manifest.json');write(f.base,'manifest.json',JSON.stringify(m));
+  fs.rmSync(path.join(f.root,'.git'),{recursive:true});mutate(f.root);const dest=path.join(f.base,'never');
+  assert.throws(()=>verifyAndCopy({source:f.root,revision:f.revision,destination:dest,trustedManifest:out,manifestSha256:sha(fs.readFileSync(out))}),expected);
+  assert.equal(fs.existsSync(dest),false);
 });
