@@ -29,12 +29,12 @@ export interface LanguageAckAuthority {
   /** EXACT sent-version/fixed-launch source ledger. Never derive provenance from current stamp at receipt time. */
   readAnalysisSource(peerId: string, documentMessageId: string): Readonly<AnalysisSource> | null;
   /** No structural wire value is a commit proof. Caller supplies its private actual-commit ledger reader. */
-  readCommittedSave(request: Readonly<LanguageSaveInput>): LanguageSaveCommit | null;
+  readCommittedSave(request: Readonly<LanguageSaveInput>, saveReceiptId: string): LanguageSaveCommit | null;
 }
 declare const pendingLanguageSave: unique symbol;
 export interface PendingLanguageSave { readonly [pendingLanguageSave]: true }
 type Capture = { request: Readonly<LanguageSaveInput>; document: Readonly<OpenOrChange>;
-  current: Readonly<LanguageAckCurrent>; source: Readonly<AnalysisSource>; proof: VerifiedLanguageAck | null };
+  current: Readonly<LanguageAckCurrent>; source: Readonly<AnalysisSource>; issued: Map<string,VerifiedLanguageAck> };
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value));
 const freeze = <T>(value: T): T => { if (value && typeof value === 'object') { Object.values(value).forEach(freeze); Object.freeze(value); } return value; };
 const same = (a: unknown,b: unknown): boolean => {
@@ -64,6 +64,7 @@ export class LanguageAckLedger {
   private transactions = new Map<string, { handle: PendingLanguageSave; capture: Capture }>();
   private pending = new WeakMap<object,Capture>();
   private proofs = new WeakMap<object,Capture>();
+  private receiptOwners = new Map<string,Capture>();
   constructor(private readonly authority: LanguageAckAuthority, private readonly codec: LanguageAckCodec) {}
 
   /** Call ONLY after authenticated current-peer scope checks and successful immutable OPEN/CHANGE admission. */
@@ -101,17 +102,17 @@ export class LanguageAckLedger {
         this.codec.normalizeContent(document.content)!==this.codec.normalizeContent(request.content)) return null;
       const source=this.authority.readAnalysisSource(request.peerId,request.languageDocumentMessageId);
       if(!source || !sourceValid(source) || !same(source.sourceStamp,document.stamp)) return null;
-      const capture: Capture={request,document,current:freeze(clone(current)),source:freeze(clone(source)),proof:null};
+      const capture: Capture={request,document,current:freeze(clone(current)),source:freeze(clone(source)),issued:new Map()};
       const handle=Object.freeze({}) as PendingLanguageSave;
       this.captureBytes+=Buffer.byteLength(input.content);this.pending.set(handle,capture); this.transactions.set(k,{handle,capture}); return handle;
     } catch { return null; }
   }
-  private verified(c: Capture): { current: LanguageAckCurrent; commit: LanguageSaveCommit } | null {
+  private verified(c: Capture, saveReceiptId: string): { current: LanguageAckCurrent; commit: LanguageSaveCommit } | null {
     const { request,document,current:before,source }=c;
     // Retiring the authenticated peer also retires its captures/proofs, even if callbacks accidentally linger.
     if(this.documents.get(key(request.peerId,request.languageDocumentMessageId))!==document) return null;
-    const current=this.current(request), commit=this.authority.readCommittedSave(request);
-    if(!current || !commit || !same(commit.request,request) || !id(commit.saveReceiptId) || commit.replyTo!==request.transactionMessageId ||
+    const current=this.current(request), commit=this.authority.readCommittedSave(request,saveReceiptId);
+    if(!current || !commit || !same(commit.request,request) || !id(commit.saveReceiptId) || commit.saveReceiptId!==saveReceiptId || commit.replyTo!==request.transactionMessageId ||
       !['OK','DUPLICATE'].includes(commit.status) || !integer(commit.workspaceVersion) || !integer(commit.documentVersion) ||
       commit.documentVersion<=request.baseVersion || commit.beforeProjectRevision!==before.projectRevision ||
       !revision(commit.afterProjectRevision) || commit.afterProjectRevision===before.projectRevision ||
@@ -124,24 +125,26 @@ export class LanguageAckLedger {
       !same(this.authority.readAnalysisSource(request.peerId,request.languageDocumentMessageId),source)) return null;
     return {current,commit};
   }
-  commitSave(handle: PendingLanguageSave): VerifiedLanguageAck | null {
+  commitSave(handle: PendingLanguageSave, saveReceiptId: string): VerifiedLanguageAck | null {
     try {
-      const c=this.pending.get(handle); if(!c) return null;
-      const verified=this.verified(c); if(!verified) return null;
-      if(c.proof) return this.isVerified(c.proof) ? c.proof : null;
+      const c=this.pending.get(handle); if(!c || !id(saveReceiptId)) return null;
+      const verified=this.verified(c,saveReceiptId); if(!verified) return null;
+      const existing=c.issued.get(saveReceiptId);
+      if(existing) return this.isVerified(existing) ? existing : null;
+      if(c.issued.size>=128 || this.receiptOwners.size>=8192 || this.receiptOwners.has(saveReceiptId)) return null;
       const {current,commit}=verified;
       // The ONLY cast to this existing private brand. isVerified also requires this exact object's issuance.
       const proof=freeze({ saveReceiptId:commit.saveReceiptId,transactionMessageId:c.request.transactionMessageId,
         replyTo:commit.replyTo,status:commit.status,source:clone(c.source),previous:clone(c.document.stamp),
         presentation:clone(current.stamp),normalizedContentSha256:current.stamp.contentSha256,
         dependencyManifestSha256:current.dependencyManifestSha256 }) as VerifiedLanguageAck;
-      c.proof=proof;this.proofs.set(proof,c);return proof;
+      c.issued.set(saveReceiptId,proof);this.receiptOwners.set(saveReceiptId,c);this.proofs.set(proof,c);return proof;
     } catch { return null; }
   }
   isVerified(proof: VerifiedLanguageAck): boolean {
     try {
-      const c=this.proofs.get(proof);if(!c || c.proof!==proof) return false;
-      const checked=this.verified(c);
+      const c=this.proofs.get(proof);if(!c || c.issued.get(proof.saveReceiptId)!==proof) return false;
+      const checked=this.verified(c,proof.saveReceiptId);
       return !!checked && checked.commit.saveReceiptId===proof.saveReceiptId && checked.commit.status===proof.status &&
         same(checked.current.stamp,proof.presentation) && same(c.source,proof.source);
     } catch { return false; }
@@ -150,6 +153,6 @@ export class LanguageAckLedger {
   retirePeer(peerId: string): void {
     for(const [k,d] of this.documents) if(JSON.parse(k)[0]===peerId) { this.documentBytes-=Buffer.byteLength(d.content);this.documents.delete(k); }
     for(const k of this.seenDocuments.keys()) if(JSON.parse(k)[0]===peerId) this.seenDocuments.delete(k);
-    for(const [k,{handle,capture}] of this.transactions) if(JSON.parse(k)[0]===peerId) { this.captureBytes-=Buffer.byteLength(capture.request.content);this.pending.delete(handle); this.transactions.delete(k); }
+    for(const [k,{handle,capture}] of this.transactions) if(JSON.parse(k)[0]===peerId) { this.captureBytes-=Buffer.byteLength(capture.request.content);for(const id of capture.issued.keys()) this.receiptOwners.delete(id);this.pending.delete(handle); this.transactions.delete(k); }
   }
 }
