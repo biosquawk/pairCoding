@@ -273,13 +273,36 @@ export class WorkspaceService extends EventEmitter {
     const previousDirectories = this.directories;
     const { files, dirs } = yield* this.collectSteps();
     for (const file of new Set([...files, ...this.records.keys()])) {
-      this.external(file, this.disk(file));
+      this.external(file, this.backgroundDisk(file));
       yield;
     }
     // A normal WRITE may refresh directories without changing structure. Keep that
     // newer list, but do not restart the scan on every autosave (tail starvation).
     if (this.directories === previousDirectories) this.directories = dirs;
     this.refreshWatchers();
+  }
+
+  /** A tracked file can disappear through a safe external change of entry type.
+   * Only fresh, validated topology proves absence; an unsafe path is NOT a deletion.
+   * Keep this observation-only exception out of disk(), API reads and mutations. */
+  private backgroundDisk(relative: string): DiskFile | null {
+    try { return this.disk(relative); }
+    catch (error) {
+      if (!(error instanceof AppError)) throw error;
+      if (error.code === 'NOT_A_FILE') {
+        if (fs.lstatSync(this._safePath(relative)).isDirectory()) return null;
+      } else if (error.code === 'UNSAFE_PATH') {
+        const parts = relative.split('/');
+        for (let n = 1; n < parts.length; n++) {
+          const stat = fs.lstatSync(this._safePath(parts.slice(0, n).join('/')), { bigint: true });
+          // _safePath rechecks root, casing and every ancestor/link before lstat.
+          // Never reinterpret a hardlink (or another non-directory type) as absence.
+          if (stat.isFile() && stat.nlink === 1n) return null;
+          if (!stat.isDirectory()) break;
+        }
+      }
+      throw error;
+    }
   }
 
   private cancelRootBackgroundScans(): void {
