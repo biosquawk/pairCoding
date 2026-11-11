@@ -1,3 +1,5 @@
+import type { LanguageAckLedger } from './LanguageAckLedger';
+import type { VerifiedLanguageAck } from './ports';
 import { isDeepStrictEqual as same } from 'node:util';
 import { LANGUAGE_LIMITS } from '../../shared/language-v2';
 import * as codec from '../../language/uriCodec';
@@ -36,12 +38,19 @@ interface LaunchState {
   scope: Readonly<LanguageProjectScope>; snapshot: RegistrySnapshot; binding: ProductionLanguageBinding;
   config: Readonly<LanguageProviderConfiguration>; shadow: LanguageShadow; boot: LanguageBootPublication;
   session: LanguageServerSession;
+  ack: { proof: VerifiedLanguageAck; ledger: LanguageAckLedger } | null;
 }
 /** Actual private filesystem -> pinned configuration -> durable boot -> Docker process -> framed
  * session composition. create is synchronous and transfers the session owner BEFORE start/await.
  * No host fallback, original source/cache mount, duplicated codec or implicit prepare execution.
  */
 export class ProductionLanguageRegistryFactory implements RegistryFactory {
+  private ackLedger: LanguageAckLedger | null = null;
+  /** One composition binding; another issuer can never replace this registry's private save authority. */
+  bindAckLedger(ledger: LanguageAckLedger): void {
+    if (this.ackLedger && this.ackLedger !== ledger) throw new Error('Production language issuer already bound');
+    this.ackLedger = ledger;
+  }
   private readonly store: LanguageShadowStore;
   private readonly boot: LanguageBootPublisher;
   private readonly states = new WeakMap<RegistrySession, LaunchState>();
@@ -83,6 +92,7 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
   }
   private assertCurrent(state: LaunchState, shadow: LanguageShadow): void {
     if (state.shadow !== shadow) throw new Error('Stale production shadow handle');
+    if (state.ack && !state.ack.ledger.isVerified(state.ack.proof)) throw new Error('Revoked production ACK handoff');
     this.current(state.scope, state.snapshot, state.binding);
     this.store.assertIntegrity(shadow); this.boot.assertLaunchFiles(state.config, state.boot);
     this.current(state.scope, state.snapshot, state.binding);
@@ -105,10 +115,41 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
       rpc: { configuration: (method, params) => readLanguageProviderConfiguration(config, method, params) } });
     let state!: LaunchState;
     const session = new LanguageServerSession({ process, shadow, codec, settings: config.settings,
-      expectedProjectUri: config.expectedProjectUri, assertCurrent: current => this.assertCurrent(state, current), ...callbacks });
-    state = { scope: capturedScope, snapshot: capturedSnapshot, binding, config, shadow, boot, session };
+      expectedProjectUri: config.expectedProjectUri, ackLedger: this.ackLedger ?? undefined, assertCurrent: current => this.assertCurrent(state, current), ...callbacks });
+    state = { scope: capturedScope, snapshot: capturedSnapshot, binding, config, shadow, boot, session, ack: null };
     this.states.set(session, state); this.assertCurrent(state, shadow);
     return { session, generation }; // No process admission/command/await has occurred before this transfer.
+  }
+  /** Called only by the registry with its SAME private issuer, after authentic ACK publication.
+   * Backend-only seam: passing a branded-looking value or merely equal bytes cannot advance a lease.
+   */
+  acknowledge(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, launch: RegistryLaunch,
+    proof: VerifiedLanguageAck, ledger: LanguageAckLedger): void {
+    const state = this.states.get(launch.session), transition = ledger.readVerifiedTransition(proof);
+    if (this.ackLedger !== ledger || !state || !same(scope, state.scope) || !transition || snapshot.revision !== transition.afterProjectRevision ||
+      state.snapshot.revision !== transition.beforeProjectRevision && !(state.ack?.ledger === ledger &&
+        state.snapshot.revision === transition.afterProjectRevision && same(state.ack.proof.source, proof.source) &&
+        same(state.ack.proof.presentation, proof.presentation))) throw new Error('Unbound production ACK transition');
+    const original = state.shadow.manifest.overlays.find(s => s.path === proof.previous.path);
+    if (!original || !same(original, proof.previous)) throw new Error('ACK not in original factory shadow');
+    const { binding, config, source } = this.capture(state.scope, copy(snapshot));
+    const old = state.binding, path = proof.previous.path;
+    const expectedDocuments = state.snapshot.documents.map(d => d.stamp.path === path ? { ...d, stamp: proof.presentation } : d);
+    const strip = (b: ProductionLanguageBinding) => ({ ...b, source: { ...b.source, leaseId: '',
+      files: sorted(b.source.files.filter(f => f.path !== path)),
+      overlays: sorted(b.source.overlays.map(d => ({ ...d, path: d.stamp.path, stamp: d.stamp.path === path ? proof.presentation : d.stamp }))) } });
+    if (!same(snapshot.documents, expectedDocuments) || !same(config, state.config) || !same(strip(old), strip(binding)) ||
+      binding.prepared.dependencySha256 !== proof.dependencyManifestSha256 ||
+      old.source.files.filter(f => f.path === path).length !== 1 || binding.source.files.filter(f => f.path === path).length !== 1)
+      throw new Error('ACK changed unrelated production input');
+    this.store.assertAcknowledgedSnapshot(state.shadow, this.authority(state.scope, snapshot, binding, source), proof.previous, proof.presentation);
+    this.boot.assertLaunchFiles(state.config, state.boot);
+    if (!ledger.isVerified(proof)) throw new Error('ACK revoked during production join');
+    // No shadow/manifest mutation or process operation. All future boundaries require BOTH the real
+    // committed current lease and the still-current exact proof. Diagnostic source remains original.
+    state.snapshot = copy(snapshot); state.binding = binding; state.ack = { proof, ledger };
+    this.assertCurrent(state, state.shadow);
+    if (state.shadow.phase === 'completion') state.session.acknowledgePresentation(proof, ledger);
   }
   refreshCompletion(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, launch: RegistryLaunch): boolean {
     const state = this.states.get(launch.session);
@@ -121,7 +162,7 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
       !same(binding.prepared, before.prepared) || !same(config, state.config)) return false;
     try {
       const next = this.store.refreshCompletion(state.shadow, this.authority(state.scope, capturedSnapshot, binding, source));
-      state.binding = binding; state.snapshot = capturedSnapshot; state.shadow = next;
+      state.binding = binding; state.snapshot = capturedSnapshot; state.shadow = next; state.ack = null;
       state.session.replaceCompletionShadow(next); this.assertCurrent(state, next); return true;
     } catch (error) { state.session.invalidate(String(error)); throw error; }
   }

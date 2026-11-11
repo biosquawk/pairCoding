@@ -25,6 +25,8 @@ export interface RegistryCallbacks {
 export type RegistrySession = Pick<LanguageServerSession, 'launchId' | 'start' | 'open' | 'change' | 'close' | 'cancelCompletions' | 'complete' | 'cancel' | 'invalidate' | 'retire'>;
 export interface RegistryLaunch { session: RegistrySession; generation: ImmutableDiagnosticGeneration | null }
 export interface RegistryFactory {
+  /** Bind once at construction, never chosen by wire/callers of acknowledge. */
+  bindAckLedger?(ledger: LanguageAckLedger): void;
   /** Synchronous ownership transfer BEFORE start/any await. Compose actual private shadow/process/session.
    * Throws only BEFORE a process is admitted; it must never hide an admitted process on factory failure.
    * Diagnostic descriptor must describe this exact immutable shadow, not caller-selected files/paths.
@@ -36,6 +38,12 @@ export interface RegistryFactory {
    * refresh if identity/dependencies require a new process. Never refresh immutable diagnostic siblings.
    */
   refreshCompletion(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, launch: RegistryLaunch): boolean;
+  /** Actual production ACK-only full-vector handoff, no source/result rebind or provider operation.
+   * Optional only for legacy/test factories: absent hooks never authorize fresh completion currentness.
+   * Registry supplies its SAME ledger; no transport caller may choose this dependency.
+   */
+  acknowledge?(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, launch: RegistryLaunch,
+    proof: VerifiedLanguageAck, ledger: LanguageAckLedger): void;
 }
 export interface RegistryClock {
   set(delayMs: number, callback: () => void): unknown;
@@ -80,6 +88,7 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
   private problem: LanguageView['problem'] = null;
   private readonly clock: RegistryClock;
   constructor(private readonly options: LanguageFeatureRegistryOptions) {
+    options.factory.bindAckLedger?.(options.ackLedger);
     this.clock = options.clock ?? { set: (ms, cb) => setTimeout(cb, ms), clear: h => clearTimeout(h as ReturnType<typeof setTimeout>) };
   }
   getProjectScope(): Readonly<LanguageProjectScope> | null { return this.scope; }
@@ -235,8 +244,26 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     const e = this.evidence.get(proof?.source?.sourceStamp.path);
     if (!e || !same(e.source, proof.source) || !this.options.ackLedger.isVerified(proof) ||
       proof.presentation.requestGeneration !== proof.source.sourceStamp.requestGeneration) { void this.mutate().catch(() => {}); return; }
-    this.alias = proof; this.aliasSnapshot = e.snapshot;
-    this.publishEvidence(e);
+    if (this.alias === proof) return;
+    try {
+      const changed = !same(this.alias?.presentation, proof.presentation);
+      if (changed) {
+        // Also fences a caller whose result resolved just before ACK but has not resumed in registry.complete.
+        this.epoch++; this.completion.active?.launch.session.cancelCompletions();
+        for (const l of [this.completion, this.diagnostics]) if (l.active && !l.active.invalid) l.active.epoch = this.epoch;
+      }
+      if (this.options.factory.acknowledge) {
+        const snapshot = this.captured();
+        for (const l of [this.completion, this.diagnostics]) {
+          const s = l.active;
+          if (!s || s.invalid || s.retiring) continue;
+          this.options.factory.acknowledge(this.scope!, snapshot, s.launch, proof, this.options.ackLedger);
+          if (l.phase === 'completion') s.snapshot = snapshot; // immutable diagnostic slot/evidence NEVER rebound
+        }
+      }
+      this.alias = proof; this.aliasSnapshot = e.snapshot;
+      this.publishEvidence(e);
+    } catch { void this.mutate().catch(() => {}); }
   }
   private checkGeneration(g: ImmutableDiagnosticGeneration | null, s: Slot): void {
     if (!g || g.policy !== 'IMMUTABLE_WHOLE_PROJECT' || g.maxAnalysisMs !== LANGUAGE_LIMITS.diagnosticAnalysisMs ||

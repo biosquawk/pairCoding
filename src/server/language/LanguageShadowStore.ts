@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { constants, closeSync, chmodSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
@@ -240,6 +241,30 @@ export class LanguageShadowStore {
     const record = this.records.get(shadow.launchId);
     if (!record || record.shadow !== shadow || record.poisoned) throw new Error('Unknown/stale/poisoned language shadow');
     assertPrivateLanguageDirectory(dirname(shadow.workspaceDirectory)); return record;
+  }
+  /** Read-only ACK handoff check: actual complete disk/cache inventory still yields the EXACT original
+   * provider input, except this one acknowledged overlay stamp. No writes/manifest rewrite/new generation.
+   * The factory separately binds the before/after full revisions and all unaffected raw source descriptors.
+   */
+  assertAcknowledgedSnapshot(shadow: LanguageShadow, authority: LanguageSnapshotAuthority,
+    previous: Readonly<DocumentStamp>, presentation: Readonly<DocumentStamp>): void {
+    this.assertIntegrity(shadow);
+    if (previous.path !== presentation.path || !shadow.manifest.overlays.some(s => isDeepStrictEqual(s, previous)))
+      throw new Error('ACK not in original private shadow');
+    let prior = '';
+    for (let i = 0; i < 2; i++) {
+      const captured = this.capture(authority), { manifest } = this.plan(captured.snapshot, captured.source, captured.deps, shadow.launchId, shadow.phase);
+      const saved = captured.source.contents.get(previous.path);
+      if (!saved || this.codec.contentSha256(saved.toString('utf8')) !== presentation.contentSha256)
+        throw new Error('ACK disk bytes not the committed model');
+      const expected = { ...shadow.manifest, leaseId: captured.snapshot.leaseId,
+        sourceInventorySha256: manifest.sourceInventorySha256,
+        overlays: shadow.manifest.overlays.map(s => s.path === previous.path ? presentation : s) };
+      // Property order of a coordinator's stamps is not authority; compare canonical structural values.
+      if (!isDeepStrictEqual(manifest, expected) || i > 0 && prior !== json(manifest)) throw new Error('ACK changed effective whole-project input');
+      prior = json(manifest); this.current(authority, captured.lease);
+    }
+    this.assertIntegrity(shadow);
   }
   assertIntegrity(shadow: LanguageShadow): void {
     const record = this.record(shadow);

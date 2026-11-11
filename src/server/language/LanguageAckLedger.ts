@@ -149,6 +149,15 @@ export class LanguageAckLedger {
         same(checked.current.stamp,proof.presentation) && same(c.source,proof.source);
     } catch { return false; }
   }
+  /** Private SAME-issuer transition readback. Neither a cloned proof nor revisions supplied by a caller
+   * authorize a factory lease handoff. Revalidated against the actual current commit on EVERY read.
+   */
+  readVerifiedTransition(proof: VerifiedLanguageAck): Readonly<{ beforeProjectRevision: string; afterProjectRevision: string }> | null {
+    if (!this.isVerified(proof)) return null;
+    const c = this.proofs.get(proof)!;
+    const checked = this.verified(c, proof.saveReceiptId);
+    return checked ? freeze({ beforeProjectRevision: c.current.projectRevision, afterProjectRevision: checked.commit.afterProjectRevision }) : null;
+  }
   /** Call synchronously on disconnect/reconnect/config/project/provider/shadow/control invalidation. */
   retirePeer(peerId: string): void {
     for(const [k,d] of this.documents) if(JSON.parse(k)[0]===peerId) { this.documentBytes-=Buffer.byteLength(d.content);this.documents.delete(k); }

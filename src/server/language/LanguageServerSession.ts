@@ -1,3 +1,5 @@
+import type { LanguageAckLedger } from './LanguageAckLedger';
+import type { VerifiedLanguageAck } from './ports';
 import { isDeepStrictEqual } from 'node:util';
 import type { AnalysisSource, CompleteRequest, CompleteResult, DiagnosticsResult, DocumentStamp, LanguageState, OpenOrChange } from '../../shared/language-v2';
 import { LANGUAGE_LIMITS } from '../../shared/language-v2';
@@ -16,6 +18,8 @@ export interface LanguageServerSessionOptions {
   assertCurrent(shadow: LanguageShadow): void;
   /** Pinned backend provider settings (offline imports/dependency layout), NEVER client/LSP authority. */
   settings: Readonly<Record<string, unknown>>;
+  /** Internal factory composition identity, never supplied by a wire ACK. */
+  ackLedger?: LanguageAckLedger;
   /** Canonical trusted imported Java task/project URI, NOT a client-provided path. */
   expectedProjectUri?: string;
   onState?: (state: LanguageState, problem: string | null) => void;
@@ -44,6 +48,7 @@ export class LanguageServerSession {
   private earlyDiagnostics = new Map<string, DiagnosticsResult>();
   private queue: Promise<void> = Promise.resolve();
   private documents = new Map<string, SentDocument>();
+  private presentations = new Map<string, { previous: Readonly<DocumentStamp>; stamp: Readonly<DocumentStamp> }>();
   private versions = new Map<string, number>();
   private requests = new Map<string, SentRequest>();
   private seenRequests = new Set<string>();
@@ -80,7 +85,7 @@ export class LanguageServerSession {
   /** Synchronous revoke BEFORE any await. Unknown Stop keeps this SAME actual process owner for reconcile. */
   invalidate(problem = 'Language source/scope changed'): void {
     if (!this.accepting) return;
-    this.accepting = false; this.initialized = false; this.cancelAll(); this.documents.clear();
+    this.accepting = false; this.initialized = false; this.cancelAll(); this.documents.clear(); this.presentations.clear();
     if (this.analysisTimer) clearTimeout(this.analysisTimer); this.analysisTimer = null;
     this.unsubscribe?.(); this.unsubscribe = null; this.unsubscribeClosed?.(); this.unsubscribeClosed = null; this.earlyDiagnostics.clear();
     this.rpc?.close(new Error(problem)); this.stateTo('FAILED', problem);
@@ -157,6 +162,21 @@ export class LanguageServerSession {
       throw new Error('Cannot replace immutable/foreign language shadow');
     this.options.assertCurrent(next); this.cancelAll(); this.shadow = next;
   }
+  /** Internal factory handoff only, after its SAME-issuer before/after whole-project check. Retains every
+   * sent document/source/provenance and returned result unchanged. Only NEW requests see presentation.
+   */
+  acknowledgePresentation(proof: VerifiedLanguageAck, ledger: LanguageAckLedger): void {
+    if (this.options.ackLedger !== ledger || this.shadow.phase !== 'completion' || !ledger.isVerified(proof)) throw new Error('Unverified completion presentation');
+    const original = this.shadow.manifest.overlays.find(s => s.path === proof.previous.path);
+    if (!original || !same(original, proof.previous)) throw new Error('ACK not in sent completion shadow');
+    this.current();
+    if (same(this.presentations.get(original.path)?.stamp, proof.presentation)) return;
+    this.cancelAll(); this.presentations.set(original.path, freeze(copy({ previous: proof.previous, stamp: proof.presentation })));
+  }
+  private presentation(doc: SentDocument): Readonly<DocumentStamp> {
+    const entry = this.presentations.get(doc.document.stamp.path);
+    return entry && same(entry.previous, doc.document.stamp) ? entry.stamp : doc.document.stamp;
+  }
   private enqueue<T>(operation: () => Promise<T>): Promise<T> {
     const result = this.queue.then(operation); this.queue = result.then(() => {}, () => {}); return result;
   }
@@ -187,7 +207,10 @@ export class LanguageServerSession {
           : { kind: 'VERSIONED_PUSH', lspVersion: version, inputManifestSha256: this.shadow.inputManifestSha256 } });
         const sent: SentDocument = freeze({ document: captured, uri, lspVersion: version, source });
         const sentHook = () => {
-          this.current(); this.versions.set(path, version); this.documents.set(path, sent);
+          this.current();
+          const presentation = this.presentations.get(path);
+          if (presentation && !same(presentation.previous, captured.stamp)) this.presentations.delete(path);
+          this.versions.set(path, version); this.documents.set(path, sent);
           this.options.onSourceSent?.(captured.stamp, source);
         };
         if (change) await this.rpc.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text: captured.content }] }, sentHook);
@@ -202,8 +225,8 @@ export class LanguageServerSession {
     return this.enqueue(async () => {
       try {
         this.current(); const sent = this.documents.get(captured.path);
-        if (!sent || !same(sent.document.stamp, captured) || !this.rpc) throw new Error('Close does not match exact sent model');
-        await this.rpc.notify('textDocument/didClose', { textDocument: { uri: sent.uri } }, () => { this.current(); this.documents.delete(captured.path); });
+        if (!sent || !same(this.presentation(sent), captured) || !this.rpc) throw new Error('Close does not match exact sent model');
+        await this.rpc.notify('textDocument/didClose', { textDocument: { uri: sent.uri } }, () => { this.current(); this.documents.delete(captured.path); this.presentations.delete(captured.path); });
         this.current();
       } catch (error) { this.failure(error); throw error; }
     });
@@ -216,7 +239,7 @@ export class LanguageServerSession {
     await this.queue; this.current();
     if (revision !== this.documentRevision || this.cancelledRequests.has(request.requestId) || signal?.aborted) throw new Error('Cancelled completion before send');
     const doc = this.documents.get(request.stamp.path);
-    if (!this.initialized || !this.rpc || !doc || !same(doc.document.stamp, request.stamp) ||
+    if (!this.initialized || !this.rpc || !doc || !same(this.presentation(doc), request.stamp) ||
       this.shadow.manifest.identity.provider === 'jdt' && !this.started) throw new Error('Completion source not sent/semantic server still indexing');
     this.validateDocument(doc.document);
     // Validate cursor against exact captured normalized UTF16 content before ANY RPC request.
