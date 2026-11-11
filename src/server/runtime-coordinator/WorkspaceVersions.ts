@@ -25,7 +25,8 @@ export class DurableWorkspaceVersions {
   private state: State;
   private poisoned = false;
   private closed = false;
-  constructor(directory: string, projectId: string, root: string, initial: VersionSnapshot) {
+  private freshDeferredBaseline = false;
+  constructor(directory: string, projectId: string, root: string, initial: VersionSnapshot, options: { deferDiskReconcile?: true } = {}) {
     privateDirectory(directory);
     this.file = path.join(directory, 'versions.json');
     const leasePath = path.join(directory, 'lease.lock');
@@ -43,29 +44,40 @@ export class DurableWorkspaceVersions {
         if (envelope.sha256 !== sha256(canonical(this.state))) throw Error('Workspace version integrity failure');
         this.validate(this.state);
         if (this.state.projectId !== projectId || this.state.root !== root) throw Error('Workspace version scope mismatch');
-        // A crash/external edit before the last acknowledgement cannot reuse an old version.
-        const disk = new Map(initial.files.map(f => [f.path, f.stamp]));
-        const previous = new Map(this.state.files.map(f => [f.path, f]));
-        const files: VersionSnapshot['files'] = [];
-        let workspaceVersion = this.state.workspaceVersion;
-        for (const name of new Set([...disk.keys(), ...previous.keys()])) {
-          const old = previous.get(name), stamp = disk.get(name) ?? null;
-          if (!old && stamp === null) continue;
-          if (old?.stamp === stamp) files.push(copy(old));
-          else { files.push({ path: name, stamp, version: (old?.version ?? 0) + 1 }); workspaceVersion++; }
-        }
-        // Pending settings retain the old version until operation-specific recovery. Ordinary
-        // disk observations are still reconciled, but cannot settle/guess the settings result.
-        if (canonical(files) !== canonical(this.state.files) || workspaceVersion !== this.state.workspaceVersion)
-          this.publish({ ...this.state, files, workspaceVersion });
+        if (!options.deferDiskReconcile) this.reconcileDisk(initial);
       } else {
         // The stable kernel lease is never unlinked. Its prior presence with missing state is
         // initialization uncertainty/lost persistence, NOT a new workspace/version-zero grant.
         if (priorOwnership) throw Error('Missing prior workspace versions; retain state and recover');
         this.state = { ...copy(initial), schemaVersion: 1, projectId, root, pending: null, outcomes: [] };
         this.validate(this.state); createRecord(this.file, this.encoded(this.state));
+        this.freshDeferredBaseline = options.deferDiskReconcile === true;
       }
     } catch (e) { this.lease.close(); throw e; }
+  }
+  /** Startup-only actual disk reconciliation AFTER snapshot recovery, under the SAME kernel owner.
+   * Pending settings outcomes are preserved; source observation is not a settings outcome proof.
+   */
+  reconcileDisk(initial: VersionSnapshot): VersionSnapshot {
+    this.assertCurrent();
+    if (this.freshDeferredBaseline) {
+      this.publish({ ...this.state, ...copy(initial) });
+      this.freshDeferredBaseline = false;
+    } else {
+      const disk = new Map(initial.files.map(f => [f.path, f.stamp]));
+      const previous = new Map(this.state.files.map(f => [f.path, f]));
+      const files: VersionSnapshot['files'] = [];
+      let workspaceVersion = this.state.workspaceVersion;
+      for (const name of new Set([...disk.keys(), ...previous.keys()])) {
+        const old = previous.get(name), stamp = disk.get(name) ?? null;
+        if (!old && stamp === null) continue;
+        if (old?.stamp === stamp) files.push(copy(old));
+        else { files.push({ path: name, stamp, version: (old?.version ?? 0) + 1 }); workspaceVersion++; }
+      }
+      if (canonical(files) !== canonical(this.state.files) || workspaceVersion !== this.state.workspaceVersion)
+        this.publish({ ...this.state, files, workspaceVersion });
+    }
+    return this.snapshot();
   }
   private validate(s: State): void {
     if (!s || s.schemaVersion !== 1 || typeof s.projectId !== 'string' || typeof s.root !== 'string' || !path.isAbsolute(s.root) ||

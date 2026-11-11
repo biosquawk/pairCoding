@@ -47,15 +47,18 @@ export class WorkspaceService extends EventEmitter {
   private versions = new Map<string, number>();
   private directories: string[] = [];
   private watchers = new Map<string, fs.FSWatcher>();
-  private poll: ReturnType<typeof setInterval>;
+  private poll: ReturnType<typeof setInterval> | null = null;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
   private backgroundScan: { steps: Generator<void, void, void>; immediate: ReturnType<typeof setImmediate> | null } | null = null;
 
   private versionStore: DurableWorkspaceVersions | null = null;
   private versionFailure = false;
-  constructor(rootPath: string, dataDir?: string, options: { durableVersions?: true } = {}) {
+  private startupSnapshotRecovery = false;
+  private observationDeferred = false;
+  constructor(rootPath: string, dataDir?: string, options: { durableVersions?: true; recoverSnapshotsBeforeVersions?: true; deferObservation?: true } = {}) {
     super();
+    this.observationDeferred = options.deferObservation === true;
     if (typeof rootPath !== 'string' || !rootPath || rootPath.includes('\0')) {
       throw new AppError(400, 'INVALID_ROOT', 'Choose an existing workspace directory.');
     }
@@ -84,25 +87,45 @@ export class WorkspaceService extends EventEmitter {
     catch { this.recoveryRequired = true; } // Gate validates/reports the exact cause before any mutation.
     this.settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md',
       runProfiles: [], aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'] };
-    if (!this.recoveryRequired) this.scan(true);
+    if (options.recoverSnapshotsBeforeVersions && !options.durableVersions)
+      throw new AppError(400, 'DURABLE_VERSIONS_REQUIRED', 'Ordered V2 startup requires durable workspace ownership.');
+    if (!this.recoveryRequired && !options.recoverSnapshotsBeforeVersions) this.scan(true);
     if (options.durableVersions === true) {
-      if (this.recoveryRequired) throw snapshotFailure('Recover snapshots before enabling durable V2 versions.');
+      if (this.recoveryRequired && !options.recoverSnapshotsBeforeVersions) throw snapshotFailure('Recover snapshots before enabling durable V2 versions.');
       this.safeDataDirectory();
-      this.versionStore = new DurableWorkspaceVersions(path.join(this.dataDir, 'workspace-v2'), this.projectId, this.rootPath, this.versionSnapshot());
-      const recovered = this.versionStore.snapshot();
-      this.workspaceVersion = recovered.workspaceVersion;
-      this.versions = new Map(recovered.files.map(f => [f.path, f.version]));
-      for (const file of recovered.files) {
-        const current = this.records.get(file.path);
-        if (current) this.records.set(file.path, this.track(file.path, current, file.version));
-      }
+      this.versionStore = new DurableWorkspaceVersions(path.join(this.dataDir, 'workspace-v2'), this.projectId, this.rootPath,
+        this.versionSnapshot(), options.recoverSnapshotsBeforeVersions ? { deferDiskReconcile: true } : {});
+      try {
+        if (options.recoverSnapshotsBeforeVersions) {
+          // Own the durable root BEFORE snapshot recovery can affect public paths. No watcher,
+          // session, source scan or settings route may observe a partial recovered tree.
+          this.startupSnapshotRecovery = true;
+          try { this._recoverSnapshots(); } finally { this.startupSnapshotRecovery = false; }
+          this.scan(true);
+          this.versionStore.reconcileDisk(this.versionSnapshot());
+        }
+        const recovered = this.versionStore.snapshot();
+        this.workspaceVersion = recovered.workspaceVersion;
+        this.versions = new Map(recovered.files.map(f => [f.path, f.version]));
+        for (const file of recovered.files) {
+          const current = this.records.get(file.path);
+          if (current) this.records.set(file.path, this.track(file.path, current, file.version));
+        }
+      } catch (error) { this.versionStore.close(); throw error; }
     }
-    // Watch each real directory without following symlinks; polling covers missed events.
+    if (!options.deferObservation) this._startObservation();
+    if (!openWorkspaces.has(this.rootPath)) openWorkspaces.set(this.rootPath, new Set());
+    openWorkspaces.get(this.rootPath)!.add(this);
+  }
+
+  /** @internal V2 composition calls this ONLY after settings recovery, before publishing its core. */
+  _startObservation(): void {
+    if (this.closed) throw new AppError(503, 'WORKSPACE_CLOSED', 'Workspace is closed.');
+    if (this.poll) return;
+    this.observationDeferred = false;
     this.refreshWatchers();
     this.poll = setInterval(() => this.watchScan(), 500);
     this.poll.unref();
-    if (!openWorkspaces.has(this.rootPath)) openWorkspaces.set(this.rootPath, new Set());
-    openWorkspaces.get(this.rootPath)!.add(this);
   }
 
   /** All API paths are relative POSIX; use this before *every* filesystem effect. */
@@ -361,6 +384,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   private refreshWatchers(): void {
+    if (this.observationDeferred) return;
     const required = new Set(['', ...this.directories]);
     for (const [dir, watcher] of this.watchers) if (!required.has(dir)) { watcher.close(); this.watchers.delete(dir); }
     for (const relative of required) {
@@ -868,7 +892,7 @@ export class WorkspaceService extends EventEmitter {
     try {
       this.snapshotJournal.recover();
       this.recoveryRequired = false;
-      this.scanInternal();
+      if (!this.startupSnapshotRecovery) this.scanInternal();
     } catch (error) {
       this.recoveryRequired = true;
       const failure = snapshotFailure(`Recovery required in ${this.snapshotJournal.base}. Preserve public paths and copy recovery material to NEW names before manual resolution.`);
@@ -988,7 +1012,7 @@ export class WorkspaceService extends EventEmitter {
     const instances = openWorkspaces.get(this.rootPath);
     instances?.delete(this);
     if (!instances?.size) openWorkspaces.delete(this.rootPath);
-    clearInterval(this.poll);
+    if (this.poll) clearInterval(this.poll);
     if (this.scanTimer) clearTimeout(this.scanTimer);
     for (const watcher of this.watchers.values()) watcher.close();
     this.watchers.clear();
