@@ -113,7 +113,7 @@ test('REAL REST oversize settings outcome → safe503 survives public projection
 test('REAL REST finish oversize after effect → LiveBackend UNKNOWN then matching GET-only reconciliation, one snapshot/POST',async t=>{
   const f=await fixture(t),p=new Peer(f as any);await p.connect();
   // Real student chat produces >1KiB of report evidence IDs without faking the report generator or runner.
-  for(let n=0;n<40;n++)assert.equal((await p.ack(p.send('CHAT_MESSAGE',{text:`Independent evidence ${n}`}))).payload.status,'OK');
+  for(let n=0;n<40;n++)assert.equal((await p.ack(p.send('CHAT_MESSAGE',{text:`Independent evidence ${n}`,path:null,documentVersion:null,selection:null}))).payload.status,'OK');
   const {c,release}=f.client(true);await c.connect();await until(()=>!c.getState().isOffline,'HELLO');
   await c.finishSession('COMPLETED');
   const first=f.requests.find(r=>r.path==='/api/session/finish')!;assert.equal(first.status,503);publicFailure(first.value,'COMMAND_RESULT_UNAVAILABLE',first.body.requestId);

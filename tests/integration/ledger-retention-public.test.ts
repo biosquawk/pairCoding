@@ -112,6 +112,7 @@ test('ledger VIEW_CHANGED delayed duplicate cannot revert the newer view',async 
 test('ledger real budget lifecycle: PING bypasses history, adoption resets session capacity but not process-lived open capacity',async t=>{
   const dirs=await workspaceFiles(t,{'solution.js':'start\n'}),token='budget-'+id(),clientId=id();
   const budget={maxEntries:2,maxBytes:65536,maxPending:2,maxOutcomeBytes:8192,tempRoot:path.join(dirs.base,'journals')};
+  await fs.mkdir(budget.tempRoot); // Healthy-storage precondition; fault injection is covered separately.
   const app=createPairCoachServer({...dirs,port:0,token,enableCoach:false,ledgerOptions:budget,openLedgerOptions:budget} as any);
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,peers=new Set<{close():void}>();
   t.after(async()=>{for(const p of peers)p.close();try{await app.close();}finally{await dirs.cleanup();}});
