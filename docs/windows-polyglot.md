@@ -132,9 +132,14 @@ Po `pom.xml`, `requirements.txt`, `package.json` lub lock/config zmienionym wzgl
 przygotowanego projektu wykonaj nowe jawne prepare; zwykła edycja źródła nie zmienia zależności.
 Run/Test używają później wyłącznie przypiętych lokalnych obrazów `--pull=never` i zarządzanych cache.
 
-**Przekazanie wyniku do aplikacji: wstępny freeze P1_4, JESZCZE NIE ZINTEGROWANY.**
-Poniższe nazwy/statusy pochodzą z wstępnego kontraktu CLI; ich działanie musi jeszcze
-potwierdzić frozen źródło CLI i faktyczny konsument backendu. Nie jest to gotowe wydanie.
+**Przekazanie wyniku do aplikacji: zamrożony producent P1_4, JESZCZE NIE ZINTEGROWANY.**
+Źródło publicznego CLI jest zamrożone; poniższe nazwy/statusy odpowiadają jego kodowi.
+Celowany smoke rzeczywistego CLI na izolowanej źródłowej kopii bez Git w WSL potwierdził
+`PLAN_ONLY` bez zapisu i procesów potomnych (7 profili oraz Spring21/27), a także odmowę
+fragmentu settings, obcej flagi i istniejącego outputu. Używał istniejących zależności,
+nie świeżej instalacji. Nie wykonywał `--execute`, npm/PowerShell ani backendu.
+Faktyczny konsument i zintegrowany pakiet nadal wymagają osobnego potwierdzenia;
+nie jest to gotowe wydanie.
 Execute zwraca `PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE` albo `NOTREADY`, nigdy
 status końcowy `READY`. Sam exit0, receipt lub wygenerowany config nie dowodzi gotowości.
 Przy `NOTREADY` zachowaj output/diagnostykę; nie dopisuj locka i nie ponawiaj na ślepo.
@@ -171,9 +176,11 @@ rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty
 CLI czyta rzeczywiste pełne SettingsV2 i wspólne task.workingDirectory, a backend ponownie
 sprawdza aktualny stan; staging/receipt CLI nie zastępuje WriteGate ani aktualnego źródła.
 
-W tej rewizji źródło CLI nadal jest osobną niezakończoną dostawą i konsument nie jest
-zintegrowany. Publiczny plan-only/Gitless smoke pozostaje NOT_RUN; wcześniejsza odmowa
-pakietera na brakującym CLI nie stała się PASS. Kandydat **nie spełnia całego AC112**.
+Ta zmiana dokumentacji/pakietera nie importuje osobnego źródła CLI ani konsumenta.
+Celowany plan-only/Gitless smoke producenta to PASS wyłącznie dla izolowanej kopii
+łączącej zamrożone źródła — nie dowód zintegrowanego backendu ani świeżej paczki.
+Wcześniejsza odmowa pakietera na brakującym CLI pozostaje historycznym FAIL; nie została
+przepisana na PASS. Konsument nadal nie jest potwierdzony; kandydat **nie spełnia całego AC112**.
 Nie obchodź odmowy przez ręczne docker run, receipt-presence ani fikcyjny lock.
 Offline proof pozostaje osobno wymagany po prepare; samo pobranie obrazów i zależności
 lub tiny tool probe go nie zastępuje.
