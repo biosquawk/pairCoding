@@ -2,6 +2,7 @@ import type { Document, Snapshot } from '../shared/protocol';
 import { WorkspaceService } from './WorkspaceService';
 import { SessionController } from './SessionController';
 import { AppError } from './errors';
+import type { AcknowledgedRunInput, InputFile } from './execution/ports';
 
 export type MutationAuth = { clientId: string; sessionId: string; controlEpoch: number; actor: 'STUDENT' | 'COACH' };
 export type FileMutation = MutationAuth & { operation: 'CREATE' | 'RENAME' | 'DELETE'; path: string;
@@ -51,6 +52,47 @@ export class WriteGate {
     return this.workspace._withMutation(() => this.writeAuthorized(input));
   }
 
+  /** Ordered server admission path, including writes queued before a Run capture. */
+  writeAsync(input: MutationAuth & { path: string; baseVersion: number; content: string }): Promise<Document> {
+    const accepted = structuredClone(input);
+    return this.workspace._withQueuedMutation(async () => this.writeAuthorized(accepted));
+  }
+
+  /** Frozen copy-helper signature; implementation stays executor-owned and is injected until reviewed. */
+  captureRun(input: MutationAuth & { runId: string; profileId: string; configurationGeneration: string; expectedWorkspaceVersion: number;
+      runDirectory: string }, collaborators: {
+        inventory(root: string): Promise<readonly { path: string; sha256: string; bytes: number }[]>;
+        copy(options: { workspaceDirectory: string; runDirectory: string; runId: string; profileId: string; configurationGeneration: string;
+          acknowledgement: { projectId: string; sessionId: string; workspaceVersion: number; files: readonly InputFile[]; assertCurrent(): Promise<void> } }): Promise<AcknowledgedRunInput>;
+      }): Promise<AcknowledgedRunInput> {
+    const accepted = structuredClone(input);
+    return this.workspace._withQueuedMutation(async () => {
+      let held = true;
+      const assertLease = () => {
+        if (!held) throw new AppError(409, 'RUN_INPUT_CHANGED', 'Immutable input lease has already been released.');
+        this.authorize(accepted);
+        if (accepted.actor !== 'STUDENT') throw new AppError(403, 'RUN_FORBIDDEN', 'Only student authority may capture Run input.');
+        if (this.workspace.workspaceVersion !== accepted.expectedWorkspaceVersion) throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Run requires the current settled workspace.');
+      };
+      try {
+        assertLease();
+        const capture = await this.workspace._settledRunInput(collaborators.inventory, assertLease);
+        const acknowledgement = Object.freeze({ projectId: this.workspace.projectId, sessionId: accepted.sessionId,
+          workspaceVersion: capture.workspaceVersion, files: capture.files, assertCurrent: capture.assertCurrent });
+        await acknowledgement.assertCurrent();
+        const copied = await collaborators.copy({ workspaceDirectory: this.workspace.rootPath, runDirectory: accepted.runDirectory,
+          runId: accepted.runId, profileId: accepted.profileId, configurationGeneration: accepted.configurationGeneration, acknowledgement });
+        await acknowledgement.assertCurrent();
+        // A helper result is not authority to substitute another run/scope/inventory.
+        if (copied.projectId !== acknowledgement.projectId || copied.sessionId !== acknowledgement.sessionId ||
+            copied.identity.runId !== accepted.runId || copied.identity.profileId !== accepted.profileId ||
+            copied.identity.configurationGeneration !== accepted.configurationGeneration || copied.identity.workspaceVersion !== capture.workspaceVersion ||
+            JSON.stringify(copied.files) !== JSON.stringify(capture.files)) throw new AppError(409, 'RUN_INPUT_CHANGED', 'Immutable copy did not retain the captured authority.');
+        return copied;
+      } finally { held = false; }
+    });
+  }
+
   private writeAuthorized(input: MutationAuth & { path: string; baseVersion: number; content: string }): Document {
     this.authorize(input);
     this.workspace._safePath(input.path);
@@ -72,6 +114,11 @@ export class WriteGate {
 
   mutate(input: FileMutation): void {
     return this.workspace._withMutation(() => this.mutateAuthorized(input));
+  }
+
+  mutateAsync(input: FileMutation): Promise<void> {
+    const accepted = structuredClone(input);
+    return this.workspace._withQueuedMutation(async () => this.mutateAuthorized(accepted));
   }
 
   private mutateAuthorized(input: FileMutation): void {

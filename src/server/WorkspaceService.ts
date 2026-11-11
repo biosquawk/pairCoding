@@ -9,9 +9,12 @@ import { AppError } from './errors';
 import { SnapshotStorage, type FrozenSnapshot, snapshotAllowed, identity, snapshotFailure } from './SnapshotStorage';
 import { SnapshotJournal, type RestoreBefore } from './SnapshotJournal';
 import { LanguageFeatureRegistry } from './LanguageFeatureRegistry';
+import { SerialQueue } from './runtime-coordinator/storage';
+import type { InputFile } from './execution/ports';
 
 const activeRoots = new Set<string>(); // guard shared by all instances, held across async operations
 const activeAsyncRoots = new Set<string>();
+const queuedRoots = new Map<string, number>(); // sync admission fence, including before the first queue microtask
 const openWorkspaces = new Map<string, Set<WorkspaceService>>();
 const MAX_BYTES = 1048576;
 const MAX_FILES = 1000;
@@ -36,6 +39,7 @@ export class WorkspaceService extends EventEmitter {
   private readonly snapshotStore: SnapshotStorage;
   private readonly snapshotJournal: SnapshotJournal;
   private mutationBusy = false;
+  private readonly mutationQueue = new SerialQueue();
   private recoveryRequired = false;
   private records = new Map<string, Tracked>();
   private versions = new Map<string, number>();
@@ -378,7 +382,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   updateSettings(settings: Settings): void {
-    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
+    if (this.mutationBusy || activeRoots.has(this.rootPath) || queuedRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
     this._assertWritable();
     if (!settings || !['IMPLEMENTATION', 'CODE_REVIEW'].includes(settings.taskMode) || typeof settings.aiConsent !== 'boolean' ||
         !Array.isArray(settings.runProfiles) || settings.runProfiles.length > 2 || !Array.isArray(settings.contextPatterns) ||
@@ -727,15 +731,63 @@ export class WorkspaceService extends EventEmitter {
 
   /** @internal Shared by every gate referencing this workspace; listeners cannot reenter a mutation. */
   _withMutation<T>(action: () => T): T {
-    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another synchronous workspace operation is in progress.');
+    if (this.mutationBusy || activeRoots.has(this.rootPath) || queuedRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another synchronous workspace operation is in progress.');
     this._assertWritable();
     this.mutationBusy = true; activeRoots.add(this.rootPath);
     try { return action(); } finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); }
   }
 
+  /** Admission order is shared by all WriteGate instances. Sync callers retain BUSY refusal. */
+  _withQueuedMutation<T>(action: () => Promise<T>): Promise<T> {
+    queuedRoots.set(this.rootPath, (queuedRoots.get(this.rootPath) ?? 0) + 1);
+    return this.mutationQueue.run(() => {
+      const remaining = queuedRoots.get(this.rootPath)! - 1;
+      if (remaining) queuedRoots.set(this.rootPath, remaining); else queuedRoots.delete(this.rootPath);
+      return this._withMutationAsync(action, true);
+    });
+  }
+
+  /** Internal: caller retains this workspace's mutation lease through immutable copy + both fences.
+   * Inventory is the executor-owned bounded raw inventory, injected rather than duplicated here.
+   * Document versions come from actual tracked workspace records, never the client or filesystem mtime.
+   */
+  async _settledRunInput(inventory: (root: string) => Promise<readonly { path: string; sha256: string; bytes: number }[]>,
+      assertLease: () => void): Promise<{ workspaceVersion: number; files: readonly InputFile[];
+        normalizedContentHashes: Readonly<Record<string, string | null>>; assertCurrent(): Promise<void> }> {
+    assertLease();
+    this.scan();
+    const before = this.workspaceVersion;
+    const actual = await inventory(this.rootPath);
+    assertLease(); this.scan();
+    if (this.workspaceVersion !== before) throw new AppError(409, 'RUN_INPUT_CHANGED', 'Workspace changed during input capture.');
+    const paths = new Set<string>(), normalized: Record<string, string | null> = {};
+    const files = actual.map(file => {
+      this._safePath(file.path);
+      const record = this.records.get(file.path);
+      if (paths.has(file.path) || !record || !Number.isSafeInteger(record.version) || record.version < 1 ||
+          !/^[a-f0-9]{64}$/.test(file.sha256) || !Number.isSafeInteger(file.bytes) || file.bytes < 0 ||
+          (record.raw !== null && (hash(record.raw) !== file.sha256 || record.raw.length !== file.bytes))) {
+        throw new AppError(409, 'RUN_INPUT_CHANGED', 'Inventory does not match current authoritative document records.');
+      }
+      paths.add(file.path); normalized[file.path] = record.document?.contentHash ?? null;
+      return Object.freeze({ ...file, documentVersion: record.version });
+    }).sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+    const original = JSON.stringify(files.map(({path,sha256,bytes}) => ({path,sha256,bytes})));
+    return { workspaceVersion: before, files: Object.freeze(files), normalizedContentHashes: Object.freeze(normalized),
+      assertCurrent: async () => {
+        assertLease(); this.scan();
+        const current = await inventory(this.rootPath);
+        assertLease(); this.scan();
+        const sorted = [...current].sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+        if (this.workspaceVersion !== before || JSON.stringify(sorted.map(({path,sha256,bytes}) => ({path,sha256,bytes}))) !== original ||
+            files.some(f => this.records.get(f.path)?.version !== f.documentVersion)) throw new AppError(409, 'RUN_INPUT_CHANGED', 'Source/dependency inventory or document authority changed.');
+      },
+    };
+  }
+
   /** Async critical sections MUST retain both guards until terminal commit/rollback. */
-  async _withMutationAsync<T>(action: () => Promise<T>): Promise<T> {
-    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
+  async _withMutationAsync<T>(action: () => Promise<T>, admitted = false): Promise<T> {
+    if (this.mutationBusy || activeRoots.has(this.rootPath) || (!admitted && queuedRoots.has(this.rootPath))) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
     this._assertWritable();
     this.cancelRootBackgroundScans();
     this.mutationBusy = true; activeRoots.add(this.rootPath); activeAsyncRoots.add(this.rootPath);
@@ -758,7 +810,7 @@ export class WorkspaceService extends EventEmitter {
 
   /** @internal Called only by the gate constructor, before exposing normal mutation authority. */
   _recoverSnapshots(): void {
-    if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Recovery cannot reenter an active workspace operation.');
+    if (this.mutationBusy || activeRoots.has(this.rootPath) || queuedRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Recovery cannot reenter an active workspace operation.');
     this.cancelRootBackgroundScans();
     this.mutationBusy = true; activeRoots.add(this.rootPath);
     try {
