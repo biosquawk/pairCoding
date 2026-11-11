@@ -19,12 +19,12 @@ try {
   const b=bundle();
   await page.addInitScript('globalThis.__name = (fn) => fn;');
   await page.addInitScript(data=>{
-    let seq=0;const snapshot=data;
+    let seq=0;const snapshot=data;(window as any).cutoverWire=[];
     const sendToClient=(socket:any,type:string,payload:unknown)=>socket.onmessage?.({data:JSON.stringify({protocolVersion:'3.0',messageId:`server${++seq}`,sessionId:'s1',seq,type,payload})});
     class Socket {
       readyState=0;onopen:any;onmessage:any;onerror:any;onclose:any;
       constructor(){queueMicrotask(()=>{this.readyState=1;this.onopen?.({});});}
-      send(raw:string){const m=JSON.parse(raw);if(m.type==='HELLO')queueMicrotask(()=>sendToClient(this,'SESSION_SNAPSHOT',snapshot));
+      send(raw:string){const m=JSON.parse(raw);(window as any).cutoverWire.push(m);if(m.type==='HELLO')queueMicrotask(()=>sendToClient(this,'SESSION_SNAPSHOT',snapshot));
         if(m.type==='CODE_CHANGED') {snapshot.project.workspaceVersion++;snapshot.session.workspaceVersion++;snapshot.activeDocument!.content=m.payload.content;snapshot.activeDocument!.version++;snapshot.project.files[0].version=snapshot.activeDocument!.version;
           queueMicrotask(()=>sendToClient(this,'ACK',{replyTo:m.messageId,status:'OK',documentVersion:snapshot.activeDocument!.version,workspaceVersion:snapshot.project.workspaceVersion,controlEpoch:0,error:null}));}
         if(m.type==='VIEW_CHANGED')queueMicrotask(()=>sendToClient(this,'ACK',{replyTo:m.messageId,status:'OK',documentVersion:m.payload.documentVersion,workspaceVersion:snapshot.project.workspaceVersion,controlEpoch:0,error:null}));
@@ -62,6 +62,10 @@ try {
   const rect=await dialog.boundingBox();assert.ok(rect&&rect.x>=0&&rect.x+rect.width<=390&&rect.y>=0&&rect.y+rect.height<=844);assert.equal(await dialog.evaluate(e=>e.scrollWidth<=e.clientWidth),true);
   await dialog.getByLabel('Ścieżki testów').fill('draft/mobile.txt');await page.screenshot({path:path.join(output,'mobile-fence-draft-390x844.png')});await page.keyboard.press('Escape');
   const editor=page.locator('.monaco-editor textarea').first();await editor.focus();await page.keyboard.press('Control+End');await page.keyboard.type(' manual');
+  await page.waitForFunction(()=>(window as any).cutoverWire.some((m:any)=>m.type==='CODE_CHANGED'&&m.payload.content.endsWith(' manual')));
+  await page.getByText('Zapis oczekuje na ACK.',{exact:true}).waitFor({state:'detached'});
+  await page.keyboard.press('Control+z');
+  await page.waitForFunction(()=>(window as any).cutoverWire.filter((m:any)=>m.type==='CODE_CHANGED').length>=2 && (window as any).cutoverWire.filter((m:any)=>m.type==='CODE_CHANGED').at(-1).payload.content==='draft');
   await page.getByText('Zapis oczekuje na ACK.',{exact:true}).waitFor({state:'detached'});assert.equal(requests.some(r=>r.path==='/api/run'),false);
   assert.deepEqual(errors,[]);
   await writeFile(path.join(output,'proof.json'),JSON.stringify({status:'PASS_APP_MONACO_CONTROLLED_TRANSPORT_ONLY',revision:process.env.RUNTIME_REVISION,utc:new Date().toISOString(),browser:browser.version(),viewports:['1365x900','390x844'],requests,pageErrors:errors,boundary:'Actual App/Header/ProjectSettings/RuntimeSettings/LiveBackend/Monaco; controlled authenticated HTTP+WS, NOT production backend/LSP/Docker/AI/native.'},null,2));
