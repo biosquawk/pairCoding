@@ -73,6 +73,13 @@ async function inventory(root: string): Promise<Entry[]> {
   await visit('',0);
   return files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
 }
+/** Raw disk inventory only, NOT WriteGate/ACK authority. Caller keeps the same
+ * serialization through inventory + copy and joins authoritative document versions.
+ * This projects the ONE existing inventory implementation; never normalize BOM/LF.
+ */
+export async function readRunSourceInventory(root: string): Promise<readonly Readonly<{path:string; sha256:string; bytes:number}>[]> {
+  return Object.freeze((await inventory(root)).map(entry=>Object.freeze({ ...entry })));
+}
 export function inputManifestHash(input: Pick<AcknowledgedRunInput,'projectId'|'sessionId'|'identity'|'files'>) {
   return sha256(canonicalJson({
     projectId:input.projectId,sessionId:input.sessionId,runId:input.identity.runId,profileId:input.identity.profileId,configurationGeneration:input.identity.configurationGeneration,workspaceVersion:input.identity.workspaceVersion,files:input.files

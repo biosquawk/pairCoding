@@ -1,11 +1,96 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { constants } from 'node:fs';
+import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
+import { atomicNoReplace } from '../AtomicNoReplace';
 import type {
   AdapterOutcome, CollectedArtifacts, DurableTerminalReceipt, ExecutionExit, ExecutionHandle, ExecutionOwnership, ExecutionPlan
 } from './ports';
 import {
   canonicalDirectory, durableWrite, fsyncDirectory, readRegular, requireThat, safeId, sha256, canonicalJson
 } from './files';
+const require = createRequire(import.meta.url);
+const lockProtocol = 'PairCoach journal native exclusion v2\n';
+const lockError = (code:string, message:string, cause?:unknown) => Object.assign(new Error(message, { cause }), { code });
+
+/** Stable marker publication fences old wx-only binaries too: they can no longer
+ * create the name. An empty legacy sentinel is ambiguous, so NEVER adopt/delete it.
+ * Atomic no-replace prevents a crash from publishing a partial marker and preserves
+ * a concurrent publisher's inode. The marker/locked inode is NEVER unlinked.
+ */
+async function prepareLockFile(directory:string):Promise<string> {
+  await canonicalDirectory(directory);
+  const file=path.join(directory,'.transaction-lock');
+  try {
+    await fs.lstat(file);
+  } catch(error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    const temporary=path.join(directory,'.lock-protocol-'+randomUUID()+'.tmp');
+    try {
+      await durableWrite(temporary,lockProtocol);
+      try { atomicNoReplace(temporary,file); }
+      catch(error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      await fsyncDirectory(directory);
+    } finally { await fs.rm(temporary,{ force:true }); }
+  }
+  requireThat((await readRegular(file,Buffer.byteLength(lockProtocol))).toString()===lockProtocol,
+    'Legacy/unknown journal lock: preserve for scoped operator reconciliation; no guessed recovery');
+  return file;
+}
+
+/** Native, nonblocking, process-death-released lease. Synchronous FFI only, from
+ * existing pinned application dependency koffi (same trust boundary as no-replace).
+ * No shell/helper/TTL/PID probes, async native worker, unlink, or in-memory fallback.
+ */
+async function acquireLock(file:string):Promise<()=>Promise<void>> {
+  let koffi:any, flock:any, create:any, close:any, lastError:any;
+  try {
+    koffi=require('koffi');
+    if(process.platform==='linux') flock=koffi.load('libc.so.6').func('int flock(int, int)');
+    else if(process.platform==='win32') {
+      requireThat(!!process.env.SystemRoot && path.isAbsolute(process.env.SystemRoot),'Missing trusted SystemRoot');
+      const kernel=koffi.load(path.join(process.env.SystemRoot!,'System32','kernel32.dll'));
+      // intptr_t preserves INVALID_HANDLE_VALUE (-1) and pointer-sized HANDLE values.
+      create=kernel.func('__stdcall','CreateFileW','intptr_t',['str16','uint32','uint32','void *','uint32','uint32','intptr_t']);
+      close=kernel.func('__stdcall','CloseHandle','int',['intptr_t']);
+      lastError=kernel.func('__stdcall','GetLastError','uint32',[]);
+    } else throw new Error('Unsupported journal locking platform');
+  } catch(error) { throw lockError('JOURNAL_LOCK_UNAVAILABLE','Native journal exclusion unavailable; no fallback',error); }
+  if(process.platform==='linux') {
+    const fd=await fs.open(file,constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+    try {
+      // LOCK_EX | LOCK_NB: separate open file descriptions conflict even in one
+      // process. Closing this descriptor (also on SIGKILL) releases ownership.
+      if(flock(fd.fd,2|4)!==0) {
+        const number=koffi.errno();
+        const code=number===koffi.os.errno.EAGAIN || number===koffi.os.errno.EWOULDBLOCK ? 'EEXIST' : 'JOURNAL_LOCK_FAILED';
+        throw lockError(code,'Journal lease refused (errno '+number+')');
+      }
+      const opened=await fd.stat({ bigint:true }), named=await fs.lstat(file,{ bigint:true });
+      requireThat(opened.isFile() && !named.isSymbolicLink() && opened.nlink===1n && named.nlink===1n &&
+        opened.dev===named.dev && opened.ino===named.ino,'Journal lock identity changed');
+      requireThat((await readRegular(file,Buffer.byteLength(lockProtocol))).toString()===lockProtocol,'Journal lock protocol changed');
+      return ()=>fd.close();
+    } catch(error) { await fd.close(); throw error; }
+  }
+  // OPEN_EXISTING, GENERIC_READ|WRITE, FILE_SHARE_READ only. Every independent
+  // transaction handle requests WRITE: kernel sharing checks exclude live peers,
+  // including this process, while readonly marker inspection remains possible.
+  // No FILE_SHARE_DELETE, inheritable handle, truncation, or reparse-point follow.
+  const handle=create(path.toNamespacedPath(file),0xC0000000,1,null,3,0x00200000,0);
+  if(handle===-1 || handle===-1n || handle===0 || handle===0n) {
+    const number=lastError();
+    throw lockError(number===32 || number===33 ? 'EEXIST' : 'JOURNAL_LOCK_FAILED','Journal handle refused (Win32 '+number+')');
+  }
+  const release=async()=>{ if(!close(handle)) throw lockError('JOURNAL_LOCK_RELEASE_FAILED','CloseHandle failed (Win32 '+lastError()+')'); };
+  try {
+    await canonicalDirectory(path.dirname(file));
+    requireThat((await readRegular(file,Buffer.byteLength(lockProtocol))).toString()===lockProtocol,'Journal lock protocol changed');
+    return release;
+  } catch(error) { await release(); throw error; }
+}
+
 export interface JournalRecord {
   version:1;
   createdAt:number;
@@ -36,15 +121,9 @@ export class DurableRunJournal {
     if (process.platform !== 'win32') requireThat(((await fs.lstat(this.directory, { bigint:true })).mode & 0o077n) === 0n, 'Journal must be private');
   }
   private async locked<T>(fn:()=>Promise<T>):Promise<T> {
-    const file=path.join(this.directory,'.transaction-lock');
-    const fd=await fs.open(file,'wx',0o600);
-    try{
-      return await fn();
-    }finally{
-      await fd.close();
-      await fs.unlink(file);
-      await fsyncDirectory(this.directory);
-    }
+    const release=await acquireLock(await prepareLockFile(this.directory));
+    try { return await fn(); }
+    finally { await release(); }
   }
   async list():Promise<JournalRecord[]> {
     const names=await fs.readdir(this.directory);
