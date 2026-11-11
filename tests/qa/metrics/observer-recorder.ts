@@ -98,6 +98,7 @@ export class MetricRecorder {
         if (e.direction === 'out' && e.type === 'VETO_ESCAPE' && v) { v.messageId = e.messageId; v.veto = { ...e, ...e.payload }; }
         if (e.hint) hints.push({ ...e.hint });
       }
+      if (e.kind === 'hintRenderRejected') { const h = hints.find(h => h.id === e.id); if (h) { h.valid = false; h.renderFilters = e.filters; } }
       if (e.kind === 'hintRendered') { const h = hints.find(h => h.id === e.id); if (h) { h.renderMs = e.renderMs; h.renderedAt = e.at; } }
     }
     // A final successful snapshot has richer failed-predicate detail, but never hides a streamed start.

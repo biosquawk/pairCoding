@@ -107,7 +107,7 @@ metricTest('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001
     const recorder = new MetricRecorder(info), conflicts: any[] = [], cutoffPairs: any[] = [];
     let initial: any = null, cutoffStart: number | null = null, observed: any = null, phase = 'setup', startedTrial = -1;
     let completedTrials = 0, calibration: any = null, report: any = null, failure: any = null;
-    const sameFixture = (m: any) => Boolean(initial && m.rootPath === initial.rootPath && m.dataDir === initial.dataDir
+    const sameFixture = (m: any) => Boolean(initial && m && m.rootPath === initial.rootPath && m.dataDir === initial.dataDir
       && m.base === initial.base && m.reference === true && m.mainBytes === initial.mainBytes);
     try {
       expect(process.platform, 'Reference evidence MUST be executed on Windows, not WSL').toBe('win32');
@@ -181,9 +181,9 @@ metricTest('AC-027 TEST-027: Windows Chromium, 100 veto + hint trials, METRIC001
         || { trial, marker: `qa_probe_${trial}`, stage: 'started but not armed', localMs: null, ackMs: null, veto: null, ownerWasCoach: false });
       observed.vetoes = vetoes;
       const hints = observed.hints;
-      const pairedFixture = sameFixture(end) && observed?.identity
+      const pairedFixture = Boolean(sameFixture(end) && observed?.identity
         && path.resolve(observed.identity.rootPath) === path.resolve(end.rootPath)
-        && vetoes.every((v: any) => !v.veto || (v.veto.sessionId === observed.identity.sessionId && v.veto.connection === observed.identity.connection));
+        && vetoes.every((v: any) => !v.veto || (v.veto.sessionId === observed.identity.sessionId && v.veto.connection === observed.identity.connection)));
       const manifestCutoffRaw = pairedFixture && cutoffStart !== null ? end.vetoCutoffMs.slice(cutoffStart) : [];
       const hintSlots = vetoes.map(v => hints.find((h: any) => h.trial === v.trial));
       const extraHints = hints.filter((h: any) => !hintSlots.includes(h));

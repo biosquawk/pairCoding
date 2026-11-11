@@ -9,6 +9,29 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
   let panel: HTMLElement | null = null, host: HTMLElement | null = null, header: Element | null = null;
   let input: HTMLElement | null = null, body: HTMLElement | null = null, bubble: Element | null = null;
   let raf = 0, connectionCounter = 0, nextId = 0, queue: any[] = [], flushTimer: any = null;
+  let documentEvidence: any = null;
+  const pendingWrites = new Map<string, any>();
+  const documentVersion = (f: any, connection: number, at: number, path: any, version: any, source: string) => {
+    if (path !== 'main.py') return;
+    if (documentEvidence?.sessionId === f.sessionId && documentEvidence?.connection === connection
+      && Number.isInteger(version) && version < documentEvidence.version) return;
+    documentEvidence = Number.isInteger(version) && version > 0
+      ? { sessionId: f.sessionId, connection, path, version, seq: f.seq, at, source } : null;
+    record({ kind: 'documentVersion', evidence: documentEvidence, source, at, connection });
+  };
+  const hintFilters = (hint: any) => ({
+    shape: predicates.hint(hint.payload),
+    knownVersion: Boolean(documentEvidence),
+    currentVersion: Boolean(documentEvidence && hint.payload.documentVersion === documentEvidence.version),
+    samePath: Boolean(documentEvidence && hint.payload.path === documentEvidence.path && hint.request?.payload.path === documentEvidence.path),
+    sameSession: Boolean(output.identity && hint.sessionId === output.identity.sessionId
+      && hint.request?.sessionId === hint.sessionId && documentEvidence?.sessionId === hint.sessionId),
+    sameConnection: Boolean(hint.connection === output.identity?.connection && hint.request?.connection === hint.connection
+      && documentEvidence?.connection === hint.connection),
+    requestVersion: Boolean(documentEvidence && hint.request?.payload.documentVersion === documentEvidence.version),
+    receiveOrder: Boolean(hint.request && hint.receivedAt >= hint.request.at && Number.isInteger(hint.seq) && hint.seq > hint.request.lastServerSeq),
+    noPendingWrite: ![...pendingWrites.values()].some(w => w.path === 'main.py'),
+  });
   const ids = new WeakMap<object, number>(), pending = new Set<Promise<any>>();
   const id = (object: object | null) => object ? (ids.get(object) || (ids.set(object, ++nextId), nextId)) : null;
   const error = (stage: string, e: any) => output.recordingErrors.push({ stage, name: e?.name || 'Error', at: performance.now() });
@@ -76,6 +99,15 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
         }
         watchBubble();
         for (const hint of output.hints) if (hint.renderMs === null && hint.valid) {
+          const state = snapshot();
+          hint.renderFilters = { ...hintFilters(hint), activePath: state.activePath === hint.payload.path,
+            loaded: state.loaded && state.visible && state.connected && state.mode === 'python' };
+          if (!all(hint.renderFilters)) {
+            hint.valid = false;
+            record({ kind: 'hintRenderRejected', trial: hint.trial, id: hint.id, at: performance.now(),
+              filters: hint.renderFilters, documentEvidence });
+            continue;
+          }
           if (bubble?.textContent === hint.text && visible(bubble)) {
             const observedAt = performance.now(); hint.renderMs = observedAt - hint.receivedAt;
             hint.renderedAt = observedAt;
@@ -157,7 +189,7 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
       const state = { connection, openedAt: null as number | null, closedAt: null as number | null, closeCode: null as number | null };
       output.connections.push(state);
       this.addEventListener('open', () => { state.openedAt = performance.now(); record({ kind: 'open', connection, at: state.openedAt }); });
-      this.addEventListener('close', e => { state.closedAt = performance.now(); state.closeCode = e.code;
+      this.addEventListener('close', e => { documentEvidence = null; state.closedAt = performance.now(); state.closeCode = e.code;
         record({ kind: 'close', connection, at: state.closedAt, code: e.code }); });
       this.addEventListener('error', () => record({ kind: 'socketError', connection, at: performance.now() }));
       this.addEventListener('message', event => {
@@ -174,9 +206,23 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
           if (f.type === 'ACK') meta.payload.error = p.error === null ? null : { code: p.error?.code || 'INVALID' };
           if (f.type === 'SESSION_SNAPSHOT') {
             const identity = { sessionId: p.session.sessionId, projectId: p.project.projectId, rootPath: p.project.rootPath, connection };
-            if (!output.identity) output.identity = identity;
+            if (output.identity?.sessionId !== identity.sessionId || output.identity?.connection !== connection) pendingWrites.clear();
+            output.identity = identity; documentEvidence = null;
+            documentVersion(f, connection, at, p.activeDocument?.path, p.activeDocument?.version, 'SESSION_SNAPSHOT');
             meta.identity = identity;
             latestControl = { ...p.session, sessionId: f.sessionId, seq: f.seq, connection, at };
+          }
+          if (f.type === 'COACH_STEP_EDIT') documentVersion(f, connection, at, p.path, p.version, 'COACH_STEP_EDIT');
+          if (f.type === 'EXTERNAL_FILE_SYNC') documentVersion(f, connection, at, p.path,
+            p.operation === 'DELETED' ? null : p.document?.version ?? p.version, 'EXTERNAL_FILE_SYNC');
+          if (f.type === 'ACK') {
+            const write = pendingWrites.get(p.replyTo);
+            if (write && write.sessionId === f.sessionId && write.connection === connection) {
+              pendingWrites.delete(p.replyTo);
+              documentVersion(f, connection, at, write.path,
+                p.status === 'OK' && p.error === null && p.documentVersion > write.baseVersion ? p.documentVersion : null, 'WRITE_ACK');
+              schedule();
+            }
           }
           if (f.type === 'CONTROL_STATE' || f.type === 'SESSION_STATE') latestControl = { ...p, sessionId: f.sessionId, seq: f.seq, connection, at };
           if (f.type === 'ACK' && current?.veto && p.replyTo === current.veto.messageId) {
@@ -189,8 +235,10 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
           }
           if (f.type === 'COACH_HINT_BUBBLE') {
             const request = pendingHint?.request;
-            const valid = predicates.hint(p) && Boolean(request && request.connection === connection && request.sessionId === f.sessionId && at >= request.at);
-            const hint = { trial: pendingHint?.trial ?? null, id: p.id, text: p.text, receivedAt: at, valid, renderMs: null, request };
+            const hint: any = { trial: pendingHint?.trial ?? null, id: p.id, text: p.text, payload: p,
+              sessionId: f.sessionId, connection, seq: f.seq, receivedAt: at, renderMs: null, request,
+              documentAtReceipt: documentEvidence ? { ...documentEvidence } : null };
+            hint.receiptFilters = hintFilters(hint); hint.valid = all(hint.receiptFilters);
             output.hints.push(hint); meta.hint = hint; pendingHint = null; schedule();
           }
           record(meta);
@@ -207,7 +255,8 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
           for (const key of ['controlEpoch','activeInterventionId','lastAppliedSeq','stepId','interventionId','path','baseVersion',
             'editKind','documentVersion','workspaceVersion','requestId','ready']) if (p?.[key] !== undefined) meta.payload[key] = p[key];
           // HELLO tokens / auth URL / chat / document snapshots are NEVER copied into records.
-          if (f.type === 'CODE_CHANGED') { meta.content = p.content; w.__qaMetric.writes.push({ ...meta, ...p }); }
+          if (f.type === 'CODE_CHANGED') { meta.content = p.content; w.__qaMetric.writes.push({ ...meta, ...p });
+            pendingWrites.set(f.messageId, { ...meta, path: p.path, baseVersion: p.baseVersion }); }
           if (f.type === 'VETO_ESCAPE' && current) {
             const veto = { ...meta, ...p, lastServerSeq };
             if (current.veto) error('duplicateVeto', new Error());
@@ -226,3 +275,23 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
 
 export const metricObserverSource = () => `(() => { const __name = (fn, _name) => fn; (${installMetricObserver.toString()})(${createMetricPredicates.toString()}); })();`;
 export const observeMetrics = (page: Page) => page.addInitScript({ content: metricObserverSource() });
+
+/** Outside measured windows: actual rendered marker, never a model/API read or body scan. */
+export function calibrationMarkerEvidence({ marker, baseline }: { marker: string; baseline: any }) {
+  const state = (window as any).__qaMetric.snapshot();
+  let renderedMarker = false;
+  for (const line of document.querySelectorAll('.monaco-editor .view-lines .view-line')) {
+    if (!line.textContent?.includes(`# ${marker}`)) continue;
+    let lineVisible = line.isConnected && line.getClientRects().length > 0;
+    for (let n: Element | null = line; n; n = n.parentElement) {
+      const style = getComputedStyle(n);
+      if (n.hasAttribute('hidden') || style.display === 'none' || style.visibility !== 'visible' || style.opacity === '0') lineVisible = false;
+    }
+    if (lineVisible) renderedMarker = true;
+  }
+  return { sameInput: state.inputId === baseline.inputId && state.hostId === baseline.hostId && state.panelId === baseline.panelId,
+    loaded: state.loaded && state.visible && state.connected && state.native && state.inputCount === 1,
+    activePath: state.activePath === 'main.py' && state.mode === 'python',
+    student: state.owner === 'STUDENT' && state.autocomplete === 'both',
+    renderedMarker };
+}

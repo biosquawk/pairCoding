@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { writeFileSync, rmSync } from 'node:fs';
 import { append, chat, disk, openEditor, editorInput, manifest } from '../e2e/browser-helpers';
-import { observeMetrics } from './observer';
+import { observeMetrics, calibrationMarkerEvidence } from './observer';
 import { MetricRecorder, digest, sourceHashes } from './observer-recorder';
 
 const receiptPath = 'tests/qa/.runtime/AC027-native-calibration.json';
@@ -41,6 +41,10 @@ test('AC027 native calibration: COACH rejects real input; same input accepts aft
     })).toBe(true);
     report.phase = 'STUDENT control';
     await append(page, `# ${marker}\n`);
+    await expect.poll(async () => {
+      report.positiveDOM = await page.evaluate(calibrationMarkerEvidence, { marker, baseline: report.baseline });
+      return Object.values(report.positiveDOM).every(Boolean);
+    }, { message: 'Same loaded visible native input must render the real STUDENT marker' }).toBe(true);
     const keep = page.getByRole('button', { name: 'Zachowaj mój lokalny draft', exact: true });
     await expect.poll(async () => disk().includes(`# ${marker}\n`) || await keep.isVisible()).toBe(true);
     let expected: string | null = null, after = 0;
