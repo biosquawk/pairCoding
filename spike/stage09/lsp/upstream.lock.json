@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "observedUTC": "2026-11-11",
+  "platform": "linux/amd64",
+  "jdt": {
+    "version": "1.63.0",
+    "sourceCommit": "d98abba8f04cf041542d9ebb6df0d472a1395606",
+    "url": "https://download.eclipse.org/jdtls/milestones/1.63.0/jdt-language-server-1.63.0-202610191322.tar.gz",
+    "filename": "jdt-language-server-1.63.0-202610191322.tar.gz",
+    "sha256": "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4",
+    "launcher": "org.eclipse.equinox.launcher_1.8.0.v20260804-1928.jar",
+    "serverJVM": 21,
+    "targetJDKs": [
+      21,
+      27
+    ]
+  },
+  "bases": {
+    "server21": "eclipse-temurin:21-jdk@sha256:0b84a658e0d745af944a4e4d40454bac2b2fba5252cf0f2990573a8aa0cb83e1",
+    "target27": "eclipse-temurin:27-jdk@sha256:de25c3be25d05d4e1f82d594fb3f3914271964361cb7cf20f3abf9d027c5ae72",
+    "python": "python:3.13.9-slim-bookworm@sha256:8cdd496996889eef0a8a7921c152c0a4a9f18a26c7a5e7257d3c90b431891894"
+  },
+  "wheels": [
+    {
+      "name": "python-lsp-server",
+      "version": "1.12.2",
+      "url": "https://files.pythonhosted.org/packages/cb/e7/28010a326ef591e1409daf9d57a47de94156c147ad1befe74d8196d82729/python_lsp_server-1.12.2-py3-none-any.whl",
+      "filename": "python_lsp_server-1.12.2-py3-none-any.whl",
+      "sha256": "750116459449184ba20811167cdf96f91296ae12f1f65ebd975c5c159388111b",
+      "size": 74773
+    },
+    {
+      "name": "python-lsp-jsonrpc",
+      "version": "1.1.2",
+      "url": "https://files.pythonhosted.org/packages/cb/d9/656659d5b5d5f402b2b174cd0ba9bc827e07ce3c0bf88da65424baf64af8/python_lsp_jsonrpc-1.1.2-py3-none-any.whl",
+      "filename": "python_lsp_jsonrpc-1.1.2-py3-none-any.whl",
+      "sha256": "7339c2e9630ae98903fdaea1ace8c47fba0484983794d6aafd0bd8989be2b03c",
+      "size": 8805
+    },
+    {
+      "name": "jedi",
+      "version": "0.19.2",
+      "url": "https://files.pythonhosted.org/packages/c0/5a/9cac0c82afec3d09ccd97c8b6502d48f165f9124db81b4bcb90b4af974ee/jedi-0.19.2-py2.py3-none-any.whl",
+      "filename": "jedi-0.19.2-py2.py3-none-any.whl",
+      "sha256": "a8ef22bde8490f57fe5c7681a3c83cb58874daf72b4784de3cce5b6ef6edb5b9",
+      "size": 1572278
+    },
+    {
+      "name": "parso",
+      "version": "0.8.5",
+      "url": "https://files.pythonhosted.org/packages/16/32/f8e3c85d1d5250232a5d3477a2a28cc291968ff175caeadaf3cc19ce0e4a/parso-0.8.5-py2.py3-none-any.whl",
+      "filename": "parso-0.8.5-py2.py3-none-any.whl",
+      "sha256": "646204b5ee239c396d040b90f9e272e9a8017c630092bf59980beb62fd033887",
+      "size": 106668
+    },
+    {
+      "name": "pyflakes",
+      "version": "3.2.0",
+      "url": "https://files.pythonhosted.org/packages/d4/d7/f1b7db88d8e4417c5d47adad627a93547f44bdc9028372dbd2313f34a855/pyflakes-3.2.0-py2.py3-none-any.whl",
+      "filename": "pyflakes-3.2.0-py2.py3-none-any.whl",
+      "sha256": "84b5be138a2dfbb40689ca07e2152deb896a65c3a3e24c251c5c62489568074a",
+      "size": 62725
+    },
+    {
+      "name": "pycodestyle",
+      "version": "2.12.1",
+      "url": "https://files.pythonhosted.org/packages/3a/d8/a211b3f85e99a0daa2ddec96c949cac6824bd305b040571b82a03dd62636/pycodestyle-2.12.1-py2.py3-none-any.whl",
+      "filename": "pycodestyle-2.12.1-py2.py3-none-any.whl",
+      "sha256": "46f0fb92069a7c28ab7bb558f05bfc0110dac69a0cd23c61ea0040283a9d78b3",
+      "size": 31284
+    },
+    {
+      "name": "pluggy",
+      "version": "1.6.0",
+      "url": "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl",
+      "filename": "pluggy-1.6.0-py3-none-any.whl",
+      "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+      "size": 20538
+    },
+    {
+      "name": "docstring-to-markdown",
+      "version": "0.17",
+      "url": "https://files.pythonhosted.org/packages/56/7b/af3d0da15bed3a8665419bb3a630585756920f4ad67abfdfef26240ebcc0/docstring_to_markdown-0.17-py3-none-any.whl",
+      "filename": "docstring_to_markdown-0.17-py3-none-any.whl",
+      "sha256": "fd7d5094aa83943bf5f9e1a13701866b7c452eac19765380dead666e36d3711c",
+      "size": 23479
+    },
+    {
+      "name": "ujson",
+      "version": "5.11.0",
+      "url": "https://files.pythonhosted.org/packages/fe/a3/292551f936d3d02d9af148f53e1bc04306b00a7cf1fcbb86fa0d1c887242/ujson-5.11.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "filename": "ujson-5.11.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "837da4d27fed5fdc1b630bd18f519744b23a0b5ada1bbde1a36ba463f2900c03",
+      "size": 57363
+    },
+    {
+      "name": "importlib-metadata",
+      "version": "8.7.0",
+      "url": "https://files.pythonhosted.org/packages/20/b0/36bd937216ec521246249be3bf9855081de4c5e06a0c9b4219dbeda50373/importlib_metadata-8.7.0-py3-none-any.whl",
+      "filename": "importlib_metadata-8.7.0-py3-none-any.whl",
+      "sha256": "e5dd1551894c77868a30651cef00984d50e1002d06942a7101d34870c5f02afd",
+      "size": 27656
+    },
+    {
+      "name": "typing-extensions",
+      "version": "4.15.0",
+      "url": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+      "filename": "typing_extensions-4.15.0-py3-none-any.whl",
+      "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+      "size": 44614
+    },
+    {
+      "name": "zipp",
+      "version": "3.23.0",
+      "url": "https://files.pythonhosted.org/packages/2e/54/647ade08bf0db230bfea292f893923872fd20be6ac6f53b2b936ba839d75/zipp-3.23.0-py3-none-any.whl",
+      "filename": "zipp-3.23.0-py3-none-any.whl",
+      "sha256": "071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e",
+      "size": 10276
+    }
+  ]
+}
