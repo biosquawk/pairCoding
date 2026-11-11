@@ -32,6 +32,13 @@ export interface TrustedLanguageSnapshot {
   /** Prepared immutable artifacts, never an original/private cache. Copied, NOT mounted or written. */
   dependencies: { root: string; files: readonly ShadowFile[] } | null;
 }
+/** Complete source policy shared with materialize; trusted in-memory handle, not wire authority. */
+export interface LanguageSourceCapture {
+  readonly projectRoot: string;
+  readonly files: readonly Readonly<ShadowFile>[];
+  /** Rechecks complete included raw inventory, empty directories and actual root identity. */
+  assertCurrent(): void;
+}
 export interface LanguageSnapshotAuthority {
   capture(): TrustedLanguageSnapshot;
   /** Synchronous trusted lease check: inventory/overlays/scope/epoch/dependency current; NOT receipt presence. */
@@ -114,6 +121,20 @@ export class LanguageShadowStore {
     const after = lstatSync(root, { bigint: true });
     if (!after.isDirectory() || after.isSymbolicLink() || after.ino !== rootIdentity.ino || after.dev !== rootIdentity.dev) throw new Error('Language source root changed');
     return { files: files.sort(byPath), directories: directories.sort(), contents };
+  }
+  /** Read-only coordinator preparation seam. Reuses this exact scanner (never Run-source policy),
+   * including source exclusions/limits. It does not hold WriteGate or attest overlays/settings itself.
+   */
+  captureSource(projectRoot: string): LanguageSourceCapture {
+    const root = lstatSync(projectRoot, { bigint: true }), { files, directories } = this.scan(projectRoot);
+    const assertCurrent = () => {
+      const now = lstatSync(projectRoot, { bigint: true });
+      if (now.dev !== root.dev || now.ino !== root.ino) throw new Error('Language source root replaced');
+      const actual = this.scan(projectRoot);
+      if (!isDeepStrictEqual(files, actual.files) || !isDeepStrictEqual(directories, actual.directories))
+        throw new Error('Complete language source inventory changed');
+    };
+    assertCurrent(); return Object.freeze({ projectRoot, files: freeze(copy(files)), assertCurrent });
   }
   private validateExpected(expected: readonly ShadowFile[], actual: readonly ShadowFile[]): void {
     if (!Array.isArray(expected) || expected.length > 16000) throw new Error('Invalid trusted inventory');

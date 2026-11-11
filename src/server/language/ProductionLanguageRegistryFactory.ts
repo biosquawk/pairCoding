@@ -22,6 +22,9 @@ export interface ProductionLanguageBinding {
 }
 export interface ProductionLanguageAuthority {
   capture(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot): ProductionLanguageBinding;
+  /** Actual selected-cache composition additionally asserts SAME held gate through every copy fence.
+   * Dispatch currentness is persistent, not an assertion that a long-lived LSP owns WriteGate. */
+  assertCopyLease?(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, binding: ProductionLanguageBinding): void;
   /** Complete currentness, including external sources, inactive overlays, dependency and preparation
    * revocation. Must support immutable copies; never identity-of-object or equal-byte-only authority.
    */
@@ -87,6 +90,7 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
     source: TrustedLanguageSnapshot): LanguageSnapshotAuthority {
     return { capture: () => source, isCurrent: candidate => {
       if (!same(candidate, source)) return false;
+      this.options.authority.assertCopyLease?.(scope, snapshot, binding);
       this.current(scope, snapshot, binding); return true;
     } };
   }
@@ -110,6 +114,7 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
     }) : null;
     if (requested && !same(requested, generation)) throw new Error('Requested generation is not the actual fresh private shadow');
     const boot = this.boot.publish(shadow, config); this.current(capturedScope, capturedSnapshot, binding);
+    this.options.authority.assertCopyLease?.(capturedScope, capturedSnapshot, binding);
     const process = DockerLanguageProcess.prepare({ ...source.identity, launchId: shadow.launchId, phase,
       installationId: binding.installationId, engineId: binding.engineId, argv: config.argv }, { ...this.options,
       rpc: { configuration: (method, params) => readLanguageProviderConfiguration(config, method, params) } });
@@ -118,6 +123,7 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
       expectedProjectUri: config.expectedProjectUri, ackLedger: this.ackLedger ?? undefined, assertCurrent: current => this.assertCurrent(state, current), ...callbacks });
     state = { scope: capturedScope, snapshot: capturedSnapshot, binding, config, shadow, boot, session, ack: null };
     this.states.set(session, state); this.assertCurrent(state, shadow);
+    this.options.authority.assertCopyLease?.(capturedScope, capturedSnapshot, binding);
     return { session, generation }; // No process admission/command/await has occurred before this transfer.
   }
   /** Called only by the registry with its SAME private issuer, after authentic ACK publication.
