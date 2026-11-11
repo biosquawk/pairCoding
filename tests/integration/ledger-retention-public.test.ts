@@ -3,7 +3,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { serverFixture, connected, Peer, id, settings } from '../qa/helpers';
+import { serverFixture, connected, Peer, id, settings, workspaceFiles } from '../qa/helpers';
+import {createPairCoachServer} from '../../src/server/http';
 const rejected=(a:any,code:string)=>{assert.equal(a.payload.status,'REJECTED');assert.equal(a.payload.error.code,code);};
 
 test('ledger REST/WS: concurrent CODE_CHANGED, failed replay, conflicts, cross-transport veto once',async t=>{
@@ -97,4 +98,47 @@ test('ledger proposal rejected outcome remains rejected with a new messageId',as
   rejected(a,'STALE_PROPOSAL');rejected(b,'STALE_PROPOSAL');
   assert.deepEqual({...b.payload.error,requestId:null},{...a.payload.error,requestId:null});
   rejected(await p.ack(p.send('PROPOSAL_RESPONSE',{...response,accepted:false})),'IDEMPOTENCY_CONFLICT');p.assertProtocol();
+});
+
+test('ledger VIEW_CHANGED delayed duplicate cannot revert the newer view',async t=>{
+  const f=await serverFixture(t,{'solution.js':'start\n'}),p=await connected(t,f);
+  const view={path:'solution.js',documentVersion:1,cursor:null,selection:null},key=p.send('VIEW_CHANGED',view);
+  assert.equal((await p.ack(key)).payload.status,'OK');
+  assert.equal((await p.ack(p.send('VIEW_CHANGED',{...view,path:null,documentVersion:null}))).payload.status,'OK');
+  p.send('VIEW_CHANGED',view,key);assert.equal((await p.ack(key)).payload.status,'DUPLICATE');
+  assert.equal((await f.http('GET','/api/session')).body.activeFilePath,null);
+});
+
+test('ledger real budget lifecycle: PING bypasses history, adoption resets session capacity but not process-lived open capacity',async t=>{
+  const dirs=await workspaceFiles(t,{'solution.js':'start\n'}),token='budget-'+id(),clientId=id();
+  const budget={maxEntries:2,maxBytes:65536,maxPending:2,maxOutcomeBytes:8192,tempRoot:path.join(dirs.base,'journals')};
+  const app=createPairCoachServer({...dirs,port:0,token,enableCoach:false,ledgerOptions:budget,openLedgerOptions:budget} as any);
+  const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,peers=new Set<{close():void}>();
+  t.after(async()=>{for(const p of peers)p.close();try{await app.close();}finally{await dirs.cleanup();}});
+  const http=async(method:string,target:string,body?:unknown)=>{
+    const r=await fetch(baseURL+target,{method,headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(5000)});
+    return {status:r.status,body:await r.json()};
+  };
+  const sessionId=(await http('GET','/api/session')).body.sessionId;
+  const f={...dirs,app,token,clientId,port,baseURL,peers,http,sessionId},p=new Peer(f as any);await p.connect();
+  const original=(await http('GET','/api/file?path=solution.js')).body,state=(await http('GET','/api/session')).body;
+  const edit=(version:number,content:string)=>({path:'solution.js',baseVersion:version,controlEpoch:state.controlEpoch,content,editKind:'TYPING'});
+  const oldKey=p.send('CODE_CHANGED',edit(original.version,'one\n'));assert.equal((await p.ack(oldKey)).payload.status,'OK');
+  assert.equal((await p.ack(p.send('CODE_CHANGED',edit(original.version+1,'two\n')))).payload.status,'OK');
+  const blocked=await p.ack(p.send('CODE_CHANGED',edit(original.version+2,'must-not-write\n')));rejected(blocked,'COMMAND_LIMIT');
+  assert.equal((await p.ack(p.send('PING',{lastAppliedSeq:0}))).payload.status,'OK','valid PING must work even when mutation history is full');
+  assert.equal((await http('GET','/api/file?path=solution.js')).body.content,'two\n');
+  const roots=['A','B','C'].map(name=>path.join(dirs.base,name));
+  for(const root of roots){await fs.mkdir(root);await fs.writeFile(path.join(root,'challenge.md'),'task\n');await fs.writeFile(path.join(root,'solution.js'),path.basename(root)+'\n');}
+  const openA={requestId:id(),clientId,rootPath:roots[0],settings};
+  const opened=await http('POST','/api/project/open',openA);assert.equal(opened.status,201);
+  const fresh=new Peer({...f,sessionId:opened.body.sessionId} as any);await fresh.connect();
+  const newDoc=(await http('GET','/api/file?path=solution.js')).body,newState=(await http('GET','/api/session')).body;
+  assert.equal((await fresh.ack(fresh.send('CODE_CHANGED',{...edit(newDoc.version,'fresh-scope\n'),controlEpoch:newState.controlEpoch},oldKey))).payload.status,'OK','new session has actual new capacity, not the exhausted global ledger');
+  const openedB=await http('POST','/api/project/open',{...openA,requestId:id(),rootPath:roots[1]});assert.equal(openedB.status,201);
+  const blockedOpen=await http('POST','/api/project/open',{...openA,requestId:id(),rootPath:roots[2]});assert.equal(blockedOpen.status,429);assert.equal(blockedOpen.body.code,'COMMAND_LIMIT');
+  assert.equal((await http('GET','/api/session')).body.sessionId,openedB.body.sessionId);
+  const known=await http('POST','/api/project/open',openA);assert.equal(known.status,201);assert.equal(known.body.sessionId,opened.body.sessionId);
+  assert.equal((await http('GET','/api/session')).body.sessionId,openedB.body.sessionId,'known old open works at budget but never rebinds');
+  assert.equal((await http('GET','/api/file?path=solution.js')).body.content,'B\n');
 });

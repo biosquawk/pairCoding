@@ -25,8 +25,8 @@ async function command(i:number) {
     const value=await ledger.run('result-'+i,{index:i},()=>({content:JSON.parse(JSON.stringify(content))})).result;
     assert.equal(value.content.length,chars);if(i===0)firstHash=digest(value.content);
   } else if(mode==='error') {
-    const message=JSON.parse(JSON.stringify(content));if(i===0)firstHash=digest(message);
-    await assert.rejects(ledger.run('error-'+i,{index:i},()=>{throw new TransportError(409,'QA_LARGE_ERROR',message);}).result,{status:409,code:'QA_LARGE_ERROR',message});
+    const details=JSON.parse(JSON.stringify(content));
+    await assert.rejects(ledger.run('error-'+i,{index:i},()=>{throw Object.assign(new TransportError(409,'QA_LARGE_ERROR','ordinary public rejection'),{details});}).result,{status:409,code:'QA_LARGE_ERROR',message:'ordinary public rejection'});
   } else if(mode==='control')held.push(JSON.stringify({type:'CODE_CHANGED',payload:{content}}));
   else assert.equal(await ledger.run('edit-'+i,{type:'CODE_CHANGED',payload:{path:'solution.js',content,baseVersion:i+1}},()=>i+2).result,i+2);
 }
@@ -47,7 +47,7 @@ if(mode==='result') {
   const replay=ledger.run<{content:string}>('result-0',{index:0},()=>{throw new Error('result repeated');});
   assert.equal(replay.duplicate,true);assert.equal(digest((await replay.result).content),firstHash);
 }
-if(mode==='error')await assert.rejects(ledger.run('error-0',{index:0},()=>{throw new Error('failure repeated');}).result,(e:any)=>e.status===409&&e.code==='QA_LARGE_ERROR'&&digest(e.message)===firstHash);
+if(mode==='error')await assert.rejects(ledger.run('error-0',{index:0},()=>{throw new Error('failure repeated');}).result,(e:any)=>e.status===409&&e.code==='QA_LARGE_ERROR'&&e.message==='ordinary public rejection');
 const final=await collect(),retained=final.heapUsed-baseline.heapUsed;
 console.log(JSON.stringify({mode,count:mode==='pending'?8:count,chars:mode==='pending'?6*MiB:chars,totalHistoryBytes:count*chars,baseline,final,retained,pendingPeak,threshold:24*MiB,heapLimitMiB:192}));
 // Read survivors after GC: neither the live ledger nor the control may be optimized away.

@@ -5,12 +5,12 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import {CommandLedger} from '../../src/server/transport';
-type Options={maxEntries?:number;maxBytes?:number;maxPending?:number;tempRoot?:string};
+type Options={maxEntries?:number;maxBytes?:number;maxPending?:number;maxOutcomeBytes?:number;tempRoot?:string};
 type Lifecycle=CommandLedger&{retire():void|Promise<void>;close():void|Promise<void>};
 const PublicLedger=CommandLedger as unknown as new(options:Options)=>Lifecycle;
 async function fixture(t:TestContext,options:Options={}) {
   const tempRoot=await fs.mkdtemp(path.join(os.tmpdir(),'ledger-budget-p3-'));
-  const ledger=new PublicLedger({tempRoot,...options});
+  const ledger=new PublicLedger({tempRoot,maxOutcomeBytes:1024,...options});
   t.after(async()=>{try{await ledger.close?.();}finally{await fs.rm(tempRoot,{recursive:true,force:true});}});
   return {ledger,tempRoot};
 }
@@ -42,14 +42,14 @@ test('ledger pending budget: accepted unresolved work shares promise, excess new
   assert.equal(await ledger.run('three',{n:3},()=>++effects).result,3);
 });
 
-test('ledger byte budget: oversized accepted result is replayable, then fail-closed before any further effect',async t=>{
+test('ledger byte budget: oversized accepted effect returns stable503, then fail-closed before any further effect',async t=>{
   const {ledger}=await fixture(t,{maxBytes:4096,maxEntries:100,maxPending:2});let effects=0;
   const value={content:'independent-large-result-'.repeat(2048)};
   const first=ledger.run('large',{n:1},()=>{effects++;return value;});
-  assert.deepEqual(await first.result,value);
+  await assert.rejects(first.result,{status:503,code:'COMMAND_RESULT_UNAVAILABLE'});
   limited(()=>ledger.run('next',{n:2},()=>++effects));
   const replay=ledger.run('large',{n:1},()=>{effects++;return null;});
-  assert.equal(replay.duplicate,true);assert.deepEqual(await replay.result,value);
+  assert.equal(replay.duplicate,true);await assert.rejects(replay.result,{status:503,code:'COMMAND_RESULT_UNAVAILABLE'});
   assert.throws(()=>ledger.run('large',{n:99},()=>++effects),{status:409,code:'IDEMPOTENCY_CONFLICT'});
   assert.equal(effects,1);
 });
