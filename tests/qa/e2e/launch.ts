@@ -24,7 +24,11 @@ if (reference) for (let i = 0; i < 98; i++) fs.writeFileSync(path.join(rootPath,
 const manifest = { rootPath, dataDir, base, reference, mainBytes: Buffer.byteLength(main),
   fileCount: reference ? 100 : 2, vetoCutoffMs: [] as number[], committedSteps: [] as { id: string; epoch: number; version: number }[] };
 const manifestPath = path.join(runtime, 'browser-manifest.json');
-const saveManifest = () => fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
+const saveManifest = () => {
+  const temporary = `${manifestPath}.${randomUUID()}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(manifest, null, 2), { flag: 'wx' });
+  fs.renameSync(temporary, manifestPath);
+};
 saveManifest();
 let hintCounter = 0;
 
