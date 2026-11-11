@@ -119,8 +119,8 @@ export class LanguageAckLedger {
       current.projectRevision!==commit.afterProjectRevision || current.dependencyManifestSha256!==before.dependencyManifestSha256 ||
       this.codec.normalizeContent(commit.committedContent)!==this.codec.normalizeContent(request.content) ||
       current.stamp.baseDocumentVersion!==commit.documentVersion || current.stamp.documentVersion!==commit.documentVersion ||
-      current.stamp.requestGeneration<document.stamp.requestGeneration) return null;
-    const ackOnly=new Set(['baseDocumentVersion','documentVersion','requestGeneration']);
+      current.stamp.requestGeneration!==document.stamp.requestGeneration) return null;
+    const ackOnly=new Set(['baseDocumentVersion','documentVersion']);
     if(Object.keys(document.stamp).some(k=>!ackOnly.has(k) && document.stamp[k as keyof DocumentStamp]!==current.stamp[k as keyof DocumentStamp]) ||
       !same(this.authority.readAnalysisSource(request.peerId,request.languageDocumentMessageId),source)) return null;
     return {current,commit};

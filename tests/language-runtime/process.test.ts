@@ -243,3 +243,23 @@ test('throwing transport observer cannot crash editing or discard actual-contain
   const f=fixture(t),{spec}=f.prepare();const p=DockerLanguageProcess.prepare(spec,{...f.options,onTransportClosed:()=>{throw new Error('observer failed');}});
   await p.start();assert.doesNotThrow(()=>p.transport!.close(new Error('transport failed')));assert.equal(f.driver.container!.running,true);assert.equal((await p.retire()).removed,true);
 });
+
+// Production constructor joining found a pre-start cancellation could otherwise claim a lane and
+// demand a journal for a container it had NEVER admitted or touched.
+test('never-admitted retirement has no daemon/journal/phase side effects and permanently revokes start',async t=>{
+  const f=fixture(t),unused=f.prepare();
+  assert.deepEqual(await unused.process.retire(),{confirmed:true,removed:true,problem:null});
+  assert.deepEqual(f.driver.events,[]);assert.deepEqual(f.journal.listIntents(),[]);
+  await assert.rejects(unused.process.start(),/cannot be restarted/);
+  const next=f.prepare();await next.process.start();assert.equal((await next.process.retire()).removed,true);
+});
+test('failed phase claim retirement cannot acquire/release/touch the retained incumbent',async t=>{
+  const f=fixture(t),old=f.prepare();await old.process.start();
+  const next=f.prepare();await assert.rejects(next.process.start(),/ownership retained/);
+  const commands=f.driver.commands.length;
+  assert.deepEqual(await next.process.retire(),{confirmed:true,removed:true,problem:null});
+  assert.equal(f.driver.commands.length,commands);assert.equal(f.driver.container!.running,true);
+  assert.equal((await old.process.retire()).removed,true);
+  assert.deepEqual(await next.process.retire(),{confirmed:true,removed:true,problem:null});
+  const later=f.prepare();await later.process.start();assert.equal((await later.process.retire()).removed,true);
+});

@@ -188,6 +188,14 @@ export class DockerLanguageProcess {
     if (this.removed) return Promise.resolve({ confirmed: true, removed: true, problem: null });
     if (this.retirement) return this.retirement;
     this.retiring = true;
+    // prepare() has no daemon/journal/phase effects. claim() is synchronous and precedes EVERY
+    // startup await/mutation. Thus a never-admitted handle (including a rejected phase claim)
+    // owns no container to stop/remove and must not acquire the incumbent's phase on disposal.
+    // Recovered/uncertain/partly-started owners ARE admitted and still take full reconciliation.
+    if (!this.admitted) {
+      this.removed = true; this.lastProblem = null;
+      return Promise.resolve({ confirmed: true, removed: true, problem: null });
+    }
     // Immediately reject all request authority; this does NOT claim the container stopped.
     this.rpcTransport?.close(new Error('Language process retiring; container Stop pending'));
     this.retirement = this.retireOnce().finally(() => { this.retirement = null; });

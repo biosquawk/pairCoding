@@ -21,7 +21,7 @@ function fixture() {
     readAnalysisSource:(peer:string,id:string)=>peer==='peer'&&id==='open2'?source:null,readCommittedSave:(_request:unknown,id:string)=>commit?.saveReceiptId===id?commit:null};
   const ledger=new LanguageAckLedger(authority,codec);ledger.observeDocument('peer','open2',document);
   const settle=(status:'OK'|'DUPLICATE'='OK')=>{
-    current={...current!,projectRevision:'vector:3',stamp:{...current!.stamp,baseDocumentVersion:2,documentVersion:2,requestGeneration:3}};
+    current={...current!,projectRevision:'vector:3',stamp:{...current!.stamp,baseDocumentVersion:2,documentVersion:2}};
     commit={request:clone(input),saveReceiptId:'ack2',replyTo:'save2',status,documentVersion:2,workspaceVersion:7,
       committedContent:'x\ny',beforeProjectRevision:'vector:2',afterProjectRevision:'vector:3'};
   };
@@ -121,3 +121,26 @@ test('each emitted duplicate ACK id joins original transaction, unknown/forged r
   assert.equal(duplicate.transactionMessageId,first.transactionMessageId);assert.deepEqual(duplicate.source,first.source);
   assert.equal(f.ledger.isVerified(first),true);assert.equal(f.ledger.isVerified(duplicate),true);
 });
+
+// K impact-read approval339d2495: ACK-only keeps the admitted requestGeneration exactly.
+// These are separate new counter cases, not changes to the original twelve assertion bodies.
+test('ACK-only equal requestGeneration issues and retains proof without rebinding immutable source',()=>{
+  const f=fixture(),h=f.ledger.beginSave(f.input)!;f.settle();
+  assert.equal(f.current!.stamp.requestGeneration,f.stamp.requestGeneration);
+  const original=clone(f.source),proof=f.ledger.commitSave(h,'ack2')!;assert.ok(proof);
+  assert.equal(proof.presentation.requestGeneration,proof.source.sourceStamp.requestGeneration);
+  assert.deepEqual(proof.source,original);assert.equal(f.ledger.isVerified(proof),true);
+});
+for(const offset of [-1,1]) {
+  test(`ACK-only requestGeneration ${offset>0?'+1':'-1'} cannot issue proof`,()=>{
+    const f=fixture(),h=f.ledger.beginSave(f.input)!;f.settle();
+    f.current={...f.current!,stamp:{...f.current!.stamp,requestGeneration:f.stamp.requestGeneration+offset}};
+    assert.equal(f.ledger.commitSave(h,'ack2'),null);
+  });
+  test(`ACK-only requestGeneration ${offset>0?'+1':'-1'} cannot retain already issued proof`,()=>{
+    const f=fixture(),h=f.ledger.beginSave(f.input)!;f.settle();
+    const proof=f.ledger.commitSave(h,'ack2')!;assert.ok(proof);
+    f.current={...f.current!,stamp:{...f.current!.stamp,requestGeneration:f.stamp.requestGeneration+offset}};
+    assert.equal(f.ledger.isVerified(proof),false);assert.equal(f.ledger.commitSave(h,'ack2'),null);
+  });
+}
