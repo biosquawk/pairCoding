@@ -232,7 +232,7 @@ export function measuredImageEntry(key, imageTag, observed, expectedImageId, too
   const digest = descriptor?.digest ?? (repos.length ? repos[0].split('@')[1] : null);
   check(digest && (!repos.length || repos.some(s => s.endsWith('@' + digest))), 'NOTREADY: genuine matching manifest/index Descriptor or RepoDigest required (imageId alone is not proof)');
   check(Array.isArray(tools) && tools.length > 0 && tools.length <= 16 && new Set(tools.map(t => t.name)).size === tools.length && tools.every(t => t && typeof t.name === 'string' && typeof t.version === 'string' && t.version.length > 0), 'NOTREADY: actual tools required');
-  return { key, image: repos.find(s => s.endsWith('@' + digest)) ?? imageTag, imageId: observed.Id, digest, tools };
+  return { key, image: repos.find(s => s.endsWith('@' + digest)) ?? imageTag, imageId: observed.Id, digest, tools: tools.map(({ name, version }) => ({ name, version })) };
 }
 function languageTools(item, kind, profile, lock) {
   check(item?.status === 'BUILT_TOOLS_CHECKED_NOT_LSP_FUNCTIONAL_ACCEPTANCE' && Array.isArray(item.tools), 'NOTREADY: language tool probes incomplete');

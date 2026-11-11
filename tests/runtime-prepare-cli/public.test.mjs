@@ -56,7 +56,7 @@ function unitProducers() {
     prepare: (request, execute, deadline, actualEngine, transport) => {
       calls.push('prepare'); assert.equal(execute, true); assert.deepEqual(actualEngine, engine); assert.ok(deadline > Date.now()); assert.ok(transport.endpoint); assert.ok(transport.configDirectory);
       const publish = receiptWriter(request.outputRoot);
-      const identity = resolvePreparedToolchainIdentity(request), tools = request.expectedTools;
+      const identity = resolvePreparedToolchainIdentity(request), tools = request.expectedTools.map(t => ({ ...t, raw: 'UNIT actual probe stdout ' + t.version }));
       const cache = path.join(request.outputRoot, 'cache', request.family, identity.toolchainHash, request.dependencySha256);
       fs.mkdirSync(cache, { recursive: true, mode: 0o700 });
       const deps = { family: request.family, workingDirectory: request.workingDirectory, dependencySha256: request.dependencySha256, tools, preparedAt: '2026-11-11T00:00:00Z' };
