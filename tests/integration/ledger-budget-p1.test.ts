@@ -71,7 +71,8 @@ test('P1 storage: post-effect write failure preserves ALL pending outcomes bound
   a.resolve(42);b.resolve(24);assert.deepEqual(await Promise.all([x.result,y.result]),[42,24]);
   assert.equal(await ledger.run('a',1,()=>0).result,42);assert.equal(await ledger.run('b',1,()=>0).result,24);
   assert.throws(()=>ledger.run('a',2,()=>0),{code:'IDEMPOTENCY_CONFLICT'});
-  assert(fs.statSync(journal()).size+1024>2048,'real receipts plus next reservation exceed byte budget');
+  assert(fs.statSync(file).isDirectory(),'write failure is a real path obstruction, not byte-budget exhaustion');
+  assert.deepEqual(fs.readdirSync(file),[]);
   assert.throws(()=>ledger.run('c',1,()=>{effects++;}),{code:'COMMAND_STORAGE_UNAVAILABLE'});assert.equal(effects,2);
   ledger.close();assert.deepEqual(fs.readdirSync(tempRoot),[]);
 });

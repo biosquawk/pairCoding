@@ -32,15 +32,21 @@ export function validateRequest(name: string, value: unknown): boolean {
 export function apiError(error: unknown, requestId: string | null = null): ApiError {
   const candidate = error as { status?: number; code?: string; message?: string; currentVersion?: number };
   const safe = typeof candidate?.status === 'number' && candidate.status >= 400 && candidate.status < 500;
-  return { code: candidate?.code || 'INTERNAL_ERROR', message: safe ? candidate.message || 'Żądanie odrzucone.' :
-    (candidate instanceof TransportError && candidate.status===503 && Object.hasOwn(ledgerMessages,candidate.code) ? ledgerMessages[candidate.code] : undefined) || 'Błąd operacji lokalnej. Dane nie zostały potwierdzone.', retryable: !safe, requestId, currentVersion: candidate?.currentVersion ?? null };
+  const reservedLedgerCode = typeof candidate?.code === 'string' && Object.hasOwn(ledgerMessages,candidate.code);
+  const ambiguous = candidate instanceof TransportError && candidate.status === 503 && reservedLedgerCode;
+  // Reserved warnings are local capabilities, not arbitrary exception properties.
+  // Sanitize a spoofed code too, so journal reconstruction cannot upgrade it on retry.
+  return { code: reservedLedgerCode && !ambiguous ? 'INTERNAL_ERROR' : candidate?.code || 'INTERNAL_ERROR',
+    message: ambiguous ? ledgerMessages[candidate.code!] : safe ? candidate.message || 'Żądanie odrzucone.' :
+      'Błąd operacji lokalnej. Dane nie zostały potwierdzone.',
+    retryable: !safe && !ambiguous, requestId, currentVersion: candidate?.currentVersion ?? null };
 }
 export class TransportError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 const ledgerMessages:Record<string,string>={
   COMMAND_RESULT_UNAVAILABLE:'Operacja mogła zostać wykonana, ale wynik przekroczył budżet rejestru. Zsynchronizuj stan; nie ponawiaj z nowym ID.',
-  COMMAND_STORAGE_UNAVAILABLE:'Rejestr komend jest niedostępny. Zachowaj dane i zsynchronizuj stan; nie ponawiaj operacji z nowym ID.',
+  COMMAND_STORAGE_UNAVAILABLE:'Operacja mogła zostać wykonana, ale rejestr komend jest niedostępny i wynik jest nieznany. Zachowaj dane i zsynchronizuj stan; nie ponawiaj operacji z nowym ID.',
 };
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
