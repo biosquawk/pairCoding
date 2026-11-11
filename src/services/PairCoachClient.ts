@@ -14,6 +14,7 @@ import {
   TrainingScenario,
   WindowPresence,
 } from '../types/paircoach';
+import type { EditorViewObservationP2 } from './editorViewP2';
 import { simulator } from './simulator';
 import { LiveBackend, type LiveOptions } from './LiveBackend';
 import type { ClientState, TransportMode, UpdatedFile } from './liveTypes';
@@ -162,10 +163,15 @@ export class PairCoachClient {
     simulator.setWindowPresence(presence);
   }
 
+  public getEditorViewScope() { return this.transportMode === 'LIVE_BACKEND' ? this.live.getEditorViewScope() : null; }
+  public updateEditorView(view: EditorViewObservationP2) { if (this.transportMode === 'LIVE_BACKEND') this.live.updateEditorView(view); }
+  public clearEditorView(scope: string | null) { if (this.transportMode === 'LIVE_BACKEND') this.live.clearEditorView(scope); }
+
   // Chat
   public sendChatMessage(message: string) {
     if (this.transportMode === 'LIVE_BACKEND') return this.live.sendChatMessage(message);
     simulator.addChatMessage('STUDENT', message);
+    return true;
   }
 
   // Proposals
