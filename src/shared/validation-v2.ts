@@ -4,6 +4,8 @@ import addFormats from 'ajv-formats';
 import type { ValidateFunction } from 'ajv';
 import * as R from './runtime-v2.schema';
 import * as L from './language-v2.schema';
+import type { MutationIdentity, MutationOutcomeV2, ReconcileMutationRequestV2 } from './runtime-mutation-v2';
+import type { ProjectV2 } from './runtime-v2';
 import { ProtocolV2Schema } from './protocol-v2.schema';
 import type { ExecutionView, ImageLock, RunProfileV2, RunRequestV2, RuntimeCatalog, RuntimeConfigV1, RuntimeProfile, RunV2, SettingsV2, TaskField, TaskRunConfig, UpdateSettingsRequestV2 } from './runtime-v2';
 import type { AnalysisSource, CancelRequest, CompleteRequest, CompleteResult, CompletionItem, DiagnosticsResult, DocumentStamp, LanguageClientMessage, LanguageFileOperation, LanguageServerMessage, LanguageView, OpenOrChange } from './language-v2';
@@ -189,15 +191,47 @@ export function validateCompletionEdits(item: unknown, stamp: unknown, content: 
 const protocol = new Ajv2020({ strict: false, coerceTypes: false, removeAdditional: false, ownProperties: true });
 addFormats(protocol); protocol.addSchema(ProtocolV2Schema,'v2');
 const requests = new Map<string,ValidateFunction>();
-export type V2RequestName = 'RunRequest' | 'UpdateSettingsRequest';
+export type V2RequestName = 'RunRequest' | 'UpdateSettingsRequest' | 'ReconcileMutationRequest';
 export function validateV2Request(name: V2RequestName, value: unknown): boolean {
   if (name === 'RunRequest') return validateRunRequestV2(value);
   if (name === 'UpdateSettingsRequest') return validateUpdateSettingsRequestV2(value);
+  if (name === 'ReconcileMutationRequest') return validateReconcileMutationRequestV2(value);
   return false;
 }
 /** Full future transport shape; per-message semantics still use the guards above plus existing state machine. */
-export function validateV2WireShape(kind: 'ClientMessage' | 'ServerMessage' | 'Project' | 'SessionBundle', value: unknown): boolean {
+export function validateV2WireShape(kind: 'ClientMessage' | 'ServerMessage' | 'Project' | 'SessionBundle' | 'ReconcileMutationRequest' | 'MutationOutcome', value: unknown): boolean {
   let validate=requests.get(kind);
   if(!validate) { validate=protocol.compile({ $ref:`v2#/$defs/${kind}` }); requests.set(kind,validate); }
-  return plainJSON(value) && Boolean(validate(value));
+  try { return plainJSON(value) && bytes(value) <= 8*1024*1024 && Boolean(validate(value)); } catch { return false; }
+}
+
+const mutationValid = (mutation: MutationIdentity): boolean => mutation.kind === 'RUN' ? validateRunRequestV2(mutation.request) : validateUpdateSettingsRequestV2(mutation.request);
+/** Auth/lease and full original-request echo equality remain the authenticated caller's responsibility. */
+export function validateReconcileMutationRequestV2(value: unknown): value is ReconcileMutationRequestV2 {
+  return validateV2WireShape('ReconcileMutationRequest',value) && mutationValid((value as ReconcileMutationRequestV2).mutation);
+}
+const mutationProjectValid = (project: ProjectV2): boolean => validateSettingsV2(project.settings) &&
+  validateExecutionView(project.capabilities.execution) && validateLanguageView(project.capabilities.language) &&
+  project.capabilities.language.projectId === project.projectId &&
+  project.capabilities.language.configurationGeneration === project.capabilities.execution.runtime.configurationGeneration &&
+  (project.capabilities.execution.runtime.profileId === null || project.capabilities.language.profileId === project.capabilities.execution.runtime.profileId);
+export function validateMutationOutcomeV2(value: unknown): value is MutationOutcomeV2 {
+  if (!validateV2WireShape('MutationOutcome',value)) return false;
+  const v = value as MutationOutcomeV2, m = v.mutation;
+  if (!mutationValid(m)) return false;
+  if (v.state === 'UNKNOWN') return true;
+  const current = v.current;
+  if (current.project.projectId !== m.projectId || !mutationProjectValid(current.project)) return false;
+  if (current.run !== null && (!validateRunV2(current.run) ||
+      current.run.configurationGeneration !== current.project.capabilities.execution.runtime.configurationGeneration ||
+      current.run.profileId !== current.project.capabilities.execution.runtime.profileId ||
+      current.run.workspaceVersionAtStart > current.project.workspaceVersion)) return false;
+  if (v.state === 'DEFINITIVELY_ABORTED') return true;
+  if (v.mutation.kind === 'RUN') {
+    const run = v.result as RunV2, request = v.mutation.request;
+    return validateRunV2(run) && run.mode === request.mode && run.configurationGeneration === request.configurationGeneration && run.workspaceVersionAtStart === request.expectedWorkspaceVersion;
+  }
+  const project = v.result as ProjectV2, request = v.mutation.request;
+  return mutationProjectValid(project) && project.projectId === m.projectId && project.sessionId === request.sessionId &&
+    project.workspaceVersion === request.expectedWorkspaceVersion + 1 && same(project.settings,request.settings);
 }
