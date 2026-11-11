@@ -27,6 +27,9 @@ mapping and equivalent strength (host-spawn oracle becomes matching real Docker 
   method then old result cannot reappear; actual marker at known UTF16 position then disappears on
   correction; unversioned late publish after second change cannot create/clear current markers.
   Record pinned JDT server JVM separately from target11/17/21/27 and actual diagnostic version fields.
+- **Baseline publication K1 (HUMAN0977ef31):** after ROOT gate restore safe immediate path-only
+  VIEW at selection/snapshot settlement. Frozen selection-snapshot assertions/timeouts byte-identical;
+  do not substitute eventual wait. Keep120ms cursor/selection throttle and all scope/version/ACK guards.
 - **AC109:** unchanged Monaco retention/models/tabs/view-state tests, existing UndoRedo/coach/Veto/
   singleflight tests and METRIC001–004/golden; new completion primary+additional one undo group,
   one CODE_CHANGED flight; Undo/Redo each synchronize LSP. Inactive coach model, external sync,

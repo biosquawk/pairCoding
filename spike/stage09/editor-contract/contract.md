@@ -18,6 +18,10 @@
 `paircoach.config.json` is existing Codex config: **do not overwrite it** with the separate
 `paircoach.runtime.json`. Stage08 documentation/toolchain is not runtime preparation evidence.
 
+Current baseline2FAIL are a **path-only publication K1**, not permission to migrate frozen assertions:
+HUMAN0977ef31 requires a later narrow product correction after ROOT A–B gate, preserving guards and
+120ms cursor/selection throttle. See `baseline-selection-analysis.md`; no product fix in this candidate.
+
 ## 2. RunProfile migration / exact proposed DTO boundary
 
 `dto-proposal.d.ts` is the normative shape of THIS proposal, pending K consolidation with P1.
@@ -234,3 +238,13 @@ changes also invalidate. Local Veto invalidates before optimistic STUDENT public
 allows manual draft editing per old behavior but NOT old/new completion acceptance until authoritative
 cutoff reconciles. Fresh request after confirmed student epoch allowed; no old response reopens list.
 Disconnected editor may accept manual offline drafts, NOT LSP mutation based on old authorization.
+
+## 7. Cross-proposal consolidation notes
+
+P1_2 linked LanguageFeaturesPort proposal was read. Agreement communicated through K: content/shadow
+identity separate from ACK association, trusted same-content ACK remap only, mutable unversioned DROP,
+separate immutable diagnostic provider generation if needed, no second autosave/command acceptance.
+K still must normalize names (ownershipEpoch vs controlEpoch, modelHandle vs modelLifetime), optional
+ACK vs explicit null, opaque provider-generation type, completion-result identity and descriptor schema.
+These are explicit proposal differences, not two approved wire contracts. Real capabilities/target27
+and immutable-worker latency remain operator/probe evidence, not inferred from agreement.

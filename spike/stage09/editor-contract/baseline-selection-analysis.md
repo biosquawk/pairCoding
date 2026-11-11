@@ -27,22 +27,31 @@ Separate editor-view11PASS + selection-snapshot6PASS/2FAIL. FAILs at frozen
   real120ms throttle (~163ms), with no Monaco observer. Injected ACK and no connection error.
   This is **synthetic transport**, not proof of real server ACK/FS/GUI. Raw logs are in P2 delivery.
 
-## Classification and minimal next correction
+## Current classification and binding correction (HUMAN0977ef31)
 
-Evidence supports **stale synchronous test-API expectation**, not demonstrated loss of local tab
-selection. It does NOT prove all snapshot races safe: K's real integration FAIL prevented the first
-test's later ACK/exact-FS assertions from executing. Those assertions still need to run.
+Initial P2 interpretation called this a stale synchronous test premise and proposed wait-until5000.
+That hypothesis/recommendation was sent in NOTE711aedee. **ROOT explicitly rejected it** after reading
+frozen scenarios and implementation: publication after awaitselectFile/mutateFile remains required;
+requested cursor/selection throttling does not waive safe immediate path-only publication.
+Source0977ef31-8fe2-4c14-8d68-f81878e37eef was read through END. It supersedes that interpretation.
+The timing observation above remains valid; it is NOT proof that the original contract passed.
 
-After central approval, explicit contract-alignment test change can wait using the existing `until`
-helper and unchanged5000ms bound until the **same path/version VIEW_CHANGED exists and its real ACK
-is delivered**, then retain all original assertions: selectedPath survives delayed snapshot, exact
-created-file bytes, untouched challenge.md, no errors, slow tab cannot override latest selection,
-project/session/delete/late mutation controls. Do not delete/assert-less/skip or increase limits.
-Where a snapshot cancels/rebinds view, observe/wait for the current scope rather than reuse old ACK.
-No product change to force an unthrottled stale view just to make the old test green.
+Current finding: **product K1 regression in path-only publication guarantee after awaited selection**,
+not demonstrated loss of local selectedPath. Both baseline FAILs/timeouts/assertions remain byte-identical.
+K's real integration FAIL prevents later first-test ACK/exact-FS assertions from executing; they remain
+NOT_RUN for that failed branch. Do NOT replace immediate assertions with waits, skip them or raise limits.
 
-A real post-throttle failure to send latest view/receive ACK, or activePath reverting, would instead
-be a **product K1** and requires repair; wait must not hide such outcome. Keep baseline2FAIL in
-risk register until corrected real HTTP/WS/FS test proves behavior. Frozen test unchanged in this A–B
-candidate. Existing stage05 actualMonaco proof and editor-view tests are complementary, not a claim
-that skipped later first-test branches passed.
+After independent ROOT A–B approval, plan a narrow product correction: safely publish path-only VIEW
+when selection/mutation and same-session snapshot selection reconciliation settle; retain current
+project/session/selectionRequest/generation guards, documentVersion/content ACK consistency, conflict/
+pending-write barrier and view singleflight ACK behavior. Preserve120ms trailing throttle for actual
+cursor/selection motion. No model trigger and no DTO change required for this correction. Do not flush
+old coordinates or old-scope callbacks to satisfy the test. Immediate safe path-only publication may
+coexist with the subsequent actual Monaco observation; latest observed cursor/selection must still win.
+
+Verify against the UNCHANGED real HTTP/WS/FS frozen selection test (including fresh save ACK, exact
+solution.py bytes, untouched challenge.md, latest-tab race and all scope/delete/mutation controls),
+plus stage05 view/chat/throttle checks. No fix or test migration is performed in this A–B readonly scope.
+If baseline closure is required before gate, K must present a separate minimal authorized scope; this
+proposal does not authorize it. Existing eventual publication and actualMonaco proof complement, not
+replace, the old immediate guarantee or unexecuted later branches.
