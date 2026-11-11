@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { fileURLToPath } from 'node:url';
 
 test('keyboard Monaco selection reaches next question provider with current ACK version; motion alone never calls provider', async ({ page }, info) => {
+  fs.mkdirSync(info.outputDir, { recursive: true });
   const base = fs.mkdtempSync(path.join(info.outputDir, 'editor-view-project-'));
   const root = path.join(base, 'workspace'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const selected = "A😀B";\nconst other = 1;\n');
