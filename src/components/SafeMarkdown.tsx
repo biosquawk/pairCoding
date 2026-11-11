@@ -16,12 +16,10 @@ interface SafeMarkdownProps {
 export const SafeMarkdown: React.FC<SafeMarkdownProps> = ({ content, className = '' }) => {
   // Parse markdown line by line into structured safe blocks
   const renderFormattedText = (text: string): React.ReactNode => {
-    // Escape angle brackets to prevent any HTML injection
-    const sanitized = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
     // Parse bold `**text**`, inline code `` `code` ``, links `[label](url)`
     const parts: React.ReactNode[] = [];
-    let remaining = sanitized;
+    // These strings are React text children, not HTML. React escapes them once.
+    let remaining = text;
     let keyIdx = 0;
 
     while (remaining.length > 0) {
@@ -228,19 +226,7 @@ export const SafeMarkdown: React.FC<SafeMarkdownProps> = ({ content, className =
       return;
     }
 
-    // Lists
-    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
-      const text = line.trim().substring(2);
-      elements.push(
-        <div key={index} className="flex items-start gap-2 text-xs text-zinc-300 my-1 pl-2">
-          <span className="text-blue-400 font-bold">•</span>
-          <div>{renderFormattedText(text)}</div>
-        </div>
-      );
-      return;
-    }
-
-    // Checkbox lists
+    // Checkbox lists must precede generic lists, which also match '- '.
     if (line.trim().startsWith('- [ ] ') || line.trim().startsWith('- [x] ')) {
       const isChecked = line.trim().startsWith('- [x] ');
       const text = line.trim().substring(6);
@@ -253,6 +239,18 @@ export const SafeMarkdown: React.FC<SafeMarkdownProps> = ({ content, className =
             className="rounded border-zinc-700 bg-zinc-900 text-blue-500 focus:ring-0"
           />
           <span className={isChecked ? 'line-through text-zinc-500' : ''}>{renderFormattedText(text)}</span>
+        </div>
+      );
+      return;
+    }
+
+    // Lists
+    if (line.trim().startsWith('- ') || line.trim().startsWith('* ')) {
+      const text = line.trim().substring(2);
+      elements.push(
+        <div key={index} className="flex items-start gap-2 text-xs text-zinc-300 my-1 pl-2">
+          <span className="text-blue-400 font-bold">•</span>
+          <div>{renderFormattedText(text)}</div>
         </div>
       );
       return;
