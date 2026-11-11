@@ -150,7 +150,8 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
       if (!current.validBase) throw new Error('UNSUPPORTED: require native loaded main.py, COACH and aria-autocomplete=none');
       return baseline;
     },
-    snapshot, expectHint(trial: number) { pendingHint = { trial, request: null }; },
+    snapshot, boundDOM: () => ({ host, input }),
+    expectHint(trial: number) { pendingHint = { trial, request: null }; },
     async flush() { flush(); await Promise.all([...pending]); if (output.recordingErrors.length) throw new Error('Metric recorder failed'); },
   };
   window.addEventListener('keydown', event => {
@@ -278,9 +279,11 @@ export const observeMetrics = (page: Page) => page.addInitScript({ content: metr
 
 /** Outside measured windows: actual rendered marker, never a model/API read or body scan. */
 export function calibrationMarkerEvidence({ marker, baseline }: { marker: string; baseline: any }) {
-  const state = (window as any).__qaMetric.snapshot();
-  const inputs = document.querySelectorAll('.monaco-editor [role="textbox"][aria-label="Edytor pliku main.py"]');
-  const editor = inputs.length === 1 ? inputs[0].closest('.monaco-editor') : null;
+  const observer = (window as any).__qaMetric;
+  const state = observer.snapshot();
+  const bound = observer.boundDOM();
+  const inputs = bound.host?.querySelectorAll('[role="textbox"][aria-label="Edytor pliku main.py"]');
+  const editor = inputs?.length === 1 && inputs[0] === bound.input ? bound.host : null;
   let renderedMarker = false;
   for (const line of editor?.querySelectorAll('.view-lines .view-line') || []) {
     if (!line.textContent?.replace(/\u00a0/g, ' ').includes(`# ${marker}`)) continue;

@@ -207,22 +207,24 @@ for (const kind of ['current', 'stale', 'unknown', 'foreign session', 'foreign c
   });
 }
 
-for (const kind of ['positive', 'native nonbreaking space', 'missing marker', 'hidden marker', 'detached marker', 'replaced input', 'unloaded input', 'wrong path', 'marker in another editor', 'missing input', 'multiple matching inputs'] as const) {
+for (const kind of ['positive', 'native nonbreaking space', 'missing marker', 'hidden marker', 'detached marker', 'replaced input', 'unloaded input', 'wrong path', 'marker in another editor', 'foreign marker after bound host loses class', 'missing input', 'multiple matching inputs'] as const) {
   test(`actual positive DOM evidence function: ${kind}`, () => {
     const baseline = { inputId: 1, hostId: 2, panelId: 3 };
     const state = { ...ready, ...baseline, ...(kind === 'replaced input' ? { inputId: 4 } : {}),
       ...(kind === 'unloaded input' ? { loaded: false } : {}), ...(kind === 'wrong path' ? { activePath: 'other.py' } : {}) };
     const line = { parentElement: null, isConnected: kind !== 'detached marker', getClientRects: () => [{}],
-      textContent: kind === 'missing marker' || kind === 'marker in another editor' ? 'other text'
+      textContent: kind === 'missing marker' || kind === 'marker in another editor' || kind === 'foreign marker after bound host loses class' ? 'other text'
         : kind === 'native nonbreaking space' ? '#\u00a0qa_calibration_student' : '# qa_calibration_student',
       hasAttribute: () => false };
     const otherLine = { ...line, textContent: '# qa_calibration_student' };
-    const editor = { querySelectorAll: () => [line] };
+    const editor = { querySelectorAll: (selector: string) => selector.includes('[role="textbox"]') ? inputs : [line] };
     const input = { closest: () => editor };
     const inputs = kind === 'missing input' ? [] : kind === 'multiple matching inputs' ? [input, input] : [input];
-    const context = vm.createContext({ window: { __qaMetric: { snapshot: () => state } },
+    const globalInputs = kind === 'foreign marker after bound host loses class'
+      ? [{ closest: () => ({ querySelectorAll: () => [otherLine] }) }] : inputs;
+    const context = vm.createContext({ window: { __qaMetric: { snapshot: () => state, boundDOM: () => ({ host: editor, input }) } },
       document: { querySelectorAll: (selector: string) => selector.includes('[role="textbox"]')
-        ? inputs : kind === 'marker in another editor' ? [line, otherLine] : [line] },
+        ? globalInputs : kind === 'marker in another editor' ? [line, otherLine] : [line] },
       getComputedStyle: () => ({ display: kind === 'hidden marker' ? 'none' : 'block', visibility: 'visible', opacity: '1' }) });
     // Function is exactly what page.evaluate executes, not a copied implementation of its filters.
     const filters = new vm.Script(`(${calibrationMarkerEvidence.toString()})(${JSON.stringify({ marker: 'qa_calibration_student', baseline })})`).runInContext(context);
