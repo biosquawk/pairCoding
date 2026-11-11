@@ -8,6 +8,7 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monacoType from 'monaco-editor';
 import { MonacoLspBridge, SAFE_SUGGEST_OPTIONS, disableNativeCompletionProviders, toModelUri, fromModelUri, normalizeContent, type EditorLanguageBinding } from '../services/monacoLspBridge';
+import { createBuiltinLanguageRegistry, languageForPath } from '../services/builtinLanguageRegistry';
 import { observeMonacoViewP2 } from '../services/editorViewP2';
 import { CoachHintBubble as HintBubble } from './CoachHintBubble';
 import type { HintRect } from './hintBubbleGeometryP2';
@@ -79,6 +80,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   onProposalResponse,
   onResolveConflict,
 }) => {
+  const retiredModelsRef=useRef(new Set<monacoType.editor.ITextModel>());
+  const [retiredDrafts,setRetiredDrafts]=useState<{path:string;content:string}[]>([]);
   const languageBridgeRef = useRef<MonacoLspBridge | null>(null);
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
@@ -96,19 +99,6 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   const activeFile = files.find((f) => f.path === activePath);
 
-  // Helper to map file extensions to Monaco language IDs
-  const getLanguageForPath = (path: string): string => {
-    if (path.endsWith('.java')) return 'java';
-    if (path.endsWith('.py')) return 'python';
-    if (path.endsWith('.js') || path.endsWith('.mjs') || path.endsWith('.cjs')) return 'javascript';
-    if (path.endsWith('.ts') || path.endsWith('.tsx')) return 'typescript';
-    if (path.endsWith('.md') || path.endsWith('.markdown')) return 'markdown';
-    if (path.endsWith('.json')) return 'json';
-    if (path.endsWith('.html')) return 'html';
-    if (path.endsWith('.css')) return 'css';
-    return 'plaintext';
-  };
-
   const modelUri = (monaco: Monaco, path: string) => monaco.Uri.parse(toModelUri(projectId,path));
   const pathForModel = (model: monacoType.editor.ITextModel | null, scope = projectId) => {
     try { return model ? fromModelUri(scope,model.uri.toString()) : null; } catch { return null; }
@@ -120,6 +110,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     monacoRef.current = monaco;
     // The new instance starts locked until the pre-paint model/ownership effects run.
     disableNativeCompletionProviders(monaco);
+    client.setBuiltinLanguageProvider(createBuiltinLanguageRegistry(monaco));
     editor.updateOptions({ ...SAFE_SUGGEST_OPTIONS, readOnly: true });
     // Monaco owns disposal. Never leave callbacks pointing at its disposed instance.
     editor.onDidDispose(() => {
@@ -189,11 +180,19 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     const uri = modelUri(monaco, activeFile.path);
     let model = monaco.editor.getModel(uri);
 
+    if(model && retiredModelsRef.current.has(model)) {
+      // Same canonical path recreated/renamed back: do not resurrect retired bridge callbacks.
+      // Keep recovery bytes visible before disposing the old undo lifetime. New URI has a fresh
+      // public Monaco undo stack; ordinary tab switches never take this branch.
+      const content=model.getValue();setRetiredDrafts(prev=>[...prev,{path:activeFile.path,content}]);
+      client.retainModelTombstone(activeFile.path,content);
+      retiredModelsRef.current.delete(model);if(editor.getModel()===model)editor.setModel(null);model.dispose();model=null;
+    }
     if (!model) {
-      model = monaco.editor.createModel(normalizeContent(activeFile.content), getLanguageForPath(activeFile.path), uri);
+      model = monaco.editor.createModel(normalizeContent(activeFile.content), languageForPath(activeFile.path), uri);
     } else {
       // Model exists; ensure language is correct
-      monaco.editor.setModelLanguage(model, getLanguageForPath(activeFile.path));
+      monaco.editor.setModelLanguage(model, languageForPath(activeFile.path));
     }
 
     if (editor.getModel() !== model) {
@@ -215,6 +214,31 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   }, [projectId, activePath, editorGeneration, activeFile?.loaded]);
 
+  // Closing/deleting retires old URI/lifetime. Rename deliberately creates a new model/undo
+  // lifetime; preserve old view by authenticated FILE_OPERATION below, never reuse old callbacks.
+  useLayoutEffect(() => {
+    const monaco=monacoRef.current,editor=editorRef.current;if(!monaco||!editor)return;
+    const live=new Set(files.filter(f=>f.kind==='FILE').map(f=>f.path));
+    for(const model of monaco.editor.getModels()) {
+      const path=pathForModel(model);if(!path)continue;
+      if(retiredModelsRef.current.has(model))continue;
+      if(live.has(path) && (openTabs.includes(path)||path===activePath))continue;
+      if(model===editor.getModel()) {viewStatesRef.current.set(model.uri.toString(),editor.saveViewState());editor.setModel(null);}
+      model.dispose();
+    }
+  },[projectId,files,openTabs,activePath,editorGeneration]);
+
+  // Model ownership is scoped to the project, including detached retired lifetimes.
+  // In-memory current drafts already belong to the sole LiveBackend recovery store.
+  useLayoutEffect(()=>()=>{
+    const monaco=monacoRef.current;if(!monaco)return;
+    for(const model of monaco.editor.getModels()) {
+      if(!pathForModel(model,projectId))continue;
+      retiredModelsRef.current.delete(model);model.dispose();
+    }
+    viewStatesRef.current.clear();
+  },[projectId]);
+
   // Binding lifecycle is per project/editor; no second model, socket or persistence path.
   useLayoutEffect(() => {
     const editor=editorRef.current,monaco=monacoRef.current;
@@ -223,6 +247,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     languageBridgeRef.current=bridge;
     return () => { if (languageBridgeRef.current===bridge) languageBridgeRef.current=null; bridge.dispose(); };
   }, [projectId, languageBinding, editorGeneration]);
+
+  useLayoutEffect(() => languageBinding?.subscribe(event=>{
+    if(event.type!=='FILE_OPERATION'||event.operation==='CREATE')return;
+    const monaco=monacoRef.current,editor=editorRef.current;if(!monaco||!editor)return;
+    const oldUri=modelUri(monaco,event.path),newUri=event.newPath?modelUri(monaco,event.newPath):null;
+    const old=monaco.editor.getModel(oldUri);if(!old)return;
+    retiredModelsRef.current.add(old);
+    const view=old===editor.getModel()?editor.saveViewState():viewStatesRef.current.get(oldUri.toString());
+    if(view && newUri)viewStatesRef.current.set(newUri.toString(),view);
+    // Public Monaco cannot migrate an undo stack to a different URI. Keep the old model as a
+    // detached recovery lifetime until authorized file list retirement, never publish it again.
+  }),[projectId,languageBinding]);
 
   // A listener generation is bound to the actual Monaco model and authenticated connection.
   useLayoutEffect(() => {
@@ -265,7 +301,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   useEffect(() => client.onFileUpdated((file) => {
     if (!file.isExternalOrSnapshot || !monacoRef.current) return;
     const model = monacoRef.current.editor.getModel(modelUri(monacoRef.current, file.path));
-    if (model && normalizeContent(model.getValue()) !== normalizeContent(file.content)) {
+    // A recreate/rename-back file read belongs to the NEW lifetime. Never overwrite the
+    // retired model's recoverable bytes before the layout phase archives and replaces it.
+    if (model && !retiredModelsRef.current.has(model) && normalizeContent(model.getValue()) !== normalizeContent(file.content)) {
       isApplyingCoachStepRef.current = true;
       try {
         const mutate=()=>model.setValue(normalizeContent(file.content));
@@ -302,7 +340,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       if (!model) {
         const file = client.getState().files.find(f => f.path === step.path);
         if (!file || file.loaded === false) return;
-        model = monaco.editor.createModel(normalizeContent(file.content), getLanguageForPath(step.path), uri);
+        model = monaco.editor.createModel(normalizeContent(file.content), languageForPath(step.path), uri);
       }
       if (editor.getModel() !== model) {
         const old = editor.getModel();
@@ -445,6 +483,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   return (
     <div className={`h-full flex flex-col bg-zinc-950 border-[4px] ${getBorderColor()} transition-colors duration-200 relative`}>
+      {retiredDrafts.length>0 && <details className="shrink-0 max-h-32 overflow-auto border border-amber-700 bg-zinc-950 p-2 text-xs"><summary>Odzyskane modele przed ponownym użyciem ścieżki ({retiredDrafts.length})</summary>{retiredDrafts.map((d,i)=><div key={i}><label htmlFor={`retired-${i}`}>{d.path} — tylko kopia odzyskiwania; bez publikacji</label><textarea id={`retired-${i}`} readOnly value={d.content} className="w-full bg-zinc-900" /></div>)}</details>}
       {/* Tabs Header */}
       <div className="flex items-center justify-between bg-zinc-950 border-b border-zinc-800 px-2 py-1 select-none overflow-x-auto">
         <div role="tablist" aria-label="Otwarte pliki" className="flex items-center gap-1 min-w-0">
@@ -553,7 +592,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         <div className="flex-1 min-h-0" hidden={!editorRef.current || !activeFile || activeFile.loaded === false}>
           <Editor
             height="100%"
-            defaultLanguage={activeFile ? getLanguageForPath(activeFile.path) : 'plaintext'}
+            defaultLanguage={activeFile ? languageForPath(activeFile.path) : 'plaintext'}
             defaultValue={activeFile?.content ?? ''}
             theme="paircoach-solarized-dark"
             onMount={handleEditorMount}

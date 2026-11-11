@@ -41,6 +41,9 @@ export interface RunProfile {
 }
 
 export interface ProjectSettings {
+  /** Raw settings retained for explicit V2/manual migration, never executable guessing. */
+  rawSettings?: unknown;
+  runtimeSettings?: import('../shared/runtime-v2').SettingsV2;
   wireRunProfiles?: import('../shared/protocol').RunProfile[];
   contextPatterns?: string[];
   aiConsent: boolean;
@@ -68,7 +71,9 @@ export type ExecutionStatus =
   | 'SUCCEEDED'
   | 'FAILED'
   | 'CANCELLED'
-  | 'TIMED_OUT';
+  | 'TIMED_OUT'
+  | 'STOPPING'
+  | 'PROCESS_STOP_UNCONFIRMED';
 
 export type TestOutcome =
   | 'NOT_APPLICABLE'

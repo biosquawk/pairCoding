@@ -9,6 +9,7 @@ import { parseRunProfiles, parseContextPatterns } from '../services/settingsVali
 import { Bot, Code2, FileCheck, RotateCcw, Settings, X } from 'lucide-react';
 
 interface ProjectSettingsModalProps {
+  settingsVersion?:number; connected?:boolean; canSave?:boolean; onOpenRuntimeSettings?:()=>void;
   isOpen: boolean;
   settings: ProjectSettings;
   snapshots?: SnapshotItem[];
@@ -21,6 +22,7 @@ interface ProjectSettingsModalProps {
 }
 
 export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
+  settingsVersion=0,connected=true,canSave=true,onOpenRuntimeSettings,
   isOpen,
   settings,
   snapshots = [],
@@ -38,6 +40,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
   const [profilesJson, setProfilesJson] = useState('[]');
   const [patternsJson, setPatternsJson] = useState('[]');
   const [settingsError, setSettingsError] = useState('');
+  const wasOpen=useRef(false),openingVersion=useRef(settingsVersion);
   const [saving, setSaving] = useState(false);
   useEffect(() => { if (isOpen) { setFolderPath(rootPath ?? ''); setFolderError(''); } }, [isOpen, rootPath]);
   useEffect(() => {
@@ -47,7 +50,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
     const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button, input, textarea, select, [tabindex="0"]') ?? []).filter(el => !el.hasAttribute('disabled') && el.getClientRects().length > 0);
     focusable()[0]?.focus();
     const keys = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); onClose(); }
+      if (event.key === 'Escape') { event.preventDefault(); if(!dialog?.getAttribute('aria-busy') || dialog.getAttribute('aria-busy')==='false')onClose(); }
       if (event.key !== 'Tab') return;
       const targets = focusable(), first = targets[0], last = targets[targets.length - 1];
       if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
@@ -64,7 +67,8 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 
   // Sync internal state whenever modal opens or external settings change
   useEffect(() => {
-    if (isOpen) {
+    if (isOpen && !wasOpen.current) {
+      openingVersion.current=settingsVersion;
       setAiConsent(settings.aiConsent);
       setTaskMode(settings.taskMode);
       setTaskFilePath(settings.taskFilePath);
@@ -74,14 +78,16 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
       setSettingsError('');
 
     }
-  }, [isOpen, settings]);
+    wasOpen.current=isOpen;
+  }, [isOpen, settings,settingsVersion]);
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setSettingsError('');
+    if(saving || !connected || !canSave || openingVersion.current!==settingsVersion) {setSettingsError('Sesja, uprawnienia lub wersja zmieniły się. Zachowano formularz.');return;}
     try {
-      const wireRunProfiles = parseRunProfiles(profilesJson);
+      const wireRunProfiles = onOpenRuntimeSettings ? settings.wireRunProfiles : parseRunProfiles(profilesJson);
       const contextPatterns = parseContextPatterns(patternsJson);
       setSaving(true);
       const accepted = await onSave({ ...settings, aiConsent, taskMode, taskFilePath, reviewNotesPath, wireRunProfiles, contextPatterns });
@@ -93,7 +99,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 select-none">
-      <div ref={dialogRef} role="dialog" aria-modal="true" aria-label="Ustawienia Projektu i Trenera AI" className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg max-h-[90vh] overflow-y-auto w-full shadow-2xl p-5 text-zinc-200">
+      <div ref={dialogRef} aria-busy={saving} role="dialog" aria-modal="true" aria-label="Ustawienia Projektu i Trenera AI" className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg max-h-[90vh] overflow-y-auto w-full shadow-2xl p-5 text-zinc-200">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div className="flex items-center gap-2 font-bold text-sm text-zinc-100">
             <Settings className="w-4 h-4 text-blue-400" />
@@ -105,7 +111,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="py-4 space-y-4 text-xs">
-          {onOpenProject && <fieldset disabled={opening || saving} className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
+          {onOpenProject && <fieldset disabled={opening || saving || !connected || !canSave || openingVersion.current!==settingsVersion} className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
             <label htmlFor="project-folder" className="block font-semibold">Lokalny folder zadania</label>
             <input id="project-folder" value={folderPath} onChange={event => setFolderPath(event.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1" placeholder="C:/Zadania/kata" />
             <p className="text-zinc-400">Pełna ścieżka na komputerze serwera. Nowy folder: plik challenge.md, zgoda AI wyłączona, bez odziedziczonych poleceń uruchamiania. Najpierw potwierdzimy autosave; konflikt blokuje otwarcie.</p>
@@ -199,19 +205,18 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             </div>
           </div>
 
+          {onOpenRuntimeSettings && <button type="button" className="underline" onClick={onOpenRuntimeSettings}>Ustawienia wykonania V2</button>}
           {/* Run Profiles Info */}
           <div className="p-2.5 rounded bg-zinc-950/60 border border-zinc-800/80 text-[11px] text-zinc-400">
-            <p>Uruchamiane programy działają z uprawnieniami lokalnego użytkownika, nie w sandboxie.</p><span className="font-semibold text-zinc-300">Profile wykonawcze: </span>
+            <p>{onOpenRuntimeSettings ? 'Uruchomienia wymagają jawnej konfiguracji V2 i gotowego środowiska. Brak gotowości nie blokuje ręcznej edycji.' : 'Jawny tryb developerskiej symulacji.'}</p><span className="font-semibold text-zinc-300">Profile wykonawcze: </span>
             {settings.runProfiles.map((p) => p.name).join(', ')}
           </div>
 
           <details className="p-3 rounded bg-zinc-950 border border-zinc-800">
             <summary className="cursor-pointer font-semibold">Konfiguracja Run/Test i kontekstu AI</summary>
-            <p className="my-2 text-zinc-400">Zapisując ustawienia jawnie zatwierdzasz program i argumenty dla lokalnego folderu. Polecenia NIE są powłoką. Nie wklejaj sekretów. Brak raportu testów oznacza UNKNOWN, nie PASSED.</p>
-            <label htmlFor="run-profiles" className="block mb-1">Profile uruchamiania (JSON, [] = brak)</label>
-            <textarea id="run-profiles" value={profilesJson} onChange={event => setProfilesJson(event.target.value)} spellCheck={false} className="w-full h-48 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" />
-            <p className="text-zinc-500">Przykład (dostosuj executable i args do komputera):</p>
-            <pre className="whitespace-pre-wrap break-words text-[10px] text-zinc-400">{'[{"kind":"RUN_MAIN","executable":"node","args":["main.js"],"cwd":".","timeoutMs":10000,"testReportFormat":"NONE","testReportGlob":null}]'}</pre>
+            {!onOpenRuntimeSettings ? <><label htmlFor="run-profiles" className="block mb-1">Profile symulacji (JSON)</label>
+            <textarea id="run-profiles" value={profilesJson} onChange={event=>setProfilesJson(event.target.value)} spellCheck={false} className="w-full h-48 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" /></> :
+              <p>Program i testy edytuj przez „Ustawienia wykonania V2”. Stare lub nieznane ustawienia zachowujemy bez automatycznego przenoszenia poleceń. Jeśli serwer nie dostarczył szkicu migracji, zachowaj kopię istniejącego pliku ustawień i przygotuj jawny plik schemaVersion 2 zgodnie z dokumentacją profilu, następnie uruchom ponownie projekt.</p>}
             <label htmlFor="context-patterns" className="block mb-1 mt-3">Wzorce plików kontekstu AI (JSON)</label>
             <textarea id="context-patterns" value={patternsJson} onChange={event => setPatternsJson(event.target.value)} spellCheck={false} className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" />
             <p className="text-zinc-500">Np. ["**/*.ts", "**/*.md"]. Bez zgody AI nic nie jest wysyłane. Sekrety są wykluczone niezależnie od wzorców.</p>
@@ -263,6 +268,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             )}
           </div>
 
+          {(!connected || !canSave || openingVersion.current!==settingsVersion) && <p role="alert">Zapis niedostępny: offline, brak uprawnienia lub konflikt wersji. Zachowano formularz; skopiuj pola przed odświeżeniem.</p>}
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-800">
             <button
               type="button"
@@ -273,7 +279,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             </button>
             <button
               type="submit"
-              disabled={opening || saving}
+              disabled={opening || saving || !connected || !canSave || openingVersion.current!==settingsVersion}
               className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-sm"
             >
               {saving ? 'Zapisywanie…' : 'Zapisz Ustawienia'}
