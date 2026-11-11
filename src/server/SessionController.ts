@@ -4,10 +4,12 @@ import { performance } from 'node:perf_hooks';
 import type { Session, Timer } from '../shared/protocol';
 import { WorkspaceService } from './WorkspaceService';
 import { AppError, validId } from './errors';
+import { viewOffsets, type EditorViewPayload, type VersionedEditorView } from './EditorView';
 
 export class SessionController extends EventEmitter {
   readonly state: Session;
   leaseClientId: string | null = null;
+  private editorView: { clientId: string; sessionId: string; view: VersionedEditorView } | null = null;
   private elapsed = 0;
   private runningSince: number | null = null;
   private baseline = new Map<string, string>();
@@ -18,7 +20,8 @@ export class SessionController extends EventEmitter {
   private muteTimer: ReturnType<typeof setTimeout> | null = null;
   private overtimeSent = false;
   private clock: ReturnType<typeof setInterval>;
-  private onChanged = (change: { actor: string }) => {
+  private onChanged = (change: { actor: string; path?: string }) => {
+    if (this.editorView && (!change.path || change.path === this.editorView.view.path)) this.clearEditorView();
     this.state.workspaceVersion = this.workspace.workspaceVersion;
     // Any external/settings change invalidates coach authority before another step.
     if (change.actor === 'EXTERNAL' || change.actor === 'SETTINGS') {
@@ -61,6 +64,7 @@ export class SessionController extends EventEmitter {
     // Revoke first, before notifying any consumer or abort listener.
     this.state.controlEpoch++;
     this.leaseClientId = null;
+    this.clearEditorView();
     this.state.writeOwner = 'STUDENT';
     this.state.interventionId = null;
     this.syncClock();
@@ -72,6 +76,43 @@ export class SessionController extends EventEmitter {
     if (this.closed) throw new AppError(503, 'SESSION_CLOSED', 'Session is closed.');
     if (sessionId !== this.state.sessionId) throw new AppError(409, 'SESSION_MISMATCH', 'Session is no longer current.');
     if (!validId(clientId) || this.leaseClientId !== clientId) throw new AppError(403, 'LEASE_REQUIRED', 'Only the active browser tab may mutate this session.');
+  }
+
+  clearEditorView(): void { this.editorView = null; }
+
+  setEditorView(clientId: string, sessionId: string, payload: EditorViewPayload): number | null {
+    this.assertClient(clientId, sessionId);
+    if (payload.path === null) {
+      if (payload.documentVersion !== null || payload.cursor !== null || payload.selection !== null)
+        throw new AppError(400, 'INVALID_VIEW', 'A cleared view must have null coordinates and version.');
+      this.clearEditorView();
+      this.state.activeFilePath = null;
+      return null;
+    }
+    const document = this.workspace.getDocument(payload.path);
+    if (!Number.isSafeInteger(payload.documentVersion) || payload.documentVersion !== document.version)
+      throw new AppError(409, 'DOCUMENT_VERSION_CONFLICT', 'View document version is no longer current.', document.version);
+    viewOffsets(document.content, payload.cursor, payload.selection);
+    // All checks precede mutation. Copy the accepted DTO, never retain caller-owned coordinates.
+    this.editorView = { clientId, sessionId, view: structuredClone({ projectId: this.workspace.projectId,
+      path: document.path, documentVersion: document.version, cursor: payload.cursor, selection: payload.selection }) };
+    this.state.activeFilePath = document.path;
+    return document.version;
+  }
+
+  getEditorView(): VersionedEditorView | null {
+    const stored = this.editorView;
+    if (!stored) return null;
+    const view = stored.view;
+    try {
+      if (this.closed || this.state.lifecycle === 'FINISHED' || stored.clientId !== this.leaseClientId ||
+          stored.sessionId !== this.state.sessionId || view.projectId !== this.workspace.projectId ||
+          view.projectId !== this.state.projectId || view.path !== this.state.activeFilePath ||
+          this.workspace.getDocument(view.path).version !== view.documentVersion) {
+        this.clearEditorView(); return null;
+      }
+      return structuredClone(view);
+    } catch { this.clearEditorView(); return null; }
   }
 
   getSession(): Session {
@@ -266,6 +307,7 @@ export class SessionController extends EventEmitter {
     this.state.writeOwner = 'STUDENT';
     this.state.interventionId = null;
     this.state.lifecycle = 'FINISHED';
+    this.clearEditorView();
     this.syncClock();
     this.emit('invalidate');
     this.publish();
@@ -278,6 +320,7 @@ export class SessionController extends EventEmitter {
     this.state.writeOwner = 'STUDENT';
     this.state.interventionId = null;
     this.leaseClientId = null;
+    this.clearEditorView();
     this.syncClock();
     this.workspace.off('changed', this.onChanged);
     clearInterval(this.clock);

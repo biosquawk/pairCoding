@@ -120,7 +120,7 @@ export class CoachAdapter {
     const pending = this.pending;
     this.pending = null;
     const context = buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
-      this.lastRun, this.interventions, this.sensitive);
+      this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView());
     context.trigger = { reason: pending.reason, messageId: pending.message?.messageId ?? null };
     const fingerprint = contextFingerprint(context);
     if (this.fingerprints.has(fingerprint)) return;
@@ -323,7 +323,7 @@ export class CoachAdapter {
     // Own response/edit is not a new fact, nor a reason to reanalyze the resultant context.
     if (this.options.workspace.settings.aiConsent) {
       this.fingerprints.add(contextFingerprint(buildContext(this.options.workspace, this.options.session.getSession(),
-        this.messages, this.lastRun, this.interventions, this.sensitive)));
+        this.messages, this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView())));
     }
   }
   private clearPointer(): void {
