@@ -29,11 +29,11 @@ export class DurableRunJournal {
   }
   async initialize(){
     await canonicalDirectory(path.dirname(this.directory));
-    await fs.mkdir(this.directory,{
-      mode:0o700,recursive:true
-    });
+    try { await fs.mkdir(this.directory, { mode:0o700 }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
     await canonicalDirectory(this.directory);
-    requireThat(((await fs.stat(this.directory)).mode&0o077)===0,'Journal must be private');
+    // On Win32 privacy relies on the configured controlled parent's inherited ACL, not mode bits.
+    if (process.platform !== 'win32') requireThat(((await fs.lstat(this.directory, { bigint:true })).mode & 0o077n) === 0n, 'Journal must be private');
   }
   private async locked<T>(fn:()=>Promise<T>):Promise<T> {
     const file=path.join(this.directory,'.transaction-lock');

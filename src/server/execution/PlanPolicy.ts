@@ -52,7 +52,8 @@ export async function validateApprovedCaches(policy:ExecutorPolicy,runtime:Appro
   requireThat(runtime.caches.length===1&&runtime.caches[0].readOnly===true,'Exactly one prepared read-only cache required');
   requireThat(policy.managedCacheRoot&&policy.managedCacheRoot!==homedir()&&policy.managedCacheRoot!==path.parse(policy.managedCacheRoot).root,'Private managed cache root required');
   await canonicalDirectory(policy.managedCacheRoot);
-  requireThat(((await fs.stat(policy.managedCacheRoot)).mode&0o077)===0,'Cache root must be private');
+  // Win32 controlled private-parent ACL inheritance is a deployment prerequisite, not chmod proof.
+  if (process.platform !== 'win32') requireThat(((await fs.lstat(policy.managedCacheRoot, { bigint:true })).mode & 0o077n) === 0n, 'Cache root must be private');
   for(const cache of runtime.caches) {
     await canonicalDirectory(cache.directory);
     requireThat(inside(policy.managedCacheRoot,cache.directory)&&!cache.directory.split(path.sep).some(p=>['.m2','.ssh','.aws','.docker'].includes(p)),'Private/home cache forbidden');

@@ -41,7 +41,8 @@ async function inventory(root: string): Promise<Entry[]> {
   async function visit(relative:string,depth:number) {
     requireThat(depth<=INPUT_LIMITS.depth && ++dirs<=INPUT_LIMITS.directories,'Input inventory limit');
     const dir=path.join(root,relative);
-    const before=await fs.lstat(dir);
+    await canonicalDirectory(dir);
+    const before=await fs.lstat(dir, { bigint:true });
     requireThat(before.isDirectory()&&!before.isSymbolicLink(),'Input directory changed');
     const entries=await fs.readdir(dir);
     requireThat(entries.length<=INPUT_LIMITS.files+INPUT_LIMITS.directories,'Input directory limit');
@@ -52,7 +53,7 @@ async function inventory(root: string): Promise<Entry[]> {
       const folded=rel.toLowerCase();
       requireThat(!casePaths.has(folded),'Case-colliding input');
       casePaths.add(folded);
-      const st=await fs.lstat(path.join(root,rel));
+      const st=await fs.lstat(path.join(root,rel), { bigint:true });
       requireThat(!st.isSymbolicLink(),'Input symlink');
       if(st.isDirectory()) await visit(rel,depth+1);
       else {
@@ -65,8 +66,9 @@ async function inventory(root: string): Promise<Entry[]> {
         });
       }
     }
-    const after=await fs.lstat(dir);
-    requireThat(before.ino===after.ino && before.dev===after.dev && before.mtimeMs===after.mtimeMs && before.ctimeMs===after.ctimeMs,'Input directory changed');
+    const after=await fs.lstat(dir, { bigint:true });
+    requireThat(after.isDirectory() && !after.isSymbolicLink() && before.ino===after.ino && before.dev===after.dev && before.mtimeNs===after.mtimeNs && before.ctimeNs===after.ctimeNs,'Input directory changed');
+    await canonicalDirectory(dir);
   }
   await visit('',0);
   return files.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
@@ -91,6 +93,7 @@ export async function copyAcknowledgedInput(options: CopyInputOptions): Promise<
     mode:0o700
   });
   try {
+    await canonicalDirectory(run);
     await ack.assertCurrent();
     requireThat(Number.isSafeInteger(ack.workspaceVersion)&&ack.workspaceVersion>=0,'Invalid ACK version');
     const expected=ack.files.map(f=>({
@@ -117,9 +120,15 @@ export async function copyAcknowledgedInput(options: CopyInputOptions): Promise<
       const bytes=await readRegular(path.join(source,f.path),INPUT_LIMITS.fileBytes);
       requireThat(sha256(bytes)===f.sha256,'Input changed during copy');
       const dest=path.join(input,f.path);
-      await fs.mkdir(path.dirname(dest),{
-        recursive:true,mode:0o700
-      });
+      // Create each private component only through an already checked parent.
+      let parent = input;
+      for (const part of f.path.split('/').slice(0, -1)) {
+        await canonicalDirectory(parent);
+        parent = path.join(parent, part);
+        try { await fs.mkdir(parent, { mode:0o700 }); }
+        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      }
+      await canonicalDirectory(parent);
       const fd=await fs.open(dest,'wx',0o444);
       try{
         await fd.writeFile(bytes);
@@ -140,13 +149,20 @@ export async function copyAcknowledgedInput(options: CopyInputOptions): Promise<
       ...result.identity,manifestSha256:inputManifestHash(result)
     };
     async function seal(dir:string){
-      for(const d of await fs.readdir(dir,{
-        withFileTypes:true
-      }))if(d.isDirectory())await seal(path.join(dir,d.name));
-      await fs.chmod(dir,0o555);
+      await canonicalDirectory(dir);
+      for (const name of await fs.readdir(dir)) {
+        const child = path.join(dir, name), st = await fs.lstat(child, { bigint:true });
+        requireThat(!st.isSymbolicLink(), 'Input symlink');
+        if (st.isDirectory()) await seal(child);
+        else requireThat(st.isFile() && st.nlink === 1n, 'Unsafe input seal');
+      }
+      // Windows directory mode bits are not an immutable/ACL boundary. The independent private
+      // copy, complete hash inventory and Docker RO mount are the boundary (not same-user-host).
+      if (process.platform !== 'win32') await fs.chmod(dir,0o555);
       await fsyncDirectory(dir);
     }
     await seal(input);
+    requireThat(canonicalJson(await inventory(input))===canonicalJson(before), 'Copied input changed');
     await durableWrite(path.join(run,'input-manifest.json'),canonicalJson(result));
     return Object.freeze({
       ...result,identity:Object.freeze(result.identity),files:Object.freeze(expected.map(f=>Object.freeze(f)))
@@ -164,7 +180,8 @@ export async function verifyAcknowledgedInput(input:AcknowledgedRunInput) {
   requireThat(input.identity.manifestSha256===inputManifestHash(input),'Input identity mismatch');
   const published=await readRegular(path.join(path.dirname(input.immutableDirectory),'input-manifest.json'),2*1024*1024);
   requireThat(published.toString()===canonicalJson(input),'Published input manifest mismatch');
-  requireThat(((await fs.stat(input.immutableDirectory)).mode&0o222)===0,'Input directory not sealed');
+  // Win32: canonical private run ancestry + independent hash-checked copy + required RO mount.
+  if (process.platform !== 'win32') requireThat(((await fs.lstat(input.immutableDirectory, { bigint:true })).mode & 0o222n) === 0n, 'Input directory not sealed');
   const actual=await inventory(input.immutableDirectory);
   requireThat(canonicalJson(actual)===canonicalJson(input.files.map(({
     path,sha256,bytes

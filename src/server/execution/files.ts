@@ -16,42 +16,66 @@ export function inside(root: string, file: string) {
   const rel = path.relative(root,file);
   return rel !== '' && !rel.startsWith('..' + path.sep) && rel !== '..' && !path.isAbsolute(rel);
 }
-/** Require a canonical, non-symlink path. No resolution of an attacker-selected link into an approved path. */
+/** Absolute, component-by-component canonical ancestry; never follow a symlink/junction alias. */
 export async function canonicalDirectory(directory: string) {
-  requireThat(path.isAbsolute(directory) && await fs.realpath(directory) === directory, 'Noncanonical directory');
-  const st = await fs.lstat(directory);
-  requireThat(st.isDirectory() && !st.isSymbolicLink(), 'Not a directory');
+  requireThat(path.isAbsolute(directory) && path.resolve(directory) === directory, 'Noncanonical directory');
+  let current = path.parse(directory).root;
+  for (const part of ['', ...directory.slice(current.length).split(path.sep).filter(Boolean)]) {
+    if (part) current = path.join(current, part);
+    const st = await fs.lstat(current, { bigint: true });
+    requireThat(st.isDirectory() && !st.isSymbolicLink() && await fs.realpath(current) === current,
+      'Noncanonical directory ancestry');
+  }
 }
 export async function readRegular(file: string, maxBytes: number) {
-  const fd = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+  requireThat(Number.isSafeInteger(maxBytes) && maxBytes >= 0, 'Invalid read bound');
+  await canonicalDirectory(path.dirname(file));
+  const initial = await fs.lstat(file, { bigint: true });
+  const safe = (st: typeof initial) => st.isFile() && !st.isSymbolicLink() && st.nlink === 1n && st.size >= 0n && st.size <= BigInt(maxBytes);
+  const stamp = (st: typeof initial) => [st.dev, st.ino, st.size, st.mtimeNs, st.ctimeNs, st.mode, st.nlink].join(':');
+  requireThat(safe(initial), 'Unsafe or oversized file');
+  const fd = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   try {
-    const a = await fd.stat();
-    requireThat(a.isFile() && a.nlink === 1 && a.size <= maxBytes, 'Unsafe or oversized file');
-    const data = Buffer.alloc(a.size);
-    let offset=0;
-    while(offset<data.length) {
-      const r=await fd.read(data,offset,data.length-offset,offset);
-      requireThat(r.bytesRead>0,'File changed');
-      offset+=r.bytesRead;
+    const opened = await fd.stat({ bigint: true });
+    requireThat(safe(opened) && stamp(initial) === stamp(opened), 'File changed while opening');
+    // One extra byte detects growth, including an initially empty file. Never read unbounded data.
+    const size = Number(initial.size), data = Buffer.alloc(size + 1);
+    let offset = 0;
+    while (offset < data.length) {
+      const r = await fd.read(data, offset, data.length - offset, offset);
+      if (r.bytesRead === 0) break;
+      offset += r.bytesRead;
     }
-    const b=await fd.stat();
-    const named=await fs.lstat(file);
-    requireThat(a.ino===b.ino && a.dev===b.dev && a.size===b.size && a.mtimeMs===b.mtimeMs && a.ctimeMs===b.ctimeMs && named.ino===b.ino && named.dev===b.dev && !named.isSymbolicLink(), 'File changed');
-    return data;
+    const after = await fd.stat({ bigint: true });
+    await canonicalDirectory(path.dirname(file));
+    const named = await fs.lstat(file, { bigint: true });
+    requireThat(offset === size && safe(after) && safe(named) &&
+      stamp(initial) === stamp(after) && stamp(initial) === stamp(named), 'File changed while reading');
+    return data.subarray(0, offset);
   } finally {
     await fd.close();
   }
 }
+/** Win32 lacks directory flush support in Node; file flush errors are NEVER suppressed.
+ * Only the documented unsupported-directory codes are tolerated, after canonical ancestry.
+ * This is reduced metadata durability, not POSIX-equivalent crash durability. */
 export async function fsyncDirectory(dir: string) {
-  const fd=await fs.open(dir,constants.O_RDONLY);
+  await canonicalDirectory(dir);
+  let fd: Awaited<ReturnType<typeof fs.open>> | undefined;
   try {
+    fd = await fs.open(dir, constants.O_RDONLY);
     await fd.sync();
-  }finally{
-    await fd.close();
+  } catch (error) {
+    if (process.platform !== 'win32' || !['EPERM', 'EACCES', 'EINVAL', 'EISDIR', 'EBADF'].includes(
+      (error as NodeJS.ErrnoException).code ?? '')) throw error;
+  } finally {
+    // Close is deliberately outside the scoped unsupported-open/sync catch.
+    if (fd) await fd.close();
   }
 }
 /** Atomic durable publication. Existing records are replaced only by this single-owner journal. */
 export async function durableWrite(file: string, bytes: string) {
+  await canonicalDirectory(path.dirname(file));
   const tmp=file+'.'+randomUUID()+'.tmp';
   const fd=await fs.open(tmp,'wx',0o600);
   try {
