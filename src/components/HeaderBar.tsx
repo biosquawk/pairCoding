@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 
 interface HeaderBarProps {
+  runtimeLabel?: string; languageStatus?: string; onOpenRuntimeSettings?:()=>void;
   writeOwner: WriteOwner;
   coachMode: CoachMode;
   aiStatus: AiStatus;
@@ -57,6 +58,7 @@ interface HeaderBarProps {
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
+  runtimeLabel,languageStatus,onOpenRuntimeSettings,
   writeOwner,
   coachMode,
   aiStatus,
@@ -88,7 +90,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   };
 
   const isCoachWriting = writeOwner === 'COACH';
-  const isProcessRunning = executionStatus === 'RUNNING' || executionStatus === 'QUEUED';
+  const isProcessRunning = ['RUNNING','QUEUED','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(executionStatus);
   const isOvertime = sessionStatus === 'OVERTIME';
 
   // Label for coachMode
@@ -113,6 +115,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
   return (
     <header className="bg-zinc-950 border-b border-zinc-800 select-none text-zinc-200">
+      {onOpenRuntimeSettings && <button type="button" onClick={onOpenRuntimeSettings} className="text-xs underline px-2 py-1" aria-label="Profil i ustawienia wykonania">Profil: {runtimeLabel || 'nieustalony'} · AutoComp {languageStatus || 'OFF'} · Docs N/A</button>}
       {/* Main Top Row */}
       <div className="flex flex-wrap items-center justify-between px-3 py-2 gap-2">
         {/* Left Section: Brand & Write Owner Status */}

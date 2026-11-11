@@ -17,6 +17,8 @@ import {
   ProposalType,
   TrainingScenario,
 } from './types/paircoach';
+import { RuntimeStatusV2 } from './components/RuntimeStatusV2';
+import { RuntimeSettingsV2 } from './components/RuntimeSettingsV2';
 import { HeaderBar } from './components/HeaderBar';
 import { DevSimulatorBar } from './components/DevSimulatorBar';
 import { FileTree } from './components/FileTree';
@@ -41,6 +43,7 @@ export default function App() {
   // Modals
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
   const [finishReason, setFinishReason] = useState<EndReason>('COMPLETED');
+  const [isRuntimeSettingsOpen,setIsRuntimeSettingsOpen]=useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const projectSettings = state.projectSettings;
 
@@ -177,7 +180,12 @@ export default function App() {
         limitMs={state.limitMs}
         pauseOnHidden={state.pauseOnHidden}
         taskMode={state.scenario.taskMode}
-        capabilities={state.capabilities}
+        capabilities={state.transportMode==='LIVE_BACKEND' ? {...state.capabilities,
+          canRunMain:state.capabilities.canRunMain && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired,
+          canRunTests:state.capabilities.canRunTests && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired} : state.capabilities}
+        runtimeLabel={state.runtime?.execution?.runtime.label}
+        languageStatus={state.transportMode==='LIVE_BACKEND' ? 'OFF' : undefined}
+        onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>setIsRuntimeSettingsOpen(true) : undefined}
         executionStatus={state.activeRun?.status || 'IDLE'}
         isDevSimulatorOpen={isDevSimulatorOpen}
         onEmergencyVeto={() => client.triggerVeto('EMERGENCY_BUTTON')}
@@ -208,8 +216,18 @@ export default function App() {
           <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
         </>}
         {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
+        {state.runtime?.reconciliationRequired && <span role="alert" className="text-amber-300">Wynik Run lub zapisu jest nieznany. Nowy Run i zapis zablokowane do autoryzowanego rozstrzygnięcia dokładnego żądania. Ponowne połączenie nie usuwa blokady; nie odświeżaj strony, zachowaj draft. Ręczna edycja i Stop znanego wykonania pozostają dostępne.</span>}
         {state.storageError && <span role="alert" className="text-rose-300">{state.storageError}</span>}
       </div>
+      {state.transportMode==='LIVE_BACKEND' && <details className="shrink-0 max-h-[35dvh] overflow-auto border-b border-zinc-800 px-3 text-xs">
+        <summary className="cursor-pointer py-1">Środowisko: {state.runtime?.execution?.runtime.label || 'profil nieustalony'} · Autouzupełnianie OFF · Docs N/A</summary>
+        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ? {...state.language,state:'OFF',autocomplete:'OFF'} : null}
+          run={state.runtime?.run ?? null} connected={!state.isOffline} canExecute={!state.isOffline}
+          pending={!!state.runtime?.pending}
+          error={state.runtime?.reconciliationRequired ? 'Wynik Run lub zapisu nieznany. Wymagany autoryzowany odczyt dokładnego requestId; ponowne połączenie nie usuwa blokady. Ręczna edycja dostępna.' : state.runtime?.error}
+          onRun={mode=>mode==='RUN_TESTS'?client.runTests():client.runMain()} onStop={()=>client.stopExecution()} onSettings={()=>setIsRuntimeSettingsOpen(true)} />
+        {state.languageProblem && <p role="status">{state.languageProblem}</p>}
+      </details>}
       {/* Dev Simulator Bar (Togglable) */}
       {isDevSimulatorOpen && (
         <DevSimulatorBar
@@ -263,6 +281,7 @@ export default function App() {
           <div className="flex-1 min-h-0 overflow-hidden relative">
             <EditorPanel
               projectId={state.scenario.id}
+              languageBinding={client.getEditorLanguageBinding()}
               files={state.files}
               openTabs={openTabs}
               activePath={state.activePath}
@@ -335,10 +354,18 @@ export default function App() {
         onConfirm={handleConfirmFinish}
       />
 
+      <RuntimeSettingsV2 open={isRuntimeSettingsOpen} settings={state.projectSettings.rawSettings}
+        expectedWorkspaceVersion={state.workspaceVersion} execution={state.runtime?.execution ?? null}
+        connected={!state.isOffline} canSave={state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired}
+        onSave={(settings,version)=>client.saveRuntimeSettings(settings,version)} onClose={()=>setIsRuntimeSettingsOpen(false)} />
       {/* Project Settings Modal */}
       <ProjectSettingsModal
         isOpen={isSettingsModalOpen}
         settings={projectSettings}
+        settingsVersion={state.workspaceVersion}
+        connected={!state.isOffline}
+        canSave={state.transportMode!=='LIVE_BACKEND' || (state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired)}
+        onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>{setIsSettingsModalOpen(false);setIsRuntimeSettingsOpen(true);} : undefined}
         rootPath={state.transportMode === 'LIVE_BACKEND' ? state.scenario.title : undefined}
         onOpenProject={state.transportMode === 'LIVE_BACKEND' ? (root) => client.openProject(root) : undefined}
         snapshots={state.snapshots}

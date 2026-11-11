@@ -93,7 +93,7 @@ export class PairCoachClient {
   }
 
   // Getters
-  public getState() {
+  public getState():ClientState {
     if (this.transportMode === 'LIVE_BACKEND') return this.live.getState();
     return { ...simulator.getFullState(), transportMode: this.transportMode, connectionError: null, taskReadError: null, storageError: null, snapshotsError: null, pendingPaths: [] } satisfies ClientState;
   }
@@ -163,6 +163,12 @@ export class PairCoachClient {
     simulator.setWindowPresence(presence);
   }
 
+  public getEditorLanguageBinding() { return this.transportMode === 'LIVE_BACKEND' ? this.live.getEditorLanguageBinding() : undefined; }
+  public retainModelTombstone(path:string,content:string) {return this.live.retainModelTombstone(path,content);}
+  public setBuiltinLanguageProvider(provider: import('./monacoLspBridge').EditorLanguageBinding['builtin']) {
+    if (this.transportMode==='LIVE_BACKEND') this.live.setBuiltinLanguageProvider(provider);
+  }
+  public saveRuntimeSettings(settings: import('../shared/runtime-v2').SettingsV2,version:number) { return this.live.saveRuntimeSettings(settings,version); }
   public getEditorViewScope() { return this.transportMode === 'LIVE_BACKEND' ? this.live.getEditorViewScope() : null; }
   public updateEditorView(view: EditorViewObservationP2) { if (this.transportMode === 'LIVE_BACKEND') this.live.updateEditorView(view); }
   public clearEditorView(scope: string | null) { if (this.transportMode === 'LIVE_BACKEND') this.live.clearEditorView(scope); }
