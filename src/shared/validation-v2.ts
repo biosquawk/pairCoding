@@ -65,7 +65,9 @@ const runtimeProfileValid = (p: RuntimeProfile) => fieldsValid(p.taskFields) && 
   (p.adapterFamily === 'java-maven' ? p.compilerRelease !== null && p.analysis.languageLevel === String(p.compilerRelease) && p.language.provider === 'jdt' : p.compilerRelease === null && p.language.provider !== 'jdt') &&
   (p.language.provider === 'jdt' ? p.language.imageLockKey !== null && p.language.serverJvm !== null : p.language.serverJvm === null) &&
   (['jdt','pylsp'].includes(p.language.provider) ? p.language.imageLockKey !== null : p.language.imageLockKey === null) &&
-  (p.language.provider !== 'pylsp' || p.adapterFamily === 'python');
+  (p.language.provider !== 'pylsp' || p.adapterFamily === 'python') &&
+  (p.language.provider !== 'builtin' || ['node','typescript'].includes(p.adapterFamily)) &&
+  (p.adapterFamily !== 'python' || p.language.provider === 'pylsp');
 export const validateRuntimeProfile = guard<RuntimeProfile>(R.RuntimeProfileSchema,runtimeProfileValid);
 export const validateRuntimeCatalog = guard<RuntimeCatalog>(R.RuntimeCatalogSchema,c=>unique(c.profiles.map(p=>p.id)) && c.profiles.every(runtimeProfileValid));
 export const validateImageLock = guard<ImageLock>(R.ImageLockSchema,l=>unique(l.images.map(i=>i.key)) && l.images.every(i=>unique(i.tools.map(t=>t.name))));
