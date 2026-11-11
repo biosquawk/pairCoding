@@ -1,7 +1,8 @@
-import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, opendirSync, readSync,
+import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, readSync,
   renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, parse, relative, resolve, sep } from 'node:path';
+import { NodeLanguageJournalDurability, type LanguageJournalDurability } from './LanguageJournalDurability';
 
 export const sha256 = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex');
 export interface LanguageProcessIntent {
@@ -69,33 +70,41 @@ export function readRegular(path: string, limit: number): Buffer {
   } finally { closeSync(fd); }
 }
 const absent = (error: unknown): boolean => (error as NodeJS.ErrnoException)?.code === 'ENOENT';
-const syncDirectory = (path: string): void => {
-  const fd = openSync(path, constants.O_RDONLY); try { fsyncSync(fd); } finally { closeSync(fd); }
-};
 /**
  * Private receipt root is NEVER mounted. Bind-backed boot/state are copied here after verified exit.
- * Requires filesystem directory-fsync support; unsupported durability fails closed, not simulated success.
+ * Regular files require writable-handle fsync. POSIX also requires directory fsync.
+ * Win32 follows existing SnapshotStorage atomic-rename/readback policy (no directory-flush power-loss promise).
  */
 export class DiskLanguageProcessJournal implements LanguageProcessJournal {
-  constructor(readonly root: string) { assertRealDirectory(root); }
+  constructor(readonly root: string, private readonly durability: LanguageJournalDurability = new NodeLanguageJournalDurability(assertRealDirectory)) { assertRealDirectory(root); }
+  get durabilityPolicy(): LanguageJournalDurability['policy'] { return this.durability.policy; }
   private directory(id: string): string {
     assertLaunchId(id); const path = join(this.root, id);
-    try { mkdirSync(path, { mode: 0o700 }); syncDirectory(this.root); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
-    assertRealDirectory(path); return path;
+    try { mkdirSync(path, { mode: 0o700 }); } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
+    assertRealDirectory(path); this.durability.directory(this.root); return path;
   }
   private put(id: string, name: string, bytes: Buffer): void {
     const dir = this.directory(id), destination = join(dir, name);
     try {
       if (!readRegular(destination, bytes.length).equals(bytes)) throw new Error('Durable record conflict');
-      const existing = openSync(destination, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-      try { fsyncSync(existing); } finally { closeSync(existing); }
-      syncDirectory(dir); return;
+      const before = lstatSync(destination, { bigint: true });
+      const existing = openSync(destination, constants.O_RDWR | (constants.O_NOFOLLOW ?? 0));
+      try {
+        const opened = fstatSync(existing, { bigint: true });
+        if (!before.isFile() || before.isSymbolicLink() || opened.nlink !== 1n || opened.ino !== before.ino || opened.dev !== before.dev || opened.size !== BigInt(bytes.length)) throw new Error('Durable record changed while opening writable flush handle');
+        this.durability.file(existing);
+      } finally { closeSync(existing); }
+      this.durability.directory(dir);
+      if (!readRegular(destination, bytes.length).equals(bytes)) throw new Error('Durable record changed after flush');
+      return;
     } catch (e) { if (!absent(e)) throw e; }
     // Single backend owner/phase admission serializes this journal. No shared multiwriter directory.
     const temporary = join(dir, `.${randomUUID()}.tmp`);
-    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try { writeFileSync(fd, bytes); fsyncSync(fd); } finally { closeSync(fd); }
-    try { renameSync(temporary, destination); syncDirectory(dir); }
+    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+    try { writeFileSync(fd, bytes); this.durability.file(fd); }
+    catch (error) { try { unlinkSync(temporary); } catch {} throw error; }
+    finally { closeSync(fd); }
+    try { renameSync(temporary, destination); this.durability.directory(dir); }
     catch (e) { try { unlinkSync(temporary); } catch {} throw e; }
     if (!readRegular(destination, bytes.length).equals(bytes)) throw new Error('Durable readback mismatch');
   }
