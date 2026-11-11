@@ -177,6 +177,6 @@ test('P1 real HTTP: oversize after-effect warns publicly, identical retry stays 
   const command={requestId:'oversize',clientId:'p1-client',sessionId:f.initial.sessionId};
   const first=await f.request('/api/run/large/stop',command),duplicate=await f.request('/api/run/large/stop',command);
   assert.equal(first.status,503);assert.equal(first.body.code,'COMMAND_RESULT_UNAVAILABLE');
-  assert.match(first.body.message,/mogła zostać wykonana/);assert.match(first.body.message,/nie ponawiaj z nowym ID/);
+  assert.match(first.body.message,/mogła się wykonać/);assert.match(first.body.message,/nie ponawiaj z nowym ID/);
   assert.deepEqual(duplicate,first);assert.equal(effects,1);
 });

@@ -45,8 +45,8 @@ export class TransportError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 const ledgerMessages:Record<string,string>={
-  COMMAND_RESULT_UNAVAILABLE:'Operacja mogła zostać wykonana, ale wynik przekroczył budżet rejestru. Zsynchronizuj stan; nie ponawiaj z nowym ID.',
-  COMMAND_STORAGE_UNAVAILABLE:'Operacja mogła zostać wykonana, ale rejestr komend jest niedostępny i wynik jest nieznany. Zachowaj dane i zsynchronizuj stan; nie ponawiaj operacji z nowym ID.',
+  COMMAND_RESULT_UNAVAILABLE:'Wynik przekroczył budżet rejestru. Operacja mogła się wykonać. Zsynchronizuj stan; nie ponawiaj z nowym ID.',
+  COMMAND_STORAGE_UNAVAILABLE:'Rejestr komend jest niedostępny; wynik jest nieznany. Operacja mogła się wykonać. Zsynchronizuj stan; nie ponawiaj z nowym ID.',
 };
 export function canonical(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);

@@ -14,7 +14,7 @@ const secret='SECRET_C:/private/token=do-not-publish';
 const codes=['COMMAND_RESULT_UNAVAILABLE','COMMAND_STORAGE_UNAVAILABLE'] as const;
 function warning(error:any,code:string) {
   assert.equal(error.code,code);assert.equal(error.retryable,false);
-  assert.match(error.message,/mogła zostać wykonana/);assert.match(error.message,/zsynchronizuj/i);
+  assert.match(error.message,/mogła się wykonać/);assert.match(error.message,/zsynchronizuj/i);
   assert.match(error.message,/nie ponawiaj.*nowym ID/);assert(!JSON.stringify(error).includes(secret));
 }
 function evidence(t:any,label:string,payload:unknown) {t.diagnostic(JSON.stringify({label,payload}));}
@@ -104,7 +104,7 @@ test('P1 real WS→LiveBackend autosave: ambiguous storage warning reaches conne
   await client.connect();await until(()=>!client.getState().isOffline);
   await client.selectFile('solution.js');client.saveFileContent('solution.js','local draft\n');
   await until(()=>client.getState().connectionError?.includes('COMMAND_STORAGE_UNAVAILABLE'));
-  assert.match(client.getState().connectionError!,/mogła zostać wykonana/);assert.match(client.getState().connectionError!,/nie ponawiaj.*nowym ID/);
+  assert.match(client.getState().connectionError!,/mogła się wykonać/);assert.match(client.getState().connectionError!,/nie ponawiaj.*nowym ID/);
   assert(client.getState().pendingPaths.includes('solution.js'));assert.equal(f.app.workspace.getDocument('solution.js').content,'initial\n');
   evidence(t,'LiveBackend connectionError',client.getState().connectionError);
 });

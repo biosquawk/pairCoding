@@ -43,7 +43,7 @@ async function fixture(post: () => Promise<Response>) {
 // public real-listener projection is separately covered by ledger-public-failures-p1.test.ts.
 test('P1 ledger503 finish retains UNKNOWN/original ID; repeated clicks and reconnect cannot POST; durable evidence settles',async t=>{
   for(const code of ['COMMAND_RESULT_UNAVAILABLE','COMMAND_STORAGE_UNAVAILABLE']) {
-    const f=await fixture(async()=>new Response(JSON.stringify({code,message:'Operacja mogła zostać wykonana. Zsynchronizuj stan; nie ponawiaj z nowym ID.',retryable:false}),{status:503}));
+    const f=await fixture(async()=>new Response(JSON.stringify({code,message:'Operacja mogła się wykonać. Zsynchronizuj stan; nie ponawiaj z nowym ID.',retryable:false}),{status:503}));
     t.after(()=>f.client.close());await f.client.finishSession('COMPLETED');await turn();
     const notice=f.client.getState().connectionError!;
     assert.match(notice,/Wynik zakończenia jest nieznany/);assert.match(notice,new RegExp(code));
