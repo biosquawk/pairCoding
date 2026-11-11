@@ -8,6 +8,14 @@ import type { SettingsTransactionIdentity, SettingsWriteLease } from './settings
 export type MutationAuth = { clientId: string; sessionId: string; controlEpoch: number; actor: 'STUDENT' | 'COACH' };
 export type FileMutation = MutationAuth & { operation: 'CREATE' | 'RENAME' | 'DELETE'; path: string;
   newPath: string | null; content: string | null; baseVersion: number | null };
+/** Internal retained gate authority, not a wire callback or complete filesystem/source proof. */
+export interface LanguageSourceLease {
+  /** Required throughout preparation and EVERY actual shadow copy/current check. */
+  assertCurrent(): void;
+  /** Scope/control/settings/version authority after copy, NOT permission to copy without FIFO.
+   * Language owner must additionally re-scan its complete raw source/overlay vector. */
+  assertRetainedCurrent(): void;
+}
 
 export class WriteGate {
   constructor(private readonly workspace: WorkspaceService, private readonly session: SessionController) {
@@ -149,6 +157,38 @@ export class WriteGate {
   mutateAsync(input: FileMutation): Promise<void> {
     const accepted = structuredClone(input);
     return this.workspace._withQueuedMutation(async () => this.mutateAuthorized(accepted));
+  }
+
+  /** @internal SAME FIFO/root exclusion through async prepare AND synchronous materialize/dispatch.
+   * Source owner must ADD its retained full synchronous scanner proof; workspaceVersion/watchers
+   * alone cannot prove external sources. Coordinator callback checks actual scope/ALL overlays,
+   * config/settings-source/preparation revocation before every sensitive operation.
+   */
+  _withLanguageSourceLease<T>(input: MutationAuth & { expectedWorkspaceVersion: number },
+      assertScopeCurrent: () => void, action: (lease: LanguageSourceLease) => Promise<T>): Promise<T> {
+    const accepted = structuredClone(input);
+    return this.workspace._withQueuedMutation(async () => {
+      let held = true, completed = false;
+      const assertRetainedCurrent = () => {
+        if (!held && !completed) throw new AppError(409, 'LANGUAGE_LEASE_RELEASED', 'Failed language preparation has no retained authority.');
+        this.authorize(accepted);
+        this.workspace._settingsVersionStore().assertCurrent();
+        if (this.workspace.workspaceVersion !== accepted.expectedWorkspaceVersion)
+          throw new AppError(409, 'WORKSPACE_VERSION_CONFLICT', 'Language source requires the current settled workspace.');
+        assertScopeCurrent();
+      };
+      const lease: LanguageSourceLease = Object.freeze({ assertRetainedCurrent, assertCurrent: () => {
+        if (!held) throw new AppError(409, 'LANGUAGE_LEASE_RELEASED', 'Language source lease is no longer held.');
+        assertRetainedCurrent();
+      } });
+      try {
+        lease.assertCurrent();
+        const result = await action(lease);
+        lease.assertCurrent();
+        completed = true;
+        return result;
+      } finally { held = false; }
+    });
   }
 
   private mutateAuthorized(input: FileMutation): void {

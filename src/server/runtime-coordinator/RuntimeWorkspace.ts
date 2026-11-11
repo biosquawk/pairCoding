@@ -10,6 +10,7 @@ import { WriteGate } from '../WriteGate';
 import { SettingsV2Store, type SettingsReadResult } from '../settings-v2';
 import { GateSettingsAuthority } from './GateSettingsAuthority';
 import { canonicalDirectory, privateDirectory } from './storage';
+import { readRuntimeProjectSettings, applyRuntimeSettingsMetadata } from './RuntimeProject';
 
 export interface RuntimeWorkspace {
   readonly workspace: WorkspaceService;
@@ -51,13 +52,9 @@ export async function createRuntimeWorkspace(options: { rootPath: string; dataDi
     const settingsStore = new SettingsV2Store({ settingsPath: path.join(settingsDirectory, 'settings.json'), authority: settingsAuthority });
     const settingsRecovery = await settingsAuthority.recoverStore(settingsStore);
     const readSettings = () => settingsStore.read();
-    const current = readSettings();
-    if (current.settings) {
-      const { runProfiles: _profiles, schemaVersion: _version, ...metadata } = current.settings;
-      // Legacy core policy consumes only neutral metadata. V2 execution MUST use settingsStore,
-      // never legacy profiles/host commands. No conversion of TaskRunConfig to an executable.
-      workspace.settings = { ...metadata, runProfiles: [] };
-    }
+    // Preserve safe nonexecution source metadata even for migration-required raw settings.
+    // This required DTO/form NEVER changes readSettings().settings:null into accepted settings.
+    applyRuntimeSettingsMetadata(workspace, readRuntimeProjectSettings({ workspace, settingsStore }).form);
     workspace._startObservation();
     return { workspace, session, gate, settingsStore, settingsAuthority, settingsRecovery, readSettings,
       close() { try { session!.close(); } finally { workspace.close(); } } };
