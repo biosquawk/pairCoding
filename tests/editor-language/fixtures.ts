@@ -1,0 +1,4 @@
+import { contentSha256 } from '../../src/services/editor-language/codec';
+import type { DocumentStamp,CompleteResult } from '../../src/shared/language-v2';
+export const stamp=(content='obj.',o:Partial<DocumentStamp>={}):DocumentStamp=>({projectId:'projekt',sessionId:'session',path:'src/Zażółć space 😀.ts',profileId:'neutral',connectionGeneration:'connection',configurationGeneration:'config',providerGeneration:'provider',shadowGeneration:'shadow',modelLifetime:'lifetime',localModelVersion:1,baseDocumentVersion:2,documentVersion:null,contentSha256:contentSha256(content),controlEpoch:0,requestGeneration:1,...o});
+export const result=(s=stamp(),requestId='request'):CompleteResult=>({requestId,stamp:s,items:[{id:'method',label:'method',detail:null,primary:{path:s.path,range:{startLine:1,startColumn:5,endLine:1,endColumn:5},text:'method()'},additionalTextEdits:[]}],isIncomplete:false});
