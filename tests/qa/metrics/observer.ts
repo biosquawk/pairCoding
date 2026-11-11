@@ -42,7 +42,7 @@ export function installMetricObserver(makePredicates: typeof createMetricPredica
       connected: Boolean(candidate?.isConnected && panel?.isConnected && host?.isConnected),
       visible: visible(candidate) && visible(host) && visible(panel),
       loaded: visible(host?.querySelector('.view-lines') || null) && visible(candidate),
-      activePath: selected?.textContent?.trim() || null, mode: host?.getAttribute('data-mode-id') || null,
+      activePath: selected?.textContent?.trim() || null, mode: host?.closest('[data-mode-id]')?.getAttribute('data-mode-id') || null,
       owner: coach && !student && panel?.classList.contains('border-blue-500') ? 'COACH'
         : student && !coach && panel?.classList.contains('border-red-600') ? 'STUDENT' : 'UNKNOWN',
       autocomplete: candidate?.getAttribute('aria-autocomplete') || null,
