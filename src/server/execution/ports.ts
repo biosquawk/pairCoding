@@ -22,7 +22,7 @@ export interface ExecutionPlan {
   caches: readonly Readonly<ManagedDependencyCache>[];
   resources: { memoryBytes: number; cpus: number; pids: number; logBytes: 10485760; logFiles: 1 };
   isolation: { nonRootUser: string; capDropAll: true; noNewPrivileges: true; readOnlyRoot: boolean; network: 'none' | 'loopback' };
-  spring: { containerPort: number; healthPath: string; bindHost: '127.0.0.1'; readinessTimeoutMs: number } | null;
+  service: { containerPort: number; healthPath: string; bindHost: '127.0.0.1'; readinessTimeoutMs: number } | null;
   /** Approved artifact types, not client-supplied globs/parser settings. */
   artifacts: readonly ('JUNIT_XML' | 'COMPILER_DIAGNOSTICS')[];
 }
