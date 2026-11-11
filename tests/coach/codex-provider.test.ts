@@ -108,3 +108,39 @@ test('Codex selection reaches real backend/WS consented chat via fakeCLI, not a 
   assert(sent.messages.some((m:any)=>m.text.includes('Dlaczego preview_sum')));assert.equal(record.env.PAIRCOACH_TOKEN,undefined);
   peer.assertProtocol();
 });
+
+test('Codex report uses report schema/instruction and preserves bounded isolated transport',async t=>{
+  const f=await fake(t,`emit({type:'turn.started'});emit({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({markdown:'# Podsumowanie\\nTesty: 3 zaliczone.'})}});emit({type:'turn.completed'});`);
+  const result=await f.provider.generateReport({aiConsent:true,runs:[{testCount:3,testOutcome:'PASSED'}]},'REPORT_INSTRUCTION',new AbortController().signal);
+  assert.equal(result,'# Podsumowanie\nTesty: 3 zaliczone.');
+  const r=await f.read();
+  assert.deepEqual(r.schema.required,['markdown']);
+  assert(r.argv.some((a:string)=>a.includes('developer_instructions=')&&a.includes('REPORT_INSTRUCTION')));
+  assert.equal(JSON.parse(r.input).runs[0].testCount,3);
+  assert.equal(r.env.GEMINI_API_KEY,undefined);
+  assert.deepEqual(r.entries,[]);
+  await assert.rejects(fs.stat(r.cwd));
+});
+
+test('public Finish selects Codex report without Gemini key and filters private context',async t=>{
+  const {createPairCoachServer}=await import('../../src/server/http');
+  const f=await fake(t,`emit({type:'turn.started'});emit({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({markdown:'# Raport AI Codex\\nZachowano kod próby.'})}});emit({type:'turn.completed'});`);
+  await fs.writeFile(path.join(f.rootPath,'main.js'),'module.exports = 0;');
+  await fs.writeFile(path.join(f.rootPath,'.env'),'NEVER_SEND_PRIVATE_FILE');
+  const old={provider:process.env.PAIRCOACH_COACH_PROVIDER,exe:process.env.PAIRCOACH_CODEX_EXE,key:process.env.GEMINI_API_KEY};
+  process.env.PAIRCOACH_COACH_PROVIDER='codex';process.env.PAIRCOACH_CODEX_EXE=path.join(f.base,'fake codex.cjs');delete process.env.GEMINI_API_KEY;
+  t.after(()=>{for(const [key,value] of Object.entries({PAIRCOACH_COACH_PROVIDER:old.provider,PAIRCOACH_CODEX_EXE:old.exe,GEMINI_API_KEY:old.key})){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
+  const token='PRIVATE_TEST_HTTP_TOKEN';
+  const app=createPairCoachServer({...f,port:0,token,enableCoach:false,enableExecution:true});
+  t.after(()=>app.close());
+  app.workspace.updateSettings({...app.workspace.settings,aiConsent:true,contextPatterns:['**/*']});
+  const state=app.session.getSession(),clientId='report-client';assert(app.session.claimLease(clientId));
+  const port=await app.listen();
+  const response=await fetch(`http://127.0.0.1:${port}/api/session/finish`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({requestId:'report-request',clientId,sessionId:state.sessionId,expectedWorkspaceVersion:app.workspace.workspaceVersion,reason:'COMPLETED'})});
+  assert.equal(response.status,202);
+  const deadline=Date.now()+5000;let report:any;
+  do {await delay(10);report=await fetch(`http://127.0.0.1:${port}/api/session/report?sessionId=${state.sessionId}`,{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());}while(report.status==='PENDING'&&Date.now()<deadline);
+  assert.equal(report.status,'READY');assert.match(report.markdown,/Raport AI Codex/);
+  const record=await f.read();assert.doesNotMatch(record.input,/NEVER_SEND_PRIVATE_FILE|PRIVATE_TEST_HTTP_TOKEN|rawBase64|outputTail/);
+  assert.equal(record.schema.required[0],'markdown');
+});

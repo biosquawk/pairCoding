@@ -116,6 +116,7 @@ export class CoachAdapter {
     this.pending = null;
     const context = buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
       this.lastRun, this.interventions, this.sensitive);
+    context.trigger = { reason: pending.reason, messageId: pending.message?.messageId ?? null };
     const fingerprint = contextFingerprint(context);
     if (this.fingerprints.has(fingerprint)) return;
     this.fingerprints.add(fingerprint);
@@ -168,9 +169,12 @@ export class CoachAdapter {
   private async applyDecision(decision: CoachDecision, context: CoachContext, pending: Pending, signal: AbortSignal): Promise<void> {
     switch (decision.kind) {
       case 'SILENT': return;
-      case 'REPLY':
-        this.options.emit('CHAT_REPLY', { replyTo: pending.message?.messageId ?? null, text: redactSecrets(decision.text, this.sensitive) });
+      case 'REPLY': {
+        const text = redactSecrets(decision.text, this.sensitive);
+        this.options.emit('CHAT_REPLY', { replyTo: pending.message?.messageId ?? null, text });
+        this.rememberReply(text);
         return;
+      }
       case 'HINT': {
         if (decision.path) {
           const document = context.documents.find(doc => doc.path === decision.path);
@@ -191,6 +195,7 @@ export class CoachAdapter {
         }
         const { kind: _, showPointer: __, ...hint } = decision;
         this.options.emit('COACH_HINT_BUBBLE', { id, ...hint, text: redactSecrets(hint.text, this.sensitive) });
+        this.rememberReply(redactSecrets(hint.text, this.sensitive));
         this.remember(decision.kind, decision.path);
         return;
       }
@@ -209,6 +214,11 @@ export class CoachAdapter {
       }
       case 'EDIT': return this.executePlan(decision, context, signal);
     }
+  }
+
+  private rememberReply(text: string): void {
+    this.messages.push({ messageId: randomUUID(), author: 'COACH', text, createdAt: new Date().toISOString() });
+    if (this.messages.length > 20) this.messages.shift();
   }
 
   private async executePlan(plan: Extract<CoachDecision, { kind: 'EDIT' }>, context: CoachContext, signal: AbortSignal): Promise<void> {

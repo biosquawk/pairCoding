@@ -168,3 +168,14 @@ test('TEST-024 real process crash leaves durable facts and interrupted PENDING r
   await until(() => restored.get(f.session.sessionId).status === 'READY');
   assert.equal(readFileSync(materialPath(), 'utf8'), before);
 });
+
+test('local report uses readable Run numbers and time while structured evidence retains IDs',async t=>{
+  const {service}=fixture(t);const s=service();const f=facts();
+  f.runs=[{runId:'fd6ee950-44ab-4ec0-961b-b9621d6395d0',mode:'RUN_TESTS',status:'SUCCEEDED',exitCode:0,testOutcome:'PASSED',testCount:3,finishedAt:'2026-11-11T10:00:00Z'} as any];
+  s.finish('COMPLETED',f);await until(()=>s.get(f.session.sessionId).status==='READY');
+  const report=s.get(f.session.sessionId);
+  assert.match(report.markdown!,/Uruchomienie 1 \(testy\): testy zaliczone; liczba testów: 3/);
+  assert.match(report.markdown!,/0 min 12 s/);
+  assert.doesNotMatch(report.markdown!,/fd6ee950|snapshot1|12345 ms/);
+  assert(report.evidenceIds.includes(f.runs[0].runId));
+});

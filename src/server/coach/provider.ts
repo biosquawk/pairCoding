@@ -1,7 +1,7 @@
 import type { CoachContext } from './context';
 import { CodexCoachProvider } from './CodexProvider';
 import { COACH_DECISION_SCHEMA } from './schema';
-import { COACH_SYSTEM_PROMPT } from './prompt';
+import { COACH_SYSTEM_PROMPT, COACH_CONVERSATION_RULES } from './prompt';
 
 export interface CoachProvider {
   readonly name: string;
@@ -32,7 +32,7 @@ export class GeminiCoachProvider implements CoachProvider {
       model: this.model,
       contents: JSON.stringify(context),
       config: {
-        systemInstruction: COACH_SYSTEM_PROMPT,
+        systemInstruction: COACH_SYSTEM_PROMPT + COACH_CONVERSATION_RULES,
         responseMimeType: 'application/json',
         responseJsonSchema: COACH_DECISION_SCHEMA,
         abortSignal: signal,

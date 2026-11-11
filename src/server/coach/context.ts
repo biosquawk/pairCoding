@@ -18,6 +18,7 @@ export interface CoachContext {
   timer: { status: Session['timer']['status']; elapsedMs: number; limitMs: number | null };
   documents: { path: string; version: number; content: string }[];
   omittedPaths: string[];
+  trigger?: { reason: string; messageId: string | null };
   messages: ChatEntry[];
   lastRun: RunFacts | null;
   previousInterventions: { kind: string; path: string | null; workspaceVersion: number }[];
@@ -102,8 +103,8 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
 export function contextFingerprint(context: CoachContext): string {
   // Ticking timer/server seq is NOT a new domain fact. Own edits never trigger this function.
   const { elapsedMs: _, ...timer } = context.timer;
-  const { controlEpoch: __, ...facts } = context;
-  return createHash('sha256').update(JSON.stringify({ ...facts, timer })).digest('hex');
+  const { controlEpoch: __, trigger: ___, ...facts } = context;
+  return createHash('sha256').update(JSON.stringify({ ...facts, messages: facts.messages.filter(m => m.author === 'STUDENT'), timer })).digest('hex');
 }
 
 export function isCoachWriteAllowed(path: string, settings: Settings): boolean {

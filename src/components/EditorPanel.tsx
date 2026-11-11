@@ -127,26 +127,36 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     // Define custom themes or subtle decorations
-    monaco.editor.defineTheme('paircoach-dark', {
+    monaco.editor.defineTheme('paircoach-solarized-dark', {
       base: 'vs-dark',
       inherit: true,
       rules: [
-        { token: 'comment', foreground: '6b7280', fontStyle: 'italic' },
-        { token: 'keyword', foreground: '60a5fa' },
-        { token: 'string', foreground: '34d399' },
-        { token: 'number', foreground: 'f59e0b' },
+        { token: '', foreground: '839496', background: '002b36' },
+        { token: 'comment', foreground: '586e75', fontStyle: 'italic' },
+        { token: 'keyword', foreground: '859900' },
+        { token: 'string', foreground: '2aa198' },
+        { token: 'number', foreground: 'd33682' },
+        { token: 'type', foreground: 'b58900' },
+        { token: 'delimiter', foreground: '839496' },
+        { token: 'operator', foreground: '859900' },
+        { token: 'identifier', foreground: '839496' },
       ],
       colors: {
-        'editor.background': '#09090b', // zinc-950
-        'editor.foreground': '#f4f4f5',
-        'editorLineNumber.foreground': '#52525b',
-        'editorLineNumber.activeForeground': '#a1a1aa',
-        'editor.selectionBackground': '#1e3a5f80',
-        'editor.inactiveSelectionBackground': '#1e293b60',
+        'editor.background': '#002b36',
+        'editor.foreground': '#839496',
+        'editorLineNumber.foreground': '#586e75',
+        'editorLineNumber.activeForeground': '#93a1a1',
+        'editor.selectionBackground': '#285460',
+        'editor.inactiveSelectionBackground': '#164550',
+        'editor.lineHighlightBackground': '#073642',
+        'editorCursor.foreground': '#93a1a1',
+        'editorWidget.background': '#073642',
+        'editorSuggestWidget.background': '#073642',
+        'editorGutter.background': '#002b36',
       },
     });
 
-    monaco.editor.setTheme('paircoach-dark');
+    monaco.editor.setTheme('paircoach-solarized-dark');
     setEditorGeneration(generation => generation + 1);
   };
 
@@ -496,7 +506,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             height="100%"
             defaultLanguage={activeFile ? getLanguageForPath(activeFile.path) : 'plaintext'}
             defaultValue={activeFile?.content ?? ''}
-            theme="paircoach-dark"
+            theme="paircoach-solarized-dark"
             onMount={handleEditorMount}
             onChange={(newVal) => {
               if (!isApplyingCoachStepRef.current && newVal !== undefined) {

@@ -1,3 +1,4 @@
+import { CodexCoachProvider } from './coach/CodexProvider';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID, timingSafeEqual, createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -109,7 +110,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     // Coach updates can publish more frames. Send this sequence before reentering emit.
     if (type==='RUN_STATE' && (payload as Run).finishedAt) {
       coach?.updateRun?.(clone(payload as Run));
-      if(!transitioning) {session.noteNewFact('RUN');coach?.trigger('RUN');}
+      if(!transitioning && !coach?.updateRun) {session.noteNewFact('RUN');coach?.trigger('RUN');}
     }
   }
   function getBundle():SessionBundle {
@@ -172,7 +173,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   function reportGenerator():((facts:FrozenFacts,signal:AbortSignal)=>Promise<string>)|undefined {
     const configured=options.reportGenerate;
     const apiKey=process.env.GEMINI_API_KEY;
-    if(!configured && !apiKey) return undefined; // ReportService's explicit local-facts fallback.
+    const useCodex=process.env.PAIRCOACH_COACH_PROVIDER?.trim().toLowerCase()==='codex';
+    if(!configured && !useCodex && !apiKey) return undefined; // ReportService's explicit local-facts fallback.
     return async (frozen,signal)=>{
       if(frozen.aiConsent!==true) throw new Error('AI_CONSENT_REQUIRED');
       const settings=frozen.settings as Settings;
@@ -203,6 +205,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       const projected=JSON.parse(JSON.stringify(safe,(_key,value)=>typeof value==='string'?redactSecrets(value,[token,apiKey||'']):value)) as ReportAIFacts;
       signal.throwIfAborted();
       if(configured) return configured(projected,signal);
+      if(useCodex) return new CodexCoachProvider().generateReport(projected, REPORT_SYSTEM_PROMPT, signal);
       const {GoogleGenAI}=await import('@google/genai');
       signal.throwIfAborted();
       const ai=new GoogleGenAI({apiKey:apiKey!});

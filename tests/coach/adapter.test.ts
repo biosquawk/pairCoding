@@ -612,3 +612,28 @@ test('R1 control: rejected superseded provider is silent and latest request stil
     [{ replyTo: 'latest', text: 'latest survives rejection' }]);
   assert.equal(f.events.some(event => event.type === 'ERROR'), false);
 });
+
+test('answered chat is history; each new Run has its own trigger and is analyzed once', async t => {
+  const contexts: Readonly<CoachContext>[] = [];
+  const f = fixture(t, { name: 'injected', decide: async ctx => {
+    contexts.push(structuredClone(ctx));
+    return ctx.trigger?.reason === 'CHAT'
+      ? { kind: 'REPLY', text: 'Cześć! Sprawdź przypadki w zadaniu.' }
+      : { kind: 'REPLY', text: 'Nowy wynik: testy zaliczone.' };
+  } });
+  f.adapter.trigger('CHAT', chat('welcome-request', 'Przywitaj mnie.'));
+  await until(() => f.events.filter(e => e.type === 'CHAT_REPLY').length === 1);
+  const run = { runId: 'completed-after-welcome', mode: 'RUN_TESTS', status: 'SUCCEEDED', finishedAt: new Date().toISOString(), testOutcome: 'PASSED', testCount: 3 } as Run;
+  f.adapter.updateRun(run);
+  await until(() => f.events.filter(e => e.type === 'CHAT_REPLY').length === 2);
+  assert.deepEqual(contexts[0].trigger, { reason: 'CHAT', messageId: 'welcome-request' });
+  assert.deepEqual(contexts[1].trigger, { reason: 'RUN', messageId: null });
+  assert.equal(contexts[1].messages.at(-1)?.author, 'COACH');
+  assert.equal(contexts[1].messages.at(-1)?.text, 'Cześć! Sprawdź przypadki w zadaniu.');
+  f.adapter.updateRun(run); f.adapter.trigger('RUN');
+  await delay(40);
+  assert.equal(contexts.length, 2, 'same Run and own reply are not new input');
+  f.adapter.trigger('CHAT', chat('new-request', 'Przywitaj mnie.'));
+  await until(() => contexts.length === 3);
+  assert.equal(contexts[2].trigger?.messageId, 'new-request', 'a genuinely new explicit request is allowed');
+});
