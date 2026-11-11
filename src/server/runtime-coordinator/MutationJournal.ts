@@ -151,6 +151,35 @@ export class DurableMutationJournal {
       return outcome;
     });
   }
+  /**
+   * INTERNAL operation-specific recovery. The trusted callback must prove the exact original
+   * outcome from its durable effect journal, never current UI state/absence in RAM. Not a wire
+   * callback. Hold exclusion through proof AND fsynced settlement; a live admitted effect may
+   * still commit, so it must not be inspected into a definitive abort here.
+   */
+  recover<T>(original: MutationIdentity, prove: () => Promise<MutationOutcome<T>>): Promise<MutationOutcome<T>> {
+    const identity = snapshot(original), key = this.key(identity);
+    return this.serial.run(async () => {
+      this.assertOwner();
+      const prior = this.existing(key, identity);
+      if (!prior) {
+        const outcome = { state: 'DEFINITIVELY_ABORTED', result: null } as const;
+        this.reserve(key, this.record(identity, outcome));
+        return outcome;
+      }
+      if (prior.outcome.state !== 'UNKNOWN') return snapshot(prior.outcome) as MutationOutcome<T>;
+      if (this.activeEffects) return { state: 'UNKNOWN', result: null };
+      let outcome: MutationOutcome<T>;
+      try {
+        outcome = snapshot(await prove());
+        if (!outcome || !['UNKNOWN','COMMITTED','DEFINITIVELY_ABORTED'].includes(outcome.state) ||
+            (outcome.state !== 'COMMITTED' && outcome.result !== null)) throw Error('Invalid recovery proof');
+      } catch { return { state: 'UNKNOWN', result: null }; }
+      this.assertOwner(); this.existing(key, identity);
+      if (outcome.state !== 'UNKNOWN') this.settle(key, this.record(identity, outcome));
+      return snapshot(outcome);
+    });
+  }
   /** Close only after all admitted effects have settled; pending records intentionally survive. */
   close(): Promise<void> {
     return this.serial.run(() => {

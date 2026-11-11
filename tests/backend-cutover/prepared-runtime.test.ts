@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
-import { PreparedRuntimeResolver, type PreparedRuntimeDependencies } from '../../src/server/runtime-coordinator/PreparedRuntimeResolver';
+import { PreparedRuntimeResolver, createPreparedRuntimeInspection, type PreparedRuntimeDependencies } from '../../src/server/runtime-coordinator/PreparedRuntimeResolver';
 import type { ResolvedRuntime } from '../../src/server/runtime-config';
 import type { RunProfileV2, RuntimeProfile } from '../../src/shared/runtime-v2';
 const hash = (b: string | Buffer) => createHash('sha256').update(b).digest('hex');
@@ -33,7 +33,7 @@ function fixture(t: TestContext) {
     project: { root: workspace, files: [] }, workingDirectory: '.', outputRoot: root, imageTag: image.image, dependencySha256: d, expectedTools: profile.expectedTools, installationId: 'unit-install' },
     toolchainHash: identity.toolchainHash, dispatcherFiles: identity.dispatcherFiles, imageId: image.imageId, imageInspect: inspected,
     container: { Id: 'e'.repeat(64), State: { Running: false, ExitCode: 0 }, Config: { Image: image.imageId, Labels: { 'paircoach.installation': 'unit-install', 'paircoach.role': 'prepare' } } } };
-  const write = () => { fs.writeFileSync(path.join(root, 'receipt.json'), JSON.stringify(receipt)); fs.writeFileSync(path.join(cache, 'tools.json'), JSON.stringify(actualTools)); fs.writeFileSync(path.join(cache, 'dependencies-prepared.json'), JSON.stringify(prepared)); };
+  const write = () => { receipt.observedImage = { Id: receipt.imageInspect.Id, RepoDigests: receipt.imageInspect.RepoDigests ?? [], Descriptor: receipt.imageInspect.Descriptor ?? null }; receipt.cacheEvidence = { root: cache, tools: { path: 'tools.json', sha256: hash(JSON.stringify(actualTools)), actual: actualTools }, dependencies: { path: 'dependencies-prepared.json', sha256: hash(JSON.stringify(prepared)), actual: prepared } }; fs.writeFileSync(path.join(root, 'receipt.json'), JSON.stringify(receipt)); fs.writeFileSync(path.join(cache, 'tools.json'), JSON.stringify(actualTools)); fs.writeFileSync(path.join(cache, 'dependencies-prepared.json'), JSON.stringify(prepared)); };
   write();
   const runtime: ResolvedRuntime = { configurationGeneration: 'cfg', configPath: path.join(temp, 'paircoach.runtime.json'), workspaceRoot: workspace, profile: structuredClone(profile), image,
     languageImage: null, catalog: { schemaVersion: 1, profiles: [profile] }, imageLock: { schemaVersion: 1, images: [image] }, config: { schemaVersion: 1, activeProfile: profile.id, workspaceRoot: workspace,
@@ -69,7 +69,7 @@ test('UNIT image config Id is NEVER accepted as OCI digest, even when inspect/lo
   const f = fixture(t); f.image.digest = f.image.imageId; f.inspected.RepoDigests = []; f.write(); await denied(f);
 });
 test('UNIT real Descriptor manifest identity is usable, image Id or unrelated descriptor is not', async t => {
-  const f = fixture(t); const inspected: any = f.inspected; inspected.RepoDigests = []; inspected.Descriptor = { digest: f.image.digest, mediaType: 'application/vnd.oci.image.manifest.v1+json' }; f.write();
+  const f = fixture(t); const inspected: any = f.inspected; inspected.RepoDigests = []; inspected.Descriptor = { digest: f.image.digest, mediaType: 'application/vnd.oci.image.manifest.v1+json', size: 1024 }; f.write();
   assert.equal((await f.resolver().probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
   inspected.Descriptor.mediaType = 'application/vnd.oci.image.config.v1+json'; f.write(); await denied(f);
 });
@@ -123,4 +123,30 @@ test('UNIT ambiguous two matching outputs fail; private diagnostics never echo l
   await assert.rejects(f.resolver([f.root, second]).resolve(f.runtime, 'RUN_MAIN', run), { code: 'PREPARE_REQUIRED' });
   f.dependencies.inspectEngine = async () => { throw Error('/private/secret-token'); };
   assert.ok(!JSON.stringify(await f.resolver().probe(f.runtime, 'RUN_MAIN', run)).includes('secret-token'));
+});
+
+
+test('UNIT accepted transport observer permits only bounded read-only engine/image commands', async () => {
+  const calls: { args: readonly string[]; options: unknown }[] = [];
+  const observer = createPreparedRuntimeInspection({ run: async (args, options) => { calls.push({ args, options }); return { exitCode: 0, stdout: '{"unit":true}', stderr: '' }; } });
+  assert.deepEqual(await observer.inspectEngine(), { unit: true });
+  assert.deepEqual(await observer.inspectImage('sha256:' + 'a'.repeat(64)), { unit: true });
+  assert.deepEqual(calls.map(c => c.args), [['info', '--format', '{{json .}}'], ['image', 'inspect', 'sha256:' + 'a'.repeat(64)]]);
+  assert.ok(calls.every(c => JSON.stringify(c.options) === JSON.stringify({ timeoutMs: 3000, maxBytes: 1024 * 1024 })));
+  assert.throws(() => observer.inspectImage('--privileged')); assert.equal(calls.length, 2);
+  const failed = createPreparedRuntimeInspection({ run: async () => ({ exitCode: 1, stdout: '{}', stderr: '/private/do-not-publish' }) });
+  await assert.rejects(failed.inspectEngine());
+});
+
+
+test('UNIT cache marker bytes must still match producer evidence, not just self-consistent current claims', async t => {
+  const f = fixture(t);
+  fs.writeFileSync(path.join(f.cache, 'tools.json'), JSON.stringify([{ ...f.actualTools[0], raw: 'forged-but-same-version' }]));
+  await denied(f);
+});
+test('UNIT malformed RepoDigest strings or incomplete OCI descriptors never confer readiness', async t => {
+  const f = fixture(t);
+  f.inspected.RepoDigests = ['not a repository@' + f.image.digest]; f.write(); await denied(f);
+  const inspected: any = f.inspected;
+  inspected.RepoDigests = []; inspected.Descriptor = { digest: f.image.digest, mediaType: 'application/vnd.oci.image.manifest.v1+json' }; f.write(); await denied(f);
 });

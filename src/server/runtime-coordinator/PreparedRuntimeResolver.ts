@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { ManagedDependencyCache } from '../execution/ports';
+import type { DockerTransport } from '../execution/DockerTransport';
 import type { ResolvedRuntime, RuntimeModeProbe } from '../runtime-config';
 import type { ImageLockEntry, ModeReadiness, RunKind, RunProfileV2, ToolVersion } from '../../shared/runtime-v2';
 import { validateTaskForProfile } from '../../shared/validation-v2';
@@ -22,6 +23,21 @@ export interface PreparedRuntimeDependencies {
   /** Actual read-only engine info/image inspect, composed with approved credential-free CLI transport. */
   inspectEngine(): Promise<unknown>;
   inspectImage(imageId: string): Promise<unknown>;
+}
+/** Accepted transport owns absolute CLI/environment policy. This helper can only read info/image. */
+export function createPreparedRuntimeInspection(transport: Pick<DockerTransport, 'run'>): Pick<PreparedRuntimeDependencies, 'inspectEngine' | 'inspectImage'> {
+  const inspect = async (args: readonly string[]): Promise<unknown> => {
+    const response = await transport.run(args, { timeoutMs: 3000, maxBytes: 1024 * 1024 });
+    requireThat(response.exitCode === 0 && Buffer.byteLength(response.stdout, 'utf8') <= 1024 * 1024);
+    return JSON.parse(response.stdout);
+  };
+  return {
+    inspectEngine: () => inspect(['info', '--format', '{{json .}}']),
+    inspectImage: imageId => {
+      requireThat(digest(imageId));
+      return inspect(['image', 'inspect', imageId]);
+    },
+  };
 }
 export interface PreparedRuntimeSelection {
   readonly outputRoot: string;
@@ -66,8 +82,8 @@ function image(value: unknown, lock: ImageLockEntry): void {
   const descriptor = i.Descriptor ? object(i.Descriptor) : null;
   const manifestTypes = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.oci.image.index.v1+json',
     'application/vnd.docker.distribution.manifest.v2+json', 'application/vnd.docker.distribution.manifest.list.v2+json'];
-  const descriptorMatch = descriptor && descriptor.digest === lock.digest && manifestTypes.includes(String(descriptor.mediaType));
-  const repoMatch = Array.isArray(i.RepoDigests) && i.RepoDigests.some(v => typeof v === 'string' && v.endsWith('@' + lock.digest) && v.length > lock.digest.length + 1);
+  const descriptorMatch = descriptor && descriptor.digest === lock.digest && manifestTypes.includes(String(descriptor.mediaType)) && Number.isSafeInteger(descriptor.size) && Number(descriptor.size) > 0;
+  const repoMatch = Array.isArray(i.RepoDigests) && i.RepoDigests.some(v => typeof v === 'string' && /^[a-z0-9]+(?:[._-][a-z0-9]+)*(?::[0-9]{1,5})?(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)*@sha256:[a-f0-9]{64}$/.test(v) && v.endsWith('@' + lock.digest));
   requireThat(descriptorMatch || repoMatch); // NEVER image config Id promoted to OCI manifest digest.
 }
 function tools(value: unknown, expected: readonly ToolVersion[], measured = false): void {
@@ -139,6 +155,8 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
         dispatcher(identity.dispatcherFiles); dispatcher(r.dispatcherFiles);
         requireThat(canonical(r.dispatcherFiles) === canonical(identity.dispatcherFiles));
         image(r.imageInspect, runtime.image);
+        const observedImage = object(r.imageInspect);
+        requireThat(canonical(r.observedImage) === canonical({ Id: observedImage.Id, RepoDigests: observedImage.RepoDigests ?? [], Descriptor: observedImage.Descriptor ?? null }));
         image(await this.dependencies.inspectImage(runtime.image.imageId), runtime.image);
         const container = object(r.container), state = object(container.State), config = object(container.Config), labels = object(config.Labels);
         requireThat(hex(container.Id) && state.Running === false && state.ExitCode === 0 && config.Image === runtime.image.imageId &&
@@ -148,6 +166,10 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
         const toolPath = path.join(directory, 'tools.json'), preparedPath = path.join(directory, 'dependencies-prepared.json');
         const toolBytes = readRecord(toolPath, 128 * 1024)!, prepared = read(preparedPath, 256 * 1024);
         const actualTools = decode(toolBytes);
+        const cacheEvidence = object(r.cacheEvidence), toolEvidence = object(cacheEvidence.tools), dependencyEvidence = object(cacheEvidence.dependencies);
+        requireThat(cacheEvidence.root === directory && toolEvidence.path === 'tools.json' && dependencyEvidence.path === 'dependencies-prepared.json' &&
+          toolEvidence.sha256 === sha256(toolBytes) && dependencyEvidence.sha256 === sha256(prepared.bytes) &&
+          canonical(toolEvidence.actual) === canonical(actualTools) && canonical(dependencyEvidence.actual) === canonical(prepared.data));
         tools(actualTools, runtime.profile.expectedTools, true);
         const p = prepared.data;
         requireThat(p.family === request.family && p.workingDirectory === request.workingDirectory && p.dependencySha256 === dependency &&

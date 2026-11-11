@@ -129,3 +129,57 @@ process.stdout.write(outcome.state+'\\n'); setInterval(()=>{},1000);`;
   assert.deepEqual(await journal.execute(identity(),async()=>{effects++;return committed('late');}),{state:'DEFINITIVELY_ABORTED',result:null});
   assert.equal(effects,0);
 });
+
+test('UNIT trusted effect-journal recovery resolves only exact original UNKNOWN; no admission effect replay', async t => {
+  const directory = fixture(t); let journal = openJournal(directory), effects = 0;
+  await journal.execute(identity(), async () => { effects++; throw Error('lost effect outcome'); });
+  await journal.close(); journal = openJournal(directory);
+  assert.deepEqual(await journal.recover(identity(), async () => ({ state: 'UNKNOWN', result: null })), { state: 'UNKNOWN', result: null });
+  await assert.rejects(journal.execute(identity('new'), async () => committed('must not start')), { code: 'MUTATION_PENDING' });
+  const original = { runId: 'retained-original', outputTail: 'immutable-original' };
+  assert.deepEqual(await journal.recover(identity(), async () => committed(original)), committed(original));
+  original.outputTail = 'mutated-caller';
+  await journal.close(); journal = openJournal(directory);
+  assert.deepEqual(await journal.reconcile(identity()), committed({ runId: 'retained-original', outputTail: 'immutable-original' }));
+  assert.deepEqual(await journal.recover(identity(), async () => { assert.fail('definitive outcomes are immutable'); }), committed({ runId: 'retained-original', outputTail: 'immutable-original' }));
+  assert.deepEqual(await journal.execute(identity('new'), async () => committed('new admitted')), committed('new admitted'));
+  assert.equal(effects, 1);
+  await assert.rejects(journal.recover({ ...identity(), payload: { changed: true } }, async () => committed('wrong')), { code: 'IDEMPOTENCY_CONFLICT' });
+});
+
+test('UNIT recovery never invokes proof during a still-live effect and cannot race an abort', async t => {
+  const journal = openJournal(fixture(t)); let release!: () => void, entered!: () => void, proofs = 0;
+  const inside = new Promise<void>(r => { entered = r; }), wait = new Promise<void>(r => { release = r; });
+  const pending = journal.execute(identity(), async () => { entered(); await wait; return committed('actual live commit'); });
+  await inside;
+  assert.deepEqual(await journal.recover(identity(), async () => { proofs++; return { state: 'DEFINITIVELY_ABORTED', result: null }; }), { state: 'UNKNOWN', result: null });
+  release(); await pending;
+  assert.equal(proofs, 0); assert.deepEqual(await journal.reconcile(identity()), committed('actual live commit'));
+});
+
+test('UNIT recovery retains unknown on failed proof; proven abort is durable before delayed original', async t => {
+  const directory = fixture(t); let journal = openJournal(directory), effects = 0;
+  await journal.execute(identity(), async () => { effects++; throw Error('uncertain'); });
+  assert.deepEqual(await journal.recover(identity(), async () => { throw Error('daemon unavailable'); }), { state: 'UNKNOWN', result: null });
+  await journal.recover(identity(), async () => ({ state: 'DEFINITIVELY_ABORTED', result: null }));
+  await journal.close(); journal = openJournal(directory);
+  assert.deepEqual(await journal.execute(identity(), async () => { effects++; return committed('late'); }), { state: 'DEFINITIVELY_ABORTED', result: null });
+  assert.equal(effects, 1);
+  let absentProof = false;
+  assert.deepEqual(await journal.recover(identity('absent'), async () => { absentProof = true; return committed('incorrect'); }), { state: 'DEFINITIVELY_ABORTED', result: null });
+  assert.equal(absentProof, false);
+});
+
+test('UNIT trusted recovery holds serialization through awaited proof and settlement', async t => {
+  const journal = openJournal(fixture(t)); await journal.execute(identity(), async () => { throw Error('uncertain'); });
+  let release!: () => void, entered!: () => void;
+  const inside = new Promise<void>(r => { entered = r; }), wait = new Promise<void>(r => { release = r; });
+  const recovering = journal.recover(identity(), async () => { entered(); await wait; return committed('exact-proof'); });
+  await inside;
+  let nextEntered = false;
+  const next = journal.execute(identity('next'), async () => { nextEntered = true; return committed('next'); });
+  const reading = journal.reconcile(identity());
+  await new Promise<void>(r => setImmediate(r)); assert.equal(nextEntered, false);
+  release(); assert.deepEqual(await recovering, committed('exact-proof')); await next;
+  assert.deepEqual(await reading, committed('exact-proof'));
+});
