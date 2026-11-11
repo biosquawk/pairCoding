@@ -1,22 +1,33 @@
 import path from 'node:path';
 import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { open, lstat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import type { AdapterOutcome, CollectedArtifacts, ExecutionExit, ExecutionPlan } from '../execution/ports';
 import { parseJUnit, REPORT_LIMIT, type JUnitCounts } from './junit';
 export type ArtifactReader = (file: string, maxBytes: number) => Promise<Uint8Array>;
 /** Bounded regular non-symlink read. Executor supplies scoped, immutable collection, never workspace. */
-export const readArtifact: ArtifactReader = async (file, maxBytes) => {
-  const fd = await open(file, constants.O_RDONLY | constants.O_NOFOLLOW);
+/** noFollowFlag is an optimization, NEVER the authority; tests can emulate Windows absence with0. */
+export async function readRegularArtifact(file: string, maxBytes: number, noFollowFlag = constants.O_NOFOLLOW ?? 0): Promise<Uint8Array> {
+  if (!path.isAbsolute(file) || !Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('Invalid artifact read');
+  for(let parent=path.dirname(file);;) {
+    const info=await lstat(parent,{bigint:true});
+    if(info.isSymbolicLink() || !info.isDirectory()) throw new Error('Symlink/non-directory artifact parent');
+    const next=path.dirname(parent);if(next===parent)break;parent=next;
+  }
+  const before=await lstat(file,{bigint:true});
+  if(before.isSymbolicLink() || !before.isFile() || before.size>BigInt(maxBytes)) throw new Error('Artifact not bounded regular file');
+  const fd=await open(file,constants.O_RDONLY | noFollowFlag);
+  const same=(a:typeof before,b:typeof before)=>a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs;
   try {
-    const stat = await fd.stat();
-    if (!stat.isFile() || stat.size > maxBytes) throw new Error('Artifact not bounded regular file');
-    const buffer = Buffer.alloc(stat.size + 1); const { bytesRead } = await fd.read(buffer, 0, buffer.length, 0);
-    const after = await fd.stat();
-    if (bytesRead !== stat.size || after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs) throw new Error('Artifact changed');
-    return buffer.subarray(0, bytesRead);
-  } finally { await fd.close(); }
-};
+    const stat=await fd.stat({bigint:true});
+    if(!stat.isFile() || !same(before,stat))throw new Error('Artifact identity changed before open');
+    const buffer=Buffer.alloc(Number(stat.size)+1),{bytesRead}=await fd.read(buffer,0,buffer.length,0);
+    const after=await fd.stat({bigint:true}),current=await lstat(file,{bigint:true});
+    if(bytesRead!==Number(stat.size) || current.isSymbolicLink() || !same(stat,after) || !same(stat,current))throw new Error('Artifact identity changed');
+    return buffer.subarray(0,bytesRead);
+  } finally {await fd.close();}
+}
+export const readArtifact: ArtifactReader = (file,maxBytes)=>readRegularArtifact(file,maxBytes);
 const base = (): AdapterOutcome => ({ status: 'FAILED', testOutcome: 'UNKNOWN', testCount: null, skipped: null, failures: null, errors: null, problem: null });
 export async function interpretOutcome(plan: ExecutionPlan, exit: ExecutionExit, artifacts: CollectedArtifacts, read: ArtifactReader = readArtifact): Promise<AdapterOutcome> {
   const result = base();

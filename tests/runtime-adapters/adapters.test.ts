@@ -1,3 +1,4 @@
+import { readRegularArtifact } from '../../src/server/runtime-adapters/outcome';
 import { exportMavenReports } from '../../scripts/runtime-artifacts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -156,4 +157,11 @@ test('fresh Maven standard reports are bounded-exported only after exit; missing
  assert.throws(()=>exportMavenReports(task,out)); // never overwrite current artifacts with old content
  const other=path.join(root,'out2');await mkdir(other);await symlink(path.join(reports,'TEST-Example.xml'),path.join(reports,'TEST-Alias.xml'));
  assert.throws(()=>exportMavenReports(task,other),/Unsafe/);
+});
+
+test('portable artifact identity: absent O_NOFOLLOW still rejects final/parent symlinks',async()=>{
+ const root=await mkdtemp(path.join(process.env.TMPDIR!,'runtime-portable-')),dir=path.join(root,'real');await mkdir(dir);const file=path.join(dir,'fresh.xml');await writeFile(file,xmls[0]);
+ assert.equal(Buffer.from(await readRegularArtifact(file,4096,0)).toString(),xmls[0]);
+ await symlink(file,path.join(root,'alias.xml'));await assert.rejects(readRegularArtifact(path.join(root,'alias.xml'),4096,0),/regular/);
+ await symlink(dir,path.join(root,'linked-parent'));await assert.rejects(readRegularArtifact(path.join(root,'linked-parent','fresh.xml'),4096,0),/parent/);
 });
