@@ -51,6 +51,7 @@ export class RuntimeWiringV2 {
   private listeners = new Set<(event: BridgeEvent) => void>();
   private pending = new Map<string, { resolve: (r: CompleteResult) => void; reject: (e: Error) => void; dispose(): void }>();
   private binding?: EditorLanguageBinding;
+  private bindingScope = '';
   private invalidating = false;
   private prepareEpoch: number | null = null;
   private builtin?: EditorLanguageBinding['builtin'];
@@ -81,7 +82,7 @@ export class RuntimeWiringV2 {
       this.emit({type});this.rejectPending();
       try {this.language.invalidate(type);} catch(e) {this.deps.problem(String(e));}
       if(type==='DISCONNECTED'||type==='SCOPE') this.models.clear();
-      if(type==='DISCONNECTED') this.runtime.invalidate();
+      if(type==='DISCONNECTED') {this.retireBinding();this.runtime.invalidate();}
     } finally {this.invalidating=false;}
   }
   sourceChanged() {
@@ -90,6 +91,7 @@ export class RuntimeWiringV2 {
     this.emit({type:'AUTHORITY_CHANGED'});
   }
   authoritativeState(epoch:number) {
+    if(this.binding&&this.bindingContext(this.binding.projectId)!==this.bindingScope)this.retireBinding();
     if(this.prepareEpoch!==null && epoch>this.prepareEpoch) this.prepareEpoch=null;
     this.revision++;this.emit({type:'AUTHORITY_CHANGED'});
   }
@@ -179,9 +181,15 @@ export class RuntimeWiringV2 {
   private current(path:string):AcceptanceState|null {const m=this.models.get(path);if(!m)return null;const a=this.readAuthority(m);return a?{...a,stamp:{...a.stamp,path,modelLifetime:m.modelLifetime,localModelVersion:m.localModelVersion,contentSha256:m.contentSha256},content:m.content}:null;}
   private key(s:DocumentStamp) {return JSON.stringify(Object.entries(s).sort(([a],[b])=>a.localeCompare(b)));}
   private sendDocument(kind:'OPEN'|'CHANGE'|'CLOSE',doc:OpenOrChange) {
-    if(kind==='CLOSE') {try {this.language.close(doc.stamp);} finally {this.models.delete(doc.stamp.path);this.vector++;this.clearLedger();}return;}
     if(!validateDocumentStamp(doc.stamp))return;
-    const a=this.current(doc.stamp.path);if(!a||!sameDocumentStamp(a.stamp,doc.stamp)||a.content!==doc.content)return;
+    const a=this.current(doc.stamp.path);if(!a||a.content!==doc.content)return;
+    if(kind==='CLOSE') {
+      // Other models/ACKs may advance the global request generation. A close may
+      // retire only this exact model lifetime/bytes in the same language scope.
+      if((['projectId','sessionId','path','profileId','connectionGeneration','configurationGeneration','providerGeneration','shadowGeneration','modelLifetime','localModelVersion','contentSha256','controlEpoch'] as const).some(k=>a.stamp[k]!==doc.stamp[k]))return;
+      try {this.language.close(doc.stamp);} finally {this.models.delete(doc.stamp.path);this.vector++;this.clearLedger();}return;
+    }
+    if(!sameDocumentStamp(a.stamp,doc.stamp))return;
     const key=this.key(doc.stamp);
     try {if(!(kind==='OPEN'?this.language.open(doc):this.language.change(doc)))this.sent.delete(key);} catch(e) {this.sent.delete(key);throw e;}
     if(this.sent.size>256)this.sent.delete(this.sent.keys().next().value!);
@@ -213,10 +221,43 @@ export class RuntimeWiringV2 {
     return true;
   }
   receive(message:LanguageServerMessage) {return this.language.receive(message);}
+  private bindingContext(projectId:string):string {
+    const c=this.deps.current();
+    return c?.projectId===projectId ? JSON.stringify([c.projectId,c.sessionId,c.clientId,c.connectionGeneration]) : '';
+  }
+  private retireBinding() {this.binding=undefined;this.bindingScope='';this.listeners.clear();}
   getBinding(projectId:string):EditorLanguageBinding {
-    if(this.binding?.projectId===projectId)return this.binding;
-    return this.binding={projectId,readAuthority:m=>this.readAuthority(m),sendDocument:(k,d)=>this.sendDocument(k,d),complete:(r,s)=>this.complete(r,s),cancel:()=>this.language.cancel(),
-      subscribe:fn=>{this.listeners.add(fn);return()=>{this.listeners.delete(fn);};},verifyDiagnostics:(r,m)=>this.verifyDiagnostics(r,m),
-      builtin:(m,r,s)=>this.deps.current()?.language?.provider==='builtin'?this.builtin?.(m,r,s)??null:null,onProblem:m=>this.deps.problem(m)};
+    const scope=this.bindingContext(projectId);
+    if(this.binding?.projectId===projectId&&this.bindingScope===scope)return this.binding;
+    this.retireBinding();
+    // A captured project is a capability, not a label on a mutable global delegate.
+    // Instance identity also prevents ABA (p1 -> p2 -> p1) from reviving old callbacks.
+    const active=()=>{
+      if(!scope||this.binding!==binding||this.bindingScope!==scope)return false;
+      if(this.bindingContext(projectId)!==scope){this.retireBinding();return false;}
+      return true;
+    };
+    const mutable=()=>active()&&!this.invalidating;
+    const retired=()=>new Error('Powiązanie edytora utraciło swój projekt, sesję lub połączenie.');
+    const binding:EditorLanguageBinding={projectId,
+      readAuthority:m=>mutable()?this.readAuthority(m):null,
+      sendDocument:(k,d)=>{if(mutable())this.sendDocument(k,d);},
+      complete:(r,s)=>mutable()?this.complete(r,s):Promise.reject(retired()),
+      cancel:r=>{const a=mutable()?this.current(r.stamp.path):null;if(a&&this.pending.has(r.requestId)&&sameDocumentStamp(a.stamp,r.stamp))this.language.cancel();},
+      subscribe:fn=>{
+        if(!active())return()=>{};
+        // The final synchronous invalidation still hides old UI. Later events never cross scopes.
+        const listener=(e:BridgeEvent)=>{if(active())fn(e);};
+        this.listeners.add(listener);return()=>{this.listeners.delete(listener);};
+      },
+      verifyDiagnostics:(r,m)=>mutable()&&this.verifyDiagnostics(r,m),
+      builtin:(m,r,s)=>{
+        if(!mutable()||this.deps.current()?.language?.provider!=='builtin')return null;
+        const result=this.builtin?.(m,r,s);
+        return result?result.then(value=>{if(!mutable())throw retired();return value;}):null;
+      },
+      onProblem:m=>{if(mutable())this.deps.problem(m);},
+    };
+    this.bindingScope=scope;return this.binding=binding;
   }
 }

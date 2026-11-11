@@ -9,6 +9,9 @@ export interface RuntimeAuthorityV2 {
 export interface RuntimeClientV2Dependencies {
   current(): Readonly<RuntimeAuthorityV2> | null;
   requestId(): string;
+  /** Cleanup notification only, after validated acceptance and exact unresolved-entry removal.
+   * Detached immutable metadata; never a new authority or HTTP-success shortcut. */
+  confirmedMutation?(metadata: Readonly<RuntimeUnconfirmedMutationV2>): void;
   /** Existing authenticated HTTP caller wrappers. No alternate persistence/socket/host fallback. */
   http: {
     run(body: RunRequestV2, signal: AbortSignal): Promise<unknown>;
@@ -161,7 +164,12 @@ export class RuntimeClientV2 {
         Object.keys(a).some(key => a[key as keyof RuntimeAuthorityV2] !== current[key as keyof RuntimeAuthorityV2]))
         throw new Error('Odpowiedź dotyczy nieaktualnej sesji lub wersji. Odśwież stan; zachowano wpisane ustawienia.');
       accept(value, a);
-      if (dispatch.sent && this.unresolved.get(dispatch.sent.key) === dispatch.sent.entry) this.unresolved.delete(dispatch.sent.key);
+      if (dispatch.sent && this.unresolved.get(dispatch.sent.key) === dispatch.sent.entry) {
+        this.unresolved.delete(dispatch.sent.key);
+        // The operation remains singleflight during this cleanup. Notification failure
+        // cannot turn an already validated definitive success back into UNKNOWN.
+        try { this.dependencies.confirmedMutation?.(Object.freeze(clone(dispatch.sent.entry.mutation))); } catch { /* Cleanup only. */ }
+      }
       return true;
     } catch (error) {
       if (this.operation === operation) this.state.error = error instanceof Error ? error.message : 'Operacja niepotwierdzona. Odśwież stan przed ponowieniem.';

@@ -3,7 +3,7 @@ import type { MutationIdentity } from '../shared/runtime-mutation-v2';
 import type { LanguageAuthorityV2, AutosaveAckEnvelope } from './runtimeWiringV2';
 import { validateMutationOutcomeV2, validateReconcileMutationRequestV2, validateLanguageView, validateExecutionView, validateRunV2, validateV2WireShape, validateLanguageServerMessage } from '../shared/validation-v2';
 import { RuntimeWiringV2, type WiringControllerV2 } from './runtimeWiringV2';
-import type { SettingsSaveResultV2 } from './RuntimeClientV2';
+import type { SettingsSaveResultV2, RuntimeUnconfirmedMutationV2 } from './RuntimeClientV2';
 import type { EditorLanguageBinding } from './monacoLspBridge';
 import type * as Wire from '../shared/protocol';
 import { EditorViewThrottleP2, sameEditorViewP2, type EditorViewObservationP2 } from './editorViewP2';
@@ -122,6 +122,14 @@ export class LiveBackend {
   // Metadata from RuntimeClient alone cannot reconstruct lost mode/settings. No guessed read is called.
   private runtimeMutations=new Map<string,MutationIdentity>();
   private languageScope:LanguageAuthorityV2|null=null;
+  private releaseConfirmedRuntimeMutation(metadata:Readonly<RuntimeUnconfirmedMutationV2>) {
+    const key=JSON.stringify([metadata.projectId,metadata.sessionId,metadata.clientId,metadata.requestId]);
+    const original=this.runtimeMutations.get(key);
+    if(original&&original.projectId===metadata.projectId&&original.kind===metadata.kind&&
+      original.request.sessionId===metadata.sessionId&&original.request.clientId===metadata.clientId&&
+      original.request.requestId===metadata.requestId&&original.request.expectedWorkspaceVersion===metadata.expectedWorkspaceVersion)
+      this.runtimeMutations.delete(key);
+  }
   private retainRuntimeMutation(kind:'RUN'|'SAVE',request:RunRequestV2|UpdateSettingsRequestV2) {
     if(!this.project)throw new Error('Brak bieżącego projektu.');
     const key=JSON.stringify([this.project.projectId,request.sessionId,request.clientId,request.requestId]);
@@ -151,7 +159,7 @@ export class LiveBackend {
           configurationGeneration:execution.runtime.configurationGeneration,connected:this.synced && !this.stopped,
           canExecute:this.synced && !this.stopped,
           canSaveSettings:this.synced && !this.stopped && !this.preparing && !this.vetoPending && this.session.writeOwner==='STUDENT' && !this.savesHasConflict() } : null;
-      }, requestId:id, http: {
+      }, requestId:id, confirmedMutation:metadata=>this.releaseConfirmedRuntimeMutation(metadata), http: {
         run:(body,signal)=>{this.retainRuntimeMutation('RUN',body);return this.http('/api/run','POST',body,true,signal);},
         stop:(runId,body,signal)=>this.http(`/api/run/${encodeURIComponent(runId)}/stop`,'POST',body,true,signal),
         saveSettings:(body,signal)=>{this.retainRuntimeMutation('SAVE',body);return this.http('/api/project/settings','PUT',body,true,signal);},
