@@ -80,6 +80,10 @@ export class PreparedLanguageImageVerifier {
     requireThat(isAbsolute(receiptPath)); this.inspection = createPreparedRuntimeInspection(transport);
   }
   async verify(runtime: ResolvedRuntime, expectedEngineId: string, lease: PreparedCacheLease): Promise<VerifiedLanguageImage> {
+    try { return await this.verifyReadOnly(runtime, expectedEngineId, lease); }
+    catch { throw new Error('Language image/tools require explicit verified preparation'); }
+  }
+  private async verifyReadOnly(runtime: ResolvedRuntime, expectedEngineId: string, lease: PreparedCacheLease): Promise<VerifiedLanguageImage> {
     assertLease(lease);
     const bytes = readRegular(this.receiptPath, 4 * 1024 * 1024), receipt = obj(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)));
     const lock = runtime.languageImage;

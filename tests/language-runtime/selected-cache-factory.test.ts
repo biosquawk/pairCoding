@@ -183,3 +183,13 @@ test('FIFO release DURING selected preparation cannot publish authority or trans
   const f = await fixture(t); f.hook(a => { if (a[2] === f.lang.imageId) f.release(); });
   await assert.rejects(f.prepare(), /serialized control\/settings lease revoked/); assert.throws(() => f.create()); assert.deepEqual(f.mutations, []);
 });
+
+for (const input of ['malformed-receipt','observer-error'] as const) {
+  test('LANGUAGE admission redacts private parser/transport errors: ' + input, async t => {
+    const f = await fixture(t);
+    if (input === 'malformed-receipt') fs.writeFileSync(f.languageReceiptPath, '{"private":"SENTINEL-private-path",bad}');
+    else f.hook(a => { if (a[2] === f.lang.imageId) throw Error('SENTINEL-private-path transport stderr'); });
+    await assert.rejects(f.prepare(), e => e instanceof Error && !e.message.includes('SENTINEL') && /explicit verified preparation/.test(e.message));
+    assert.deepEqual(f.mutations, []);
+  });
+}
