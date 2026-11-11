@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { canonicalDirectory, readPrivate, receiptWriter, stamp, syncDirectory } from './runtime-files.mjs';
 import { dependencyHash } from './runtime-dependencies.mjs';
-import { validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, prepare } from './runtime-prepare.mjs';
+import { validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, prepare, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
 import { stageInputs } from './runtime-stage-inputs.mjs';
 import { prepareLanguageImages } from './runtime-language-prepare.mjs';
 
@@ -294,16 +294,17 @@ export async function executePublicPreparePlan(plan, dependencies = {}) {
   const configDirectory = path.join(plan.output, 'docker-config');
   const receipt = { schemaVersion: 1, status: 'STARTED_NOT_READY', scope: plan.scope, startedAt: new Date().toISOString(), plan,
     endpoint, configDirectory, commands: [], language: [], originalProject: plan.project, rawSourceAuthority: 'CURRENT_RAW_ONLY_NOT_WRITEGATE_ACK', finalQa: 'NOT_RUN' };
+  let clientState;
   let publicationFailed = false;
   const save = () => { try { publish(receipt); } catch (e) { publicationFailed = true; throw e; } }; save();
   const budget = () => check(Date.now() < deadline, 'Public preparation time budget exceeded; retain/reconcile');
   const engineArgs = ['info', '--format', '{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const invoke = args => {
-    budget(); canonicalDirectory(configDirectory);
-    check(fs.readdirSync(configDirectory).length === 0, 'Dedicated Docker config changed; retain/reconcile');
-    const argv = ['--host', endpoint, '--config', configDirectory, ...args], began = new Date().toISOString();
-    const raw = (dependencies.spawnSync ?? spawnSync)('docker', argv, { shell: false, env: { PATH: process.env.PATH, HOME: path.join(plan.output, 'docker-home') }, encoding: 'utf8', timeout: Math.max(1, Math.min(plan.limits.maxCommandMs, deadline - Date.now())), maxBuffer: 4 * 1024 * 1024 });
+    budget(); const issued = beginDockerCommand(clientState), env = issued.env;
+    const argv = ['--host', endpoint, '--config', issued.configDirectory, ...args], began = new Date().toISOString();
+    const raw = (dependencies.spawnSync ?? spawnSync)('docker', argv, { shell: false, env, encoding: 'utf8', timeout: Math.max(1, Math.min(plan.limits.maxCommandMs, deadline - Date.now())), maxBuffer: 4 * 1024 * 1024 });
     receipt.commands.push({ argv: ['docker', ...argv], endpoint, startedAt: began, finishedAt: new Date().toISOString(), exit: raw.status, signal: raw.signal, error: raw.error?.message ?? null, stdout: raw.stdout, stderr: raw.stderr }); save();
+    finishDockerCommand(clientState, issued); // never reuse command credential config
     check(!raw.error && !raw.signal && raw.status === 0, 'Unknown/failed Docker operation; retain exact receipts/resources and reconcile before retry'); return raw;
   };
   const observeEngine = () => {
@@ -314,7 +315,8 @@ export async function executePublicPreparePlan(plan, dependencies = {}) {
     check(equal(observeEngine(), receipt.engine), 'Docker engine changed; retain/reconcile'); return invoke(args);
   };
   try {
-    make(configDirectory); make(path.join(plan.output, 'docker-home')); make(path.join(plan.output, 'jobs'));
+    clientState = createDockerClientState(plan.output); receipt.clientState = clientState; save();
+    make(path.join(plan.output, 'jobs'));
     receipt.engine = observeEngine(); run.engine = receipt.engine; save();
     await assertOriginal(plan, api);
     copySource(plan);
@@ -324,7 +326,7 @@ export async function executePublicPreparePlan(plan, dependencies = {}) {
     receipt.status = 'CAPTURED_RAW_NOT_ACK'; save(); budget();
     await (dependencies.stageInputs ?? stageInputs)(path.join(plan.output, 'assets'));
     budget(); check(equal(observeEngine(), receipt.engine), 'Docker engine changed during acquisition');
-    const produced = (dependencies.prepare ?? prepare)(plan.request, true, deadline, receipt.engine, { endpoint, configDirectory, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) });
+    const produced = (dependencies.prepare ?? prepare)(plan.request, true, deadline, receipt.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) });
     receipt.prepareReceipt = path.join(plan.preparedRuntime, 'receipt.json'); save();
     const prepared = json(receipt.prepareReceipt);
     check(equal(prepared, produced), 'Actual durable prepared receipt differs from producer result');

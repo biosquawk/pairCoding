@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { canonicalDirectory, readPrivate, receiptWriter, syncDirectory } from './runtime-files.mjs';
 import { buildOperatorPlan } from './runtime-operator.mjs';
-import { prepare, validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity } from './runtime-prepare.mjs';
+import { prepare, validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
 import { prepareLanguageImages } from './runtime-language-prepare.mjs';
 import { measuredImageEntry } from './runtime-prepare-cli.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -117,22 +117,24 @@ export function executeRemainderPlan(plan, dependencies = {}) {
   check(equal((dependencies.buildPlan ?? buildRemainderPlan)(plan.options), plan), 'Frozen remainder/source/prior evidence differs');
   const root = plan.options.outputRoot, deadline = Date.now() + plan.maxElapsedMs;
   const publish = receiptWriter(root), receipt = { schemaVersion: 1, phase: plan.phase, status: 'STARTED_NOT_READY', planSha256: hash(JSON.stringify(plan, null, 2) + '\n'), commands: [], reused: plan.reuse.map(r => ({ id: r.id, receipt: r.receipt, cacheRoot: r.cacheRoot })), jobs: [], engine: plan.engine };
+  let clientState;
   let publicationFailed = false;
   const save = () => { try { publish(receipt); } catch (e) { publicationFailed = true; throw e; } }; save();
   const endpoint = process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock', configDirectory = path.join(root, 'docker-config');
   const invoke = (args, absent = false) => {
     check(Date.now() < deadline, 'Remainder budget exceeded; retain/reconcile');
     check(plan.sourceInventory.every(f => hash(readPrivate(path.join(repo, f.path), 4 * 1024 * 1024).bytes) === f.sha256), 'Frozen remainder source changed; retain/reconcile');
-    check((canonicalDirectory(configDirectory), fs.readdirSync(configDirectory).length === 0), 'Dedicated Docker config changed');
-    const argv = ['--host', endpoint, '--config', configDirectory, ...args], start = new Date().toISOString();
-    const raw = (dependencies.spawnSync ?? spawnSync)('docker', argv, { shell: false, env: { PATH: process.env.PATH, HOME: path.join(root, 'docker-home') }, encoding: 'utf8', timeout: Math.max(1, Math.min(plan.maxCommandMs, deadline - Date.now())), maxBuffer: 4 * 1024 * 1024 });
+    const issued = beginDockerCommand(clientState), env = issued.env;
+    const argv = ['--host', endpoint, '--config', issued.configDirectory, ...args], start = new Date().toISOString();
+    const raw = (dependencies.spawnSync ?? spawnSync)('docker', argv, { shell: false, env, encoding: 'utf8', timeout: Math.max(1, Math.min(plan.maxCommandMs, deadline - Date.now())), maxBuffer: 4 * 1024 * 1024 });
     receipt.commands.push({ argv: ['docker', ...argv], startedAt: start, finishedAt: new Date().toISOString(), exit: raw.status, signal: raw.signal, error: raw.error?.message ?? null, stdout: raw.stdout, stderr: raw.stderr }); save();
+    finishDockerCommand(clientState, issued);
     check(!raw.error && !raw.signal && (absent ? raw.status === 1 && /No such (?:object|container)/i.test(raw.stderr) : raw.status === 0), 'Docker operation unknown/failed or old failed resource still exists; retain/reconcile'); return raw;
   };
   const engineArgs = ['info', '--format', '{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const run = args => { check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed'); return invoke(args); };
   try {
-    make(configDirectory); make(path.join(root, 'docker-home'));
+    clientState = createDockerClientState(root); receipt.clientState = clientState; save();
     check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed before mutation');
     invoke(['container', 'inspect', plan.failure.exactContainerId], true); // NO rm/force/prune/cleanup authority here.
     // Reused image existence/config AND manifest proof are re-inspected; cache bytes stay read-only.
@@ -152,7 +154,7 @@ export function executeRemainderPlan(plan, dependencies = {}) {
       materialize(job.request.project.root, job.assets);
       put(path.join(root, 'requests', job.id + '.json'), Buffer.from(JSON.stringify(job.request, null, 2) + '\n'));
       const item = { id: job.id, status: 'PREPARE_INTENT' }; receipt.jobs.push(item); save();
-      const prepared = (dependencies.prepare ?? prepare)(job.request, true, deadline, plan.engine, { endpoint, configDirectory, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) });
+      const prepared = (dependencies.prepare ?? prepare)(job.request, true, deadline, plan.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) });
       check(prepared.status === 'PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION' && equal(prepared.request, job.request) && equal(prepared.engine, plan.engine) && prepared.toolchainHash === resolvePreparedToolchainIdentity(job.request).toolchainHash, 'Remainder prepared correlation differs');
       check(equal(json(path.join(job.request.outputRoot, 'receipt.json')), prepared), 'New durable prepared receipt differs');
       item.prepareReceipt = path.join(job.request.outputRoot, 'receipt.json'); item.status = 'PREPARED_TOOLS_CHECKED_OFFLINE_DEFERRED'; save();
