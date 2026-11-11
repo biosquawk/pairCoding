@@ -101,7 +101,8 @@ export class LiveBackend {
   private snapshotsRequest = 0;
   private editorView: EditorViewObservationP2 | null = null;
   private editorViewAck: { view: EditorViewObservationP2; version: number } | null = null;
-  private viewFlight: { messageId: string; view: EditorViewObservationP2; version: number;
+  private pathViewTimer?: ReturnType<typeof setTimeout>;
+  private viewFlight: { messageId: string; scope: string; view: EditorViewObservationP2; version: number;
     wait: Promise<boolean>; done: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> } | null = null;
   private viewThrottle = new EditorViewThrottleP2(() => { this.sendEditorView(); });
   private chatSending = false;
@@ -350,7 +351,9 @@ export class LiveBackend {
     this.state.activePath = this.selectedView?.path ?? (selectable(bundle.activeDocument?.path) ? bundle.activeDocument!.path
       : selectable(bundle.session.activeFilePath) ? bundle.session.activeFilePath
       : bundle.project.files.find(f => f.kind === 'FILE')?.path ?? '');
-    if (bundle.activeDocument) this.installDocument(bundle.activeDocument, false);
+    // A retained local selection wins over an older server-view document. Load
+    // only the settled selection/task/drafts into this new cache generation.
+    if (bundle.activeDocument?.path === this.state.activePath) this.installDocument(bundle.activeDocument, false);
     this.proposals = new Map(bundle.proposals.map(p => [p.proposalId, p]));
     this.state.activeProposal = bundle.proposals[0] ? mapProposal(bundle.proposals[0]) : null;
     this.state.chatEntries = bundle.chat.map(c => ({ id: c.messageId, sender: c.author, message: c.text, timestamp: Date.parse(c.createdAt) }));
@@ -396,7 +399,7 @@ export class LiveBackend {
       // Selection made while the snapshot was loading was not sent offline.
       // Advertise only its view, never replay CREATE/RENAME/DELETE or a save.
       if (this.selectedView && this.selectedView.path === this.state.activePath && this.documents.has(this.state.activePath)
-        && this.session?.activeFilePath !== this.state.activePath) this.observePathOnly();
+        && this.session?.activeFilePath !== this.state.activePath) this.observePathOnly(true);
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -514,10 +517,18 @@ export class LiveBackend {
     if (viewFlight?.messageId === p.replyTo) {
       clearTimeout(viewFlight.timer); this.viewFlight = null;
       const ok = p.status !== 'REJECTED' && p.documentVersion === viewFlight.version;
-      if (ok) this.editorViewAck = { view: viewFlight.view, version: viewFlight.version };
-      else { this.editorViewAck = null; this.fail(new Error(`${p.error?.code ?? 'VIEW_REJECTED'}: ${p.error?.message ?? 'Nie potwierdzono kontekstu edytora. Pytanie nie zostało wysłane.'}`)); }
-      viewFlight.done(ok);
-      if (ok && this.editorView !== viewFlight.view) this.viewThrottle.schedule();
+      const sameScope = viewFlight.scope === this.getEditorViewScope();
+      if (sameScope) {
+        if (ok) this.editorViewAck = { view: viewFlight.view, version: viewFlight.version };
+        else { this.editorViewAck = null; this.fail(new Error(`${p.error?.code ?? 'VIEW_REJECTED'}: ${p.error?.message ?? 'Nie potwierdzono kontekstu edytora. Pytanie nie zostało wysłane.'}`)); }
+      }
+      viewFlight.done(ok && sameScope);
+      if ((ok || !sameScope) && this.editorView && this.editorView !== viewFlight.view) {
+        // New path-only selection is not cursor motion. Release it on the next
+        // transport tick, not reentrantly in an old ACK and not after 120ms.
+        if (!this.editorView.cursor && !this.editorView.selection) this.schedulePathOnlyView();
+        else this.viewThrottle.schedule();
+      }
     }
     this.state.workspaceVersion = Math.max(this.state.workspaceVersion, p.workspaceVersion);
     const decision = this.proposalDecision;
@@ -629,7 +640,9 @@ export class LiveBackend {
     catch { void fallback(); }
   }
   async selectFile(path: string) {
-    this.invalidateEditorView();
+    // Invalidate old coordinates/chat, retaining only the wire singleflight
+    // barrier. Its ACK releases transport, never acknowledges this new scope.
+    this.invalidateEditorView(true);
     const request = ++this.selectionRequest, projectId = this.project?.projectId, sessionId = this.session?.sessionId;
     const current = () => !this.stopped && request === this.selectionRequest && projectId === this.project?.projectId && sessionId === this.session?.sessionId;
     if (this.session?.writeOwner === 'COACH' && path !== this.state.activePath) this.triggerVeto();
@@ -647,7 +660,7 @@ export class LiveBackend {
       this.selectedView = projectId && sessionId ? { path, projectId, sessionId } : null;
       this.state.activePath = path;
       if (save?.conflict) this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: this.documents.get(path)?.content ?? '', diskDeleted: deletedDraft };
-      if (this.synced && !deletedDraft) this.observePathOnly(); this.publish();
+      if (this.synced && !deletedDraft) this.observePathOnly(true); this.publish();
     } catch (error) { if (current()) this.fail(error); }
   }
   async flushAll(stillCurrent: () => boolean = () => true) {
@@ -705,9 +718,13 @@ export class LiveBackend {
     return this.synced && !this.stopped && this.project && this.session && this.ws?.readyState === 1
       ? JSON.stringify([this.project.projectId, this.session.sessionId, this.generation, this.state.activePath, this.selectionRequest]) : null;
   }
-  private invalidateEditorView() {
+  private invalidateEditorView(keepFlight = false) {
+    clearTimeout(this.pathViewTimer); this.pathViewTimer = undefined;
     this.viewThrottle.cancel(); this.editorView = null; this.editorViewAck = null;
-    if (this.viewFlight) { clearTimeout(this.viewFlight.timer); this.viewFlight.done(false); this.viewFlight = null; }
+    if (this.viewFlight) {
+      this.viewFlight.done(false);
+      if (!keepFlight) { clearTimeout(this.viewFlight.timer); this.viewFlight = null; }
+    }
   }
   clearEditorView(scope: string | null) {
     if (!scope || scope !== this.getEditorViewScope()) return;
@@ -719,14 +736,26 @@ export class LiveBackend {
     const copy = { ...view, cursor: view.cursor ? { ...view.cursor } : null, selection: view.selection ? { ...view.selection } : null };
     if (!sameEditorViewP2(this.editorView, copy)) { this.editorView = copy; this.viewThrottle.schedule(); }
   }
-  private observePathOnly() {
+  private observePathOnly(immediate = false) {
     const path = this.state.activePath, doc = this.documents.get(path);
-    if (doc && !this.saves.has(path) && this.project) this.updateEditorView({ projectId: this.project.projectId, path,
-      content: doc.content, cursor: null, selection: null });
+    if (!doc || this.saves.has(path) || !this.project) return;
+    this.updateEditorView({ projectId: this.project.projectId, path, content: doc.content, cursor: null, selection: null });
+    // Selection settlement publishes only this fresh path-only observation, not
+    // a pending Monaco sample. sendEditorView retains all content/scope/ACK guards.
+    if (immediate) { this.viewThrottle.cancel(); this.sendEditorView(); }
+  }
+  private schedulePathOnlyView() {
+    if (this.pathViewTimer) return;
+    const scope = this.getEditorViewScope();
+    this.pathViewTimer = setTimeout(() => {
+      this.pathViewTimer = undefined;
+      if (scope && scope === this.getEditorViewScope() && this.editorView
+        && !this.editorView.cursor && !this.editorView.selection) this.sendEditorView();
+    }, 0);
   }
   private sendEditorView() {
-    const view = this.editorView;
-    if (!view || !this.getEditorViewScope() || view.projectId !== this.project?.projectId || view.path !== this.state.activePath
+    const view = this.editorView, scope = this.getEditorViewScope();
+    if (!view || !scope || view.projectId !== this.project?.projectId || view.path !== this.state.activePath
       || this.saves.has(view.path) || this.state.fileConflict?.path === view.path || this.pendingSteps.size) return null;
     const doc = this.documents.get(view.path);
     if (!doc || doc.content !== view.content) return null;
@@ -735,7 +764,7 @@ export class LiveBackend {
     const messageId = id();
     let done!: (ok: boolean) => void;
     const wait = new Promise<boolean>(resolve => { done = resolve; });
-    const flight = { messageId, view, version: doc.version, wait, done, timer: setTimeout(() => {
+    const flight = { messageId, scope, view, version: doc.version, wait, done, timer: setTimeout(() => {
       if (this.viewFlight?.messageId !== messageId) return;
       this.viewFlight = null; this.editorViewAck = null; done(false);
       this.fail(new Error('Brak ACK widoku edytora. Pytanie nie zostało wysłane; połącz ponownie.'));
