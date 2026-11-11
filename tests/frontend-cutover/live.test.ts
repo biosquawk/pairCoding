@@ -217,3 +217,9 @@ test('FAILED authoritative provider status cancels old authority and survives or
   assert.equal(f.live.getState().language?.state,'FAILED');assert.equal(f.binding.readAuthority(f.model),null);
   f.live.saveFileContent('main.txt','manual after failure');assert.equal(f.live.getState().language?.state,'FAILED');assert.equal(f.live.getState().languageProblem,problem.message);
 });
+
+test('malformed ACK shape never grants a language alias while ordinary negative VIEW handling stays separate',async t=>{
+  const f=await languageFixture(t),{save,source}=f.begin();
+  f.acknowledge(save,'OK',{error:{code:'BAD',message:'incomplete legacy error',currentVersion:null}});
+  assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source),[f.model]),false);
+});

@@ -548,8 +548,7 @@ export class LiveBackend {
     }
     switch (message.type) {
       case 'ACK':
-        if(!validateV2WireShape('ServerMessage',message))throw new Error('Niepoprawna koperta ACK.');
-        this.ack(message.payload,message.messageId,message.sessionId); break;
+        this.ack(message.payload,message.messageId,message.sessionId,validateV2WireShape('ServerMessage',message));break;
       case 'CONTROL_PREPARE':
         this.wiring.invalidate('CONTROL_PREPARE');
         if (!this.synced || this.vetoPending || this.savesHasConflict()) { this.send('CONTROL_READY', { requestId: message.payload.requestId, workspaceVersion: this.state.workspaceVersion, ready: false }); break; }
@@ -659,10 +658,11 @@ export class LiveBackend {
       // Stay locked until CONTROL_STATE, not just until send().
     }
   }
-  private ack(p: ServerPayloads['ACK'],messageId:string,sessionId:string) {
+  private ack(p: ServerPayloads['ACK'],messageId:string,sessionId:string,verifiedEnvelope:boolean) {
     const envelope:AutosaveAckEnvelope={messageId,sessionId,replyTo:p.replyTo,status:p.status,documentVersion:p.documentVersion,workspaceVersion:p.workspaceVersion,controlEpoch:p.controlEpoch};
     // Must precede any local workspace/base/draft mutation. Receipt presence is never enough.
-    this.wiring.prepareAutosaveAck(envelope);
+    if(verifiedEnvelope)this.wiring.prepareAutosaveAck(envelope);
+    else this.wiring.cancelAutosave(p.replyTo); // Legacy negative VIEW handling is not language-ACK proof.
     const viewFlight = this.viewFlight;
     if (viewFlight?.messageId === p.replyTo) {
       clearTimeout(viewFlight.timer); this.viewFlight = null;
