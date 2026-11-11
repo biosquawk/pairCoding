@@ -146,10 +146,15 @@ export class ReportService {
   private persist(entry: Entry): void {
     const dir = this.sessionDir(entry.report.sessionId);
     const temporary = path.join(dir, `${randomUUID()}.tmp`);
-    try {
-      this.writeExclusive(temporary, JSON.stringify(entry.report));
-      renameSync(temporary, path.join(dir, 'report.json'));
-    } finally { if (existsSync(temporary)) unlinkSync(temporary); }
+    const serialized = JSON.stringify(entry.report);
+    // writeExclusive owns cleanup on write failure; a failed wx grants no ownership.
+    const ownedTemporary = this.writeExclusive(temporary, serialized);
+    try { renameSync(temporary, path.join(dir, 'report.json')); }
+    catch (error) {
+      try { this.removeOwnFile(temporary, ownedTemporary, serialized); }
+      catch { /* Keep evidence on cleanup failure; preserve the original commit error. */ }
+      throw error;
+    }
   }
   private load(sessionId: string): Entry {
     if (this.entries.has(sessionId)) return this.entries.get(sessionId)!;
