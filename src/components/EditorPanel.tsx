@@ -7,6 +7,7 @@ import '../shared/monacoSetup';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monacoType from 'monaco-editor';
+import { observeMonacoViewP2 } from '../services/editorViewP2';
 import { client } from '../services/PairCoachClient';
 import {
   ActionProposal,
@@ -211,6 +212,28 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       }
     }
   }, [projectId, activePath, editorGeneration, activeFile?.loaded]);
+
+  // A listener generation is bound to the actual Monaco model and authenticated connection.
+  useLayoutEffect(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    let scope: string | null = null;
+    let model: monacoType.editor.ITextModel | null = null;
+    let disposeObservation = () => {};
+    const bind = () => {
+      const nextScope = client.getEditorViewScope(), nextModel = editor.getModel();
+      if (scope === nextScope && model === nextModel) return;
+      disposeObservation(); scope = nextScope; model = nextModel;
+      const boundScope = scope;
+      if (!boundScope) return;
+      disposeObservation = observeMonacoViewP2(editor, projectId, activePath,
+        () => boundScope === client.getEditorViewScope(), view => client.updateEditorView(view));
+    };
+    const modelListener = editor.onDidChangeModel(bind);
+    const unsubscribe = client.onStateChanged(bind);
+    bind();
+    return () => { disposeObservation(); modelListener.dispose(); unsubscribe(); client.clearEditorView(scope); };
+  }, [projectId, activePath, editorGeneration]);
 
   // External/snapshot synchronization updates inactive models too. Ordinary ACK never calls setValue.
   useEffect(() => client.onFileUpdated((file) => {

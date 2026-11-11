@@ -1,4 +1,5 @@
 import type * as Wire from '../shared/protocol';
+import { EditorViewThrottleP2, sameEditorViewP2, type EditorViewObservationP2 } from './editorViewP2';
 import type { ReportSummary } from './reportHistory';
 import type { CoachEditStep, EndReason, ProjectSettings, WindowPresence } from '../types/paircoach';
 import type { ClientState, ServerMessage, ServerPayloads, UpdatedFile } from './liveTypes';
@@ -98,6 +99,12 @@ export class LiveBackend {
   private selectedView: { path: string; projectId: string; sessionId: string } | null = null;
   private selectionRequest = 0;
   private snapshotsRequest = 0;
+  private editorView: EditorViewObservationP2 | null = null;
+  private editorViewAck: { view: EditorViewObservationP2; version: number } | null = null;
+  private viewFlight: { messageId: string; view: EditorViewObservationP2; version: number;
+    wait: Promise<boolean>; done: (ok: boolean) => void; timer: ReturnType<typeof setTimeout> } | null = null;
+  private viewThrottle = new EditorViewThrottleP2(() => { this.sendEditorView(); });
+  private chatSending = false;
 
   constructor(options: LiveOptions = {}) {
     this.baseUrl = (options.baseUrl ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
@@ -216,6 +223,7 @@ export class LiveBackend {
   reconnect() { this.retries = 0; this.stopped = false; clearTimeout(this.reconnectTimer); this.resync(); }
   private disconnected() {
     if (this.stopped) return;
+    this.invalidateEditorView();
     this.synced = false; this.preparing = null; this.pendingSteps.clear(); this.generation++;
     clearTimeout(this.connectionTimer); clearInterval(this.tick);
     for (const save of this.saves.values()) { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; }
@@ -234,10 +242,12 @@ export class LiveBackend {
     }
   }
   private resync() {
+    this.invalidateEditorView();
     this.synced = false; this.pendingSteps.clear(); this.publish();
     if (this.ws) this.ws.close(); else this.disconnected();
   }
   close() {
+    this.invalidateEditorView();
     this.stopped = true; this.generation++;
     clearTimeout(this.reconnectTimer); clearTimeout(this.connectionTimer); clearTimeout(this.vetoTimer); clearInterval(this.tick);
     this.saves.forEach(s => { clearTimeout(s.timer); clearTimeout(s.flight?.timer); });
@@ -288,6 +298,8 @@ export class LiveBackend {
     }, 250);
   }
   private installDocument(doc: Wire.Document, external = true) {
+    const previous = this.documents.get(doc.path);
+    if (this.editorView?.path === doc.path && (external || previous?.content !== doc.content || previous?.version !== doc.version)) this.invalidateEditorView();
     this.loadErrors.delete(doc.path);
     const save = this.saves.get(doc.path);
     this.documents.set(doc.path, doc);
@@ -319,6 +331,7 @@ export class LiveBackend {
     this.installDocument(doc, external); this.publish();
   }
   private async snapshot(bundle: Wire.SessionBundle, seq: number) {
+    this.invalidateEditorView();
     const generation = ++this.generation;
     const hello = this.helloSnapshot;
     this.synced = false; this.lastSeq = seq;
@@ -383,8 +396,7 @@ export class LiveBackend {
       // Selection made while the snapshot was loading was not sent offline.
       // Advertise only its view, never replay CREATE/RENAME/DELETE or a save.
       if (this.selectedView && this.selectedView.path === this.state.activePath && this.documents.has(this.state.activePath)
-        && this.session?.activeFilePath !== this.state.activePath) this.send('VIEW_CHANGED', { path: this.state.activePath,
-          documentVersion: this.documents.get(this.state.activePath)!.version, cursor: null, selection: null });
+        && this.session?.activeFilePath !== this.state.activePath) this.observePathOnly();
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
@@ -421,6 +433,7 @@ export class LiveBackend {
       case 'SESSION_STATE': this.sessionState(message.payload); void this.reconcileFinish(); break;
       case 'EXTERNAL_FILE_SYNC': {
         const p = message.payload; this.state.workspaceVersion = p.workspaceVersion;
+        if (this.editorView?.path === p.path) this.invalidateEditorView();
         if (this.project) {
           this.project.workspaceVersion = p.workspaceVersion;
           this.project.files = this.project.files.filter(f => f.path !== p.path);
@@ -497,6 +510,15 @@ export class LiveBackend {
     }
   }
   private ack(p: ServerPayloads['ACK']) {
+    const viewFlight = this.viewFlight;
+    if (viewFlight?.messageId === p.replyTo) {
+      clearTimeout(viewFlight.timer); this.viewFlight = null;
+      const ok = p.status !== 'REJECTED' && p.documentVersion === viewFlight.version;
+      if (ok) this.editorViewAck = { view: viewFlight.view, version: viewFlight.version };
+      else { this.editorViewAck = null; this.fail(new Error(`${p.error?.code ?? 'VIEW_REJECTED'}: ${p.error?.message ?? 'Nie potwierdzono kontekstu edytora. Pytanie nie zostało wysłane.'}`)); }
+      viewFlight.done(ok);
+      if (ok && this.editorView !== viewFlight.view) this.viewThrottle.schedule();
+    }
     this.state.workspaceVersion = Math.max(this.state.workspaceVersion, p.workspaceVersion);
     const decision = this.proposalDecision;
     if (decision?.messageId === p.replyTo && decision.sessionId === this.session?.sessionId && decision.clientId === this.clientId) {
@@ -541,7 +563,7 @@ export class LiveBackend {
         else if (this.preparing) this.flushFile(path); else this.schedule(path);
         this.projectState(this.project!);
       }
-      this.persist(); this.ready(); break;
+      this.persist(); this.ready(); this.viewThrottle.schedule(); break;
     }
   }
   saveFileContent(path: string, content: string) {
@@ -571,6 +593,7 @@ export class LiveBackend {
       const hash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(n => n.toString(16).padStart(2, '0')).join('');
       if (generation !== this.generation || this.vetoPending || this.invalidInterventions.has(p.interventionId) || this.session?.controlEpoch !== p.controlEpoch) return;
       if (hash !== p.contentHash) throw new Error('Niezgodny hash kroku. Wymagana synchronizacja.');
+      this.invalidateEditorView();
       this.selectedView = null; this.selectionRequest++;
       this.pendingSteps.set(p.stepId, { step: p, content }); this.state.activePath = p.path; this.publish();
       this.emit('step', { ...p, text: p.textBlock } satisfies CoachEditStep);
@@ -581,6 +604,7 @@ export class LiveBackend {
     if (!pending || this.invalidInterventions.has(step.interventionId) || this.vetoPending || !this.synced || this.session?.controlEpoch !== step.controlEpoch) return;
     if (actualContent !== pending.content) { this.fail(new Error('Model edytora nie zgadza się z zapisanym krokiem.')); this.resync(); return; }
     const p = pending.step;
+    this.invalidateEditorView();
     this.documents.set(p.path, { ...this.documents.get(p.path)!, content: pending.content, version: p.version, contentHash: p.contentHash });
     if (this.project) { this.project.workspaceVersion = p.workspaceVersion; const f = this.project.files.find(f => f.path === p.path); if (f) f.version = p.version; this.projectState(this.project); }
     this.pendingSteps.delete(p.stepId); this.state.workspaceVersion = p.workspaceVersion;
@@ -605,6 +629,7 @@ export class LiveBackend {
     catch { void fallback(); }
   }
   async selectFile(path: string) {
+    this.invalidateEditorView();
     const request = ++this.selectionRequest, projectId = this.project?.projectId, sessionId = this.session?.sessionId;
     const current = () => !this.stopped && request === this.selectionRequest && projectId === this.project?.projectId && sessionId === this.session?.sessionId;
     if (this.session?.writeOwner === 'COACH' && path !== this.state.activePath) this.triggerVeto();
@@ -622,13 +647,14 @@ export class LiveBackend {
       this.selectedView = projectId && sessionId ? { path, projectId, sessionId } : null;
       this.state.activePath = path;
       if (save?.conflict) this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: this.documents.get(path)?.content ?? '', diskDeleted: deletedDraft };
-      if (this.synced && !deletedDraft) this.send('VIEW_CHANGED', { path, documentVersion: this.documents.get(path)?.version ?? null, cursor: null, selection: null }); this.publish();
+      if (this.synced && !deletedDraft) this.observePathOnly(); this.publish();
     } catch (error) { if (current()) this.fail(error); }
   }
-  async flushAll() {
+  async flushAll(stillCurrent: () => boolean = () => true) {
     this.saves.forEach((_, path) => this.flushFile(path));
     const end = Date.now() + 5000;
     while (this.saves.size) {
+      if (!stillCurrent()) throw new Error('Projekt, sesja lub plik uległy zmianie. Pytanie nie zostało wysłane.');
       if (!this.synced || this.savesHasConflict()) throw new Error('Nie można zakończyć: niezapisany draft lub konflikt. Zachowaj pracę i rozstrzygnij konflikt.');
       if (Date.now() >= end) throw new Error('Brak ACK zapisu. Nie zakończono sesji; draft zachowany.');
       await new Promise(resolve => setTimeout(resolve, 20));
@@ -640,6 +666,7 @@ export class LiveBackend {
       // New folder means new consent and no inherited executable approval.
       const settings: Wire.Settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
       const project = await this.http<Wire.Project>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
+      this.invalidateEditorView();
       this.selectedView = null; this.selectionRequest++;
       this.generation++; this.lastSeq = 0; this.documents.clear(); this.loadErrors.clear(); this.state.fileConflict = null; this.state.activePath = '';
       this.projectState(project); this.reconnect(); return true;
@@ -673,11 +700,85 @@ export class LiveBackend {
   private replayWindowPresence() {
     if (this.synced && !this.stopped && this.latestPresence !== null) this.safeSend('WINDOW_STATE', { presence: this.latestPresence });
   }
-  sendChatMessage(text: string) {
-    const path = this.state.activePath || null;
-    try { const messageId = this.send('CHAT_MESSAGE', { text, path, documentVersion: path ? this.documents.get(path)?.version ?? null : null, selection: null });
+  /** Scope changes invalidate both Monaco callbacks and any awaiting chat submission. */
+  getEditorViewScope(): string | null {
+    return this.synced && !this.stopped && this.project && this.session && this.ws?.readyState === 1
+      ? JSON.stringify([this.project.projectId, this.session.sessionId, this.generation, this.state.activePath, this.selectionRequest]) : null;
+  }
+  private invalidateEditorView() {
+    this.viewThrottle.cancel(); this.editorView = null; this.editorViewAck = null;
+    if (this.viewFlight) { clearTimeout(this.viewFlight.timer); this.viewFlight.done(false); this.viewFlight = null; }
+  }
+  clearEditorView(scope: string | null) {
+    if (!scope || scope !== this.getEditorViewScope()) return;
+    this.invalidateEditorView();
+    this.safeSend('VIEW_CHANGED', { path: null, documentVersion: null, cursor: null, selection: null });
+  }
+  updateEditorView(view: EditorViewObservationP2) {
+    if (!this.getEditorViewScope() || view.projectId !== this.project?.projectId || view.path !== this.state.activePath) return;
+    const copy = { ...view, cursor: view.cursor ? { ...view.cursor } : null, selection: view.selection ? { ...view.selection } : null };
+    if (!sameEditorViewP2(this.editorView, copy)) { this.editorView = copy; this.viewThrottle.schedule(); }
+  }
+  private observePathOnly() {
+    const path = this.state.activePath, doc = this.documents.get(path);
+    if (doc && !this.saves.has(path) && this.project) this.updateEditorView({ projectId: this.project.projectId, path,
+      content: doc.content, cursor: null, selection: null });
+  }
+  private sendEditorView() {
+    const view = this.editorView;
+    if (!view || !this.getEditorViewScope() || view.projectId !== this.project?.projectId || view.path !== this.state.activePath
+      || this.saves.has(view.path) || this.state.fileConflict?.path === view.path || this.pendingSteps.size) return null;
+    const doc = this.documents.get(view.path);
+    if (!doc || doc.content !== view.content) return null;
+    if (this.viewFlight) return this.viewFlight;
+    if (this.editorViewAck?.view === view && this.editorViewAck.version === doc.version) return null;
+    const messageId = id();
+    let done!: (ok: boolean) => void;
+    const wait = new Promise<boolean>(resolve => { done = resolve; });
+    const flight = { messageId, view, version: doc.version, wait, done, timer: setTimeout(() => {
+      if (this.viewFlight?.messageId !== messageId) return;
+      this.viewFlight = null; this.editorViewAck = null; done(false);
+      this.fail(new Error('Brak ACK widoku edytora. Pytanie nie zostało wysłane; połącz ponownie.'));
+    }, 5000) };
+    this.viewFlight = flight;
+    try { this.send('VIEW_CHANGED', { path: view.path, documentVersion: doc.version, cursor: view.cursor, selection: view.selection }, messageId); }
+    catch (error) { clearTimeout(flight.timer); this.viewFlight = null; done(false); this.fail(error); }
+    return flight;
+  }
+  async sendChatMessage(text: string): Promise<boolean> {
+    if (this.chatSending || !text.trim()) return false;
+    this.chatSending = true;
+    const scope = this.getEditorViewScope(), path = this.state.activePath || null;
+    const current = () => !!scope && scope === this.getEditorViewScope();
+    try {
+      if (!current()) throw new Error('Brak zsynchronizowanego połączenia. Pytanie nie zostało wysłane.');
+      await this.flushAll(current);
+      if (!current()) throw new Error('Projekt, sesja lub plik uległy zmianie. Pytanie nie zostało wysłane.');
+      if (this.savesHasConflict() || this.state.fileConflict || this.pendingSteps.size) throw new Error('Rozstrzygnij konflikt przed wysłaniem pytania.');
+      // A fresh explicit path-only view is safe after external content invalidated coordinates.
+      if (path && !this.editorView) this.observePathOnly();
+      this.viewThrottle.cancel();
+      if (path) {
+        const end = Date.now() + 5000;
+        for (;;) {
+          if (!current() || this.saves.size) throw new Error('Kontekst edytora zmienił się podczas wysyłania. Pytanie nie zostało wysłane.');
+          const view = this.editorView, doc = this.documents.get(path);
+          if (!view || view.path !== path || !doc || view.content !== doc.content) throw new Error('Edytor nie odpowiada potwierdzonemu zapisowi. Pytanie nie zostało wysłane.');
+          if (this.editorViewAck?.view === view && this.editorViewAck.version === doc.version) break;
+          if (Date.now() >= end) throw new Error('Nie potwierdzono aktualnego kontekstu. Pytanie nie zostało wysłane.');
+          const flight = this.sendEditorView();
+          if (!flight || !await flight.wait) throw new Error('Nie potwierdzono widoku edytora. Pytanie nie zostało wysłane.');
+          if (!current()) throw new Error('Projekt, sesja lub plik uległy zmianie. Pytanie nie zostało wysłane.');
+          this.viewThrottle.cancel();
+        }
+      } else this.send('VIEW_CHANGED', { path: null, documentVersion: null, cursor: null, selection: null });
+      if (!current() || this.saves.size || this.state.fileConflict) throw new Error('Kontekst uległ zmianie. Pytanie nie zostało wysłane.');
+      const messageId = this.send('CHAT_MESSAGE', { text, path, documentVersion: path ? this.documents.get(path)!.version : null,
+        selection: path ? this.editorView?.selection ?? null : null });
       this.state.chatEntries = [...this.state.chatEntries, { id: messageId, sender: 'STUDENT', message: text, timestamp: Date.now() }]; this.publish();
-    } catch (error) { this.fail(error); }
+      return true;
+    } catch (error) { this.fail(error); return false; }
+    finally { this.chatSending = false; }
   }
   async respondToProposal(proposalId: string, accepted: boolean) {
     // Repeated/opposite clicks cannot replace an unresolved envelope or consent.
