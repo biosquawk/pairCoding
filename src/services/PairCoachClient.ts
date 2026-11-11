@@ -168,6 +168,7 @@ export class PairCoachClient {
   public setBuiltinLanguageProvider(provider: import('./monacoLspBridge').EditorLanguageBinding['builtin']) {
     if (this.transportMode==='LIVE_BACKEND') this.live.setBuiltinLanguageProvider(provider);
   }
+  public reconcileRuntimeMutation() { return this.live.reconcileRuntimeMutation(); }
   public saveRuntimeSettings(settings: import('../shared/runtime-v2').SettingsV2,version:number) { return this.live.saveRuntimeSettings(settings,version); }
   public getEditorViewScope() { return this.transportMode === 'LIVE_BACKEND' ? this.live.getEditorViewScope() : null; }
   public updateEditorView(view: EditorViewObservationP2) { if (this.transportMode === 'LIVE_BACKEND') this.live.updateEditorView(view); }

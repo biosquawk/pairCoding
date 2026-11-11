@@ -44,6 +44,8 @@ export default function App() {
   const [isFinishModalOpen, setIsFinishModalOpen] = useState(false);
   const [finishReason, setFinishReason] = useState<EndReason>('COMPLETED');
   const [isRuntimeSettingsOpen,setIsRuntimeSettingsOpen]=useState(false);
+  const [isReconcilingRuntime,setIsReconcilingRuntime]=useState(false);
+  const [runtimeReconcileResult,setRuntimeReconcileResult]=useState<{scope:string|null;message:string}|null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const projectSettings = state.projectSettings;
 
@@ -184,7 +186,7 @@ export default function App() {
           canRunMain:state.capabilities.canRunMain && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired,
           canRunTests:state.capabilities.canRunTests && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired} : state.capabilities}
         runtimeLabel={state.runtime?.execution?.runtime.label}
-        languageStatus={state.transportMode==='LIVE_BACKEND' ? 'OFF' : undefined}
+        languageStatus={state.transportMode==='LIVE_BACKEND' ? state.language?.autocomplete ?? 'OFF' : undefined}
         onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>setIsRuntimeSettingsOpen(true) : undefined}
         executionStatus={state.activeRun?.status || 'IDLE'}
         isDevSimulatorOpen={isDevSimulatorOpen}
@@ -216,12 +218,14 @@ export default function App() {
           <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
         </>}
         {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
+        {state.runtime?.reconciliationRequired && <button type="button" disabled={state.isOffline || isReconcilingRuntime} onClick={async()=>{const scope=client.getReportHistoryScope();setIsReconcilingRuntime(true);setRuntimeReconcileResult(null);try {const ok=await client.reconcileRuntimeMutation();if(scope===client.getReportHistoryScope())setRuntimeReconcileResult({scope,message:ok?'Potwierdzono rozstrzygnięcie operacji. Sprawdź bieżący stan w sekcji środowiska.':client.getState().runtime?.error ?? 'Nie potwierdzono wyniku. Blokada zachowana.'});} finally {setIsReconcilingRuntime(false);}}} className="underline px-2 py-1">{isReconcilingRuntime ? 'Sprawdzanie wyniku…' : 'Sprawdź wynik operacji'}</button>}
+        {(isReconcilingRuntime || (runtimeReconcileResult && runtimeReconcileResult.scope===client.getReportHistoryScope())) && <span role="status" aria-live="polite">{isReconcilingRuntime ? 'Sprawdzanie autoryzowanego wyniku…' : runtimeReconcileResult?.message}</span>}
         {state.runtime?.reconciliationRequired && <span role="alert" className="text-amber-300">Wynik Run lub zapisu jest nieznany. Nowy Run i zapis zablokowane do autoryzowanego rozstrzygnięcia dokładnego żądania. Ponowne połączenie nie usuwa blokady; nie odświeżaj strony, zachowaj draft. Ręczna edycja i Stop znanego wykonania pozostają dostępne.</span>}
         {state.storageError && <span role="alert" className="text-rose-300">{state.storageError}</span>}
       </div>
       {state.transportMode==='LIVE_BACKEND' && <details className="shrink-0 max-h-[35dvh] overflow-auto border-b border-zinc-800 px-3 text-xs">
-        <summary className="cursor-pointer py-1">Środowisko: {state.runtime?.execution?.runtime.label || 'profil nieustalony'} · Autouzupełnianie OFF · Docs N/A</summary>
-        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ? {...state.language,state:'OFF',autocomplete:'OFF'} : null}
+        <summary className="cursor-pointer py-1">Środowisko: {state.runtime?.execution?.runtime.label || 'profil nieustalony'} · Autouzupełnianie {state.language?.autocomplete ?? 'OFF'} · Docs N/A</summary>
+        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ?? null}
           run={state.runtime?.run ?? null} connected={!state.isOffline} canExecute={!state.isOffline}
           pending={!!state.runtime?.pending}
           error={state.runtime?.reconciliationRequired ? 'Wynik Run lub zapisu nieznany. Wymagany autoryzowany odczyt dokładnego requestId; ponowne połączenie nie usuwa blokady. Ręczna edycja dostępna.' : state.runtime?.error}
