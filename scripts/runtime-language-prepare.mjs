@@ -30,8 +30,8 @@ export function prepareLanguageImages(root,lock,{run,save,receipt},kinds=['java'
   item.observedImage={Id:image.Id,RepoDigests:image.RepoDigests??[],Descriptor:image.Descriptor??null};item.status='TOOL_PROBES_PENDING';save();
   const wheels=lock.language.artifacts.filter(a=>a.kind==='language-wheel'),pythonCode='import sys,json,importlib.metadata as m;print(json.dumps({"python":sys.version.split()[0],"packages":{n:m.version(n) for n in '+JSON.stringify(wheels.map(a=>a.name))+'}}))';
   const probes=kind==='java'?[
-   {name:'jdt-server-java',exe:'/opt/jdk27/bin/java',args:['-version'],version:'27.0.1.0'},
-   ...[11,17,21,27].map(release=>({name:'target-javac-'+release,exe:(release===21?'/opt/java/openjdk':'/opt/jdk'+release)+'/bin/javac',args:['-version'],version:({11:'11.0.33',17:'17.0.21',21:'21.0.13',27:'27.0.1.0'})[release]}))
+   {name:'jdt-server-java',exe:'/opt/jdk27/bin/java',args:['-version'],version:'27.0.1.0.2'},
+   ...[11,17,21,27].map(release=>({name:'target-javac-'+release,exe:(release===21?'/opt/java/openjdk':'/opt/jdk'+release)+'/bin/javac',args:['-version'],version:({11:'11.0.33',17:'17.0.21',21:'21.0.13',27:'27.0.1.0.2'})[release]}))
   ]:[{name:'python-pylsp-inventory',exe:'/usr/local/bin/python',args:['-c',pythonCode]}];
   for(const probe of probes) {
    const name='paircoach-stage09-language-'+probe.name,record={name,status:'CREATE_INTENT'};item.tools.push(record);save();

@@ -86,7 +86,23 @@
         "JAVA_VERSION=jdk-27.0.1.0"
       ],
       "declaredCompressedLayerBytes": 151994529,
-      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT",
+      "observedTools": [
+        {
+          "name": "java",
+          "version": "27.0.1.0.2"
+        },
+        {
+          "name": "javac",
+          "version": "27.0.1.0.2"
+        }
+      ],
+      "toolVersionEvidence": {
+        "scope": "ACTUAL_CONTAINER_BINARY_PROBE_NOT_UPSTREAM_ENV",
+        "source": "ROOT/sequential-review-20261111/prepare-only-bd0261-independent-readback/java27-failure-evidence/tool-mismatch.json",
+        "toolsSha256": "d8e11737095a0b43bcf64913d5f5175ef6048e201524f59f8b12cd199ee1dd05",
+        "upstreamEnvPreserved": "JAVA_VERSION=jdk-27.0.1.0 is literal upstream image config; it is not the java/javac binary version."
+      }
     },
     "maven": {
       "reference": "maven@sha256:be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f",
