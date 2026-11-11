@@ -10,7 +10,11 @@ export interface ContextWorkspace {
   listFiles(): { path: string; kind: string }[];
   getDocument(path: string): Document;
 }
+export const ALLOWED_PROPOSAL_KINDS = ['RETRY_FROM_SNAPSHOT', 'RESTORE_SNAPSHOT', 'FINISH_EXERCISE'] as const;
 export interface CoachContext {
+  capabilities?: { canGenerateTests: false };
+  allowedProposalKinds?: (typeof ALLOWED_PROPOSAL_KINDS)[number][];
+  allowedEvidenceIds?: string[];
   view?: (VersionedEditorView & { selectedText: string | null; selectionTruncated: boolean }) | null;
   workspaceVersion: number;
   controlEpoch: number;
@@ -151,13 +155,18 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
     previousInterventions: previousInterventions.slice(-20),
   };
   // Metadata can also contain a pasted token (filename/message ID), not just code.
-  return JSON.parse(JSON.stringify(context, (_key, value) => typeof value === 'string' ? redactSecrets(value, sensitiveValues) : value)) as CoachContext;
+  const safe = JSON.parse(JSON.stringify(context, (_key, value) => typeof value === 'string' ? redactSecrets(value, sensitiveValues) : value)) as CoachContext;
+  safe.capabilities = { canGenerateTests: false };
+  safe.allowedProposalKinds = [...ALLOWED_PROPOSAL_KINDS];
+  // Identity is taken AFTER all redaction, from the exact facts sent to the provider.
+  safe.allowedEvidenceIds = [...new Set([...safe.messages.map(message => message.messageId), ...(safe.lastRun ? [safe.lastRun.runId] : [])])];
+  return safe;
 }
 
 export function contextFingerprint(context: CoachContext): string {
   // Ticking timer/server seq is NOT a new domain fact. Own edits never trigger this function.
   const { elapsedMs: _, ...timer } = context.timer;
-  const { controlEpoch: __, trigger: ___, ...facts } = context;
+  const { controlEpoch: __, trigger: ___, allowedEvidenceIds: ____, ...facts } = context;
   return createHash('sha256').update(JSON.stringify({ ...facts, messages: facts.messages.filter(m => m.author === 'STUDENT'), timer })).digest('hex');
 }
 

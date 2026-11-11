@@ -42,7 +42,9 @@ export function codexCoachArgs(schemaPath:string,instruction=INSTRUCTION,configu
 // Explicit wire projection: future fields, root paths and raw stdout never hitchhike
 // into the child. Context redaction/consent remain the existing CoachAdapter's job.
 function inputContext(c:Readonly<CoachContext>):CoachContext {
-  return {...(c.trigger ? {trigger:{reason:c.trigger.reason,messageId:c.trigger.messageId}} : {}),workspaceVersion:c.workspaceVersion,controlEpoch:c.controlEpoch,taskMode:c.taskMode,
+  return {capabilities:{canGenerateTests:false},
+    allowedProposalKinds:[...(c.allowedProposalKinds ?? [])],allowedEvidenceIds:[...(c.allowedEvidenceIds ?? [])],
+    ...(c.trigger ? {trigger:{reason:c.trigger.reason,messageId:c.trigger.messageId}} : {}),workspaceVersion:c.workspaceVersion,controlEpoch:c.controlEpoch,taskMode:c.taskMode,
     taskFilePath:c.taskFilePath,reviewNotesPath:c.reviewNotesPath,activeFilePath:c.activeFilePath,
     view:c.view ? {projectId:c.view.projectId,path:c.view.path,documentVersion:c.view.documentVersion,
       cursor:c.view.cursor ? {line:c.view.cursor.line,column:c.view.cursor.column} : null,

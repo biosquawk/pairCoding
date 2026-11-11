@@ -1,4 +1,5 @@
 import Ajv2020 from 'ajv/dist/2020.js';
+import { CoachResponseRejected } from './authorization';
 import type { CoachDecision, Range } from '../../shared/protocol';
 
 // One schema for provider constraints AND application-side validation. No coercion.
@@ -27,7 +28,7 @@ export const COACH_DECISION_SCHEMA: Schema = {
       showPointer: { type: 'boolean' }, evidenceIds: array(id, 20) }),
     object({ kind: { const: 'EDIT' }, purpose: str(240), path, documentVersion: integer(1), workspaceVersion: integer(0),
       steps: array(object({ range, textBlock: str(4096) }), 60, 1) }),
-    object({ kind: { const: 'PROPOSE' }, proposalKind: choices('RETRY_FROM_SNAPSHOT', 'RESTORE_SNAPSHOT', 'GENERATE_TESTS', 'FINISH_EXERCISE'),
+    object({ kind: { const: 'PROPOSE' }, proposalKind: choices('RETRY_FROM_SNAPSHOT', 'RESTORE_SNAPSHOT', 'FINISH_EXERCISE'),
       questionText: str(600), snapshotId: nullable(id), paths: array(path, 1000), resetTimer: { const: false } }),
     object({ kind: { const: 'REPLY' }, text: str(1200) }),
     object({ kind: { const: 'MUTE' }, durationSeconds: nullable(integer(1, 86400)), sourceUserMessageId: id }),
@@ -43,6 +44,8 @@ export function isOrderedRange(range: Range): boolean {
 
 export function parseCoachDecision(input: unknown): CoachDecision {
   const value: unknown = typeof input === 'string' ? JSON.parse(input) : input;
+  if (value && typeof value === 'object' && !Array.isArray(value) &&
+      (value as any).kind === 'PROPOSE' && (value as any).proposalKind === 'GENERATE_TESTS') throw new CoachResponseRejected('CAPABILITY');
   if (!validate(value)) throw new Error('COACH_INVALID_DECISION');
   const decision = value as CoachDecision;
   if (decision.kind === 'EDIT' && decision.steps.some(step => !isOrderedRange(step.range))) throw new Error('COACH_INVALID_RANGE');

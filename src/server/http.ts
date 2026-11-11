@@ -130,6 +130,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   }
   function snapshot() { emit('SESSION_SNAPSHOT',getBundle()); }
   function postProposal(decision:Extract<CoachDecision,{kind:'PROPOSE'}>) {
+    // Defense in depth for stale/injected CoachService implementations bypassing the adapter.
+    if(decision.proposalKind==='GENERATE_TESTS') {
+      emit('ERROR',{code:'COACH_RESPONSE_REJECTED',message:'Generowanie testów jest niedostępne; zachowano pracę.',retryable:false,requestId:null,currentVersion:null});
+      return;
+    }
     const proposal:Proposal = {proposalId:randomUUID(),kind:decision.proposalKind,questionText:decision.questionText,yesLabel:'Tak, wykonaj',noLabel:'Nie, pracuję dalej',basedOnWorkspaceVersion:workspace.workspaceVersion,expiresAt:new Date(Date.now()+60000).toISOString(),paths:decision.paths,snapshotId:decision.snapshotId,resetTimer:false};
     proposals=proposals.filter(p=>Date.parse(p.expiresAt)>Date.now()).slice(-9); proposals.push(proposal); emit('ACTION_PROPOSAL',proposal);
   }

@@ -6,6 +6,7 @@ import type { WriteGate } from './WriteGate';
 import { buildContext, contextFingerprint, isContextPathAllowed, isCoachWriteAllowed, redactSecrets } from './coach/context';
 import type { CoachContext } from './coach/context';
 import { applyTextEdit } from './coach/edits';
+import { CoachResponseRejected, hasDirectMuteRequest } from './coach/authorization';
 import { parseCoachDecision } from './coach/schema';
 import { defaultCoachProvider } from './coach/provider';
 import type { CoachProvider } from './coach/provider';
@@ -146,11 +147,12 @@ export class CoachAdapter {
       const decision = parseCoachDecision(raw);
       this.setStatus('READY');
       await this.applyDecision(decision, context, pending, controller.signal);
-    } catch {
+    } catch (error) {
       // Never log provider error/message/body: these can include request content or keys.
       if (!controller.signal.aborted && !this.closed) {
         this.setStatus('FAILED');
-        this.error('COACH_RESPONSE_REJECTED', 'Odpowiedź trenera jest nieprawidłowa lub nieaktualna; zachowano pracę.');
+        this.error('COACH_RESPONSE_REJECTED', error instanceof CoachResponseRejected ? error.safeMessage :
+          'Odpowiedź trenera jest nieprawidłowa lub nieaktualna; zachowano pracę.');
       }
     } finally {
       clearTimeout(analysisTimeout);
@@ -190,8 +192,8 @@ export class CoachAdapter {
           if (document.content !== source.content) throw new Error('UNMAPPED_HINT');
           if (decision.range) applyTextEdit(document.content, { range: decision.range, textBlock: 'x' });
         }
-        const evidence = new Set([...context.messages.map(message => message.messageId), ...(context.lastRun ? [context.lastRun.runId] : [])]);
-        if (decision.evidenceIds.some(id => !evidence.has(id))) throw new Error('INVALID_EVIDENCE');
+        const evidence = new Set(context.allowedEvidenceIds ?? []);
+        if (decision.evidenceIds.some(id => !evidence.has(id))) throw new CoachResponseRejected('EVIDENCE');
         const id = randomUUID();
         this.clearPointer();
         if (decision.showPointer && decision.path !== null && decision.documentVersion !== null) {
@@ -205,6 +207,8 @@ export class CoachAdapter {
         return;
       }
       case 'PROPOSE':
+        if (decision.proposalKind === 'GENERATE_TESTS' || !context.allowedProposalKinds?.some(kind => kind === decision.proposalKind))
+          throw new CoachResponseRejected('CAPABILITY');
         if (decision.paths.some(path => !isContextPathAllowed(path))) throw new Error('PROPOSAL_PATH_DENIED');
         this.options.onProposal({ ...decision, questionText: redactSecrets(decision.questionText, this.sensitive) });
         this.remember(decision.kind, null);
@@ -212,8 +216,9 @@ export class CoachAdapter {
       case 'MUTE': {
         const message = pending.message;
         // File text/provider cannot authorize mute. Only the current explicit chat request.
-        if (pending.reason !== 'CHAT' || message?.author !== 'STUDENT' || message.messageId !== decision.sourceUserMessageId ||
-          !/^\s*(?:prosz[ęe][, ]+)?(?:nie\s+przerywaj|wycisz|zrób\s+przerwę|przerwa|pauza|mute|stop\s+interrupting|take\s+a\s+break)(?![\p{L}\p{N}\p{M}_])/iu.test(message.text)) throw new Error('MUTE_NOT_AUTHORIZED');
+        if (pending.reason !== 'CHAT' || message?.author !== 'STUDENT' || context.trigger?.reason !== 'CHAT' ||
+          message.messageId !== decision.sourceUserMessageId || context.trigger.messageId !== message.messageId ||
+          !hasDirectMuteRequest(message.text)) throw new CoachResponseRejected('MUTE');
         this.options.session.mute(decision.durationSeconds);
         return;
       }
