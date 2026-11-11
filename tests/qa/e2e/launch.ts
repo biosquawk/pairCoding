@@ -27,7 +27,15 @@ const manifestPath = path.join(runtime, 'browser-manifest.json');
 const saveManifest = () => {
   const temporary = `${manifestPath}.${randomUUID()}.tmp`;
   fs.writeFileSync(temporary, JSON.stringify(manifest, null, 2), { flag: 'wx' });
-  fs.renameSync(temporary, manifestPath);
+  // Windows readers can briefly hold a destination handle across replacement.
+  for (let attempt = 0; attempt < 64; attempt++) {
+    try { fs.renameSync(temporary, manifestPath); return; }
+    catch (error) {
+      if (process.platform !== 'win32' || attempt === 63
+        || !['EPERM', 'EACCES', 'EBUSY'].includes(Object(error).code)) throw error;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);
+    }
+  }
 };
 saveManifest();
 let hintCounter = 0;

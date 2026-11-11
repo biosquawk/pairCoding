@@ -37,7 +37,7 @@ test('published JSON remains complete at the actual filesystem truncate boundary
     },
   };
   const write = new vm.Script(`(${writerSource})`).runInNewContext({
-    fs: instrumented, manifestPath, manifest: { counter: 1 }, randomUUID,
+    fs: instrumented, manifestPath, manifest: { counter: 1 }, randomUUID, process,
   });
   write();
   assert.deepEqual(observed, { counter: 0 });
@@ -60,7 +60,7 @@ test('independent concurrent readers observe complete JSON throughout 500 actual
     const control = new Int32Array(workerData.shared);
     const manifest = { counter: 0, payload: 'x'.repeat(4096) };
     const write = new vm.Script('(' + workerData.writerSource + ')').runInNewContext({
-      fs, randomUUID, manifest, manifestPath: workerData.manifestPath,
+      fs, randomUUID, manifest, manifestPath: workerData.manifestPath, process,
     });
     parentPort.postMessage('ready');
     Atomics.wait(control, 0, 0);
@@ -87,10 +87,42 @@ test('independent concurrent readers observe complete JSON throughout 500 actual
     reads++;
   }
   if (Atomics.load(control, 0) !== 2) await worker.terminate();
-  assert.equal(await exited, 0);
-  assert.equal(workerError, undefined);
+  const exitCode = await exited;
+  assert.ifError(workerError);
+  assert.equal(exitCode, 0);
   assert.ok(reads > 0);
   assert.equal(incomplete, 0);
   assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).counter, 499);
   t.diagnostic(`${reads} concurrent reads, ${incomplete} incomplete observations`);
 });
+
+for (const code of ['EPERM', 'EIO']) {
+  test(`actual publisher handles ${code} with bounded Windows sharing recovery`, t => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'paircoach-manifest-sharing-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const manifestPath = path.join(directory, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify({ counter: 0 }));
+    let attempts = 0;
+    const failure = Object.assign(new Error('Injected filesystem boundary'), { code });
+    const instrumented = {
+      ...fs,
+      renameSync(from: string, to: string) {
+        attempts++;
+        if (attempts <= 2) throw failure;
+        fs.renameSync(from, to);
+      },
+    };
+    const write = new vm.Script(`(${writerSource})`).runInNewContext({
+      fs: instrumented, manifestPath, manifest: { counter: 1 }, randomUUID, process: { platform: 'win32' },
+    });
+    if (code === 'EPERM') {
+      write();
+      assert.equal(attempts, 3);
+      assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).counter, 1);
+    } else {
+      assert.throws(write, error => error === failure);
+      assert.equal(attempts, 1);
+      assert.equal(JSON.parse(fs.readFileSync(manifestPath, 'utf8')).counter, 0);
+    }
+  });
+}
