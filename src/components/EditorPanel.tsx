@@ -223,7 +223,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     const bind = () => {
       const nextScope = client.getEditorViewScope(), nextModel = editor.getModel();
       if (scope === nextScope && model === nextModel) return;
+      const previousScope = scope, previousModel = model;
       disposeObservation(); scope = nextScope; model = nextModel;
+      // A model disappearing/replacing is not permission to reuse its coordinates.
+      if (previousModel && previousModel !== nextModel) client.clearEditorView(previousScope);
       const boundScope = scope;
       if (!boundScope) return;
       disposeObservation = observeMonacoViewP2(editor, projectId, activePath,
