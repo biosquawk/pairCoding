@@ -6,13 +6,14 @@ import {resolve,join,dirname,isAbsolute} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
 import {Rpc} from './rpc.mjs';
+import {javaProjectPreferences,javaCompilerOptions,javaSettingsRequest,assertEffectiveJavaSettings,runCases,runOutcome} from './spike-policy.mjs';
 import {createPrivateOutput,assertPrivateOutput,createMutableShadow} from './shadow-access.mjs';
 import {javaLaunch,prepareBootDirectory,prepareJdtStateDirectory,readJavaVersions,collectBootArtifacts,assertJavaProjectImported,assertJavaProjectDiagnostics} from './boot-artifacts.mjs';
 
 const here=dirname(fileURLToPath(import.meta.url));
 const lock=JSON.parse(await readFile(join(here,'upstream.lock.json'),'utf8'));
 const [mode,outArg,archiveArg]=process.argv.slice(2);
-if(!['prepare','run'].includes(mode)||!outArg||!isAbsolute(outArg)) throw new Error('Usage: node spike.mjs prepare|run /absolute/NEW-owned-output [absolute/verified-jdt.tar.gz for prepare]');
+if(!['prepare','run','python-only'].includes(mode)||!outArg||!isAbsolute(outArg)) throw new Error('Usage: node spike.mjs prepare|run|python-only /absolute/NEW-owned-output [absolute/verified-jdt.tar.gz for prepare]');
 const out=resolve(outArg);
 // Never touch an existing result or accept arbitrary user Docker flags/environment.
 // The operator chooses a fresh NEW owned directory, then reuses it only for run.
@@ -88,7 +89,7 @@ async function exercise(language,target,imageId){
   if(language==='java'){
     shadowAccess.write('.project','<?xml version="1.0" encoding="UTF-8"?><projectDescription><name>lsp-probe</name><comment/><projects/><buildSpec><buildCommand><name>org.eclipse.jdt.core.javabuilder</name><arguments/></buildCommand></buildSpec><natures><nature>org.eclipse.jdt.core.javanature</nature></natures></projectDescription>');
     shadowAccess.write('.classpath',`<?xml version="1.0" encoding="UTF-8"?><classpath><classpathentry kind="src" path="src"/><classpathentry kind="con" path="org.eclipse.jdt.launching.JRE_CONTAINER/org.eclipse.jdt.internal.debug.ui.launcher.StandardVMType/JavaSE-${target}"/><classpathentry kind="output" path="bin"/></classpath>`);
-    shadowAccess.write('.settings/org.eclipse.jdt.core.prefs',`eclipse.preferences.version=1\norg.eclipse.jdt.core.compiler.codegen.targetPlatform=${target}\norg.eclipse.jdt.core.compiler.compliance=${target}\norg.eclipse.jdt.core.compiler.source=${target}\norg.eclipse.jdt.core.compiler.release=enabled\n`);
+    shadowAccess.write('.settings/org.eclipse.jdt.core.prefs',javaProjectPreferences(target));
   }
   const method='pairCoachUniqueMethod',renamed='pairCoachRenamedMethod';
   const makeText=language==='java'?javaText:pythonText;
@@ -134,6 +135,12 @@ async function exercise(language,target,imageId){
       summary.projectImport.projectUris=projects;
       summary.projectImport=assertJavaProjectImported(status,projects);
       summary.projectImport.statusEvent=statusEvent;
+      summary.compilerPolicy={status:'PENDING',expected:javaCompilerOptions(target)};
+      const actual=await rpc.request('workspace/executeCommand',javaSettingsRequest(target),30000);
+      summary.compilerPolicy.actual=actual;
+      // Persist actual values BEFORE validating; mismatches/errors remain evidence.
+      await writeFile(join(out,`${kind}-effective-settings.json`),JSON.stringify(summary.compilerPolicy,null,2)+'\n');
+      summary.compilerPolicy=assertEffectiveJavaSettings(target,actual);
     }
     if(language==='python')summary.tools=await command(['exec',name,...['sh','-c','python --version && python -m pip check && python -c "import importlib.metadata as m; print({n:m.version(n) for n in [\'python-lsp-server\',\'jedi\',\'pyflakes\']})"']]);
     rpc.notify('textDocument/didOpen',{textDocument:{uri,languageId:language,version:1,text}});
@@ -210,11 +217,11 @@ async function run(){
   const images=JSON.parse(await readFile(join(out,'prepared-images.json'),'utf8'));
   assert.equal(images.upstreamLockSHA256,hash(await readFile(join(here,'upstream.lock.json'))));
   const results=[];
-  for(const [language,target]of [['java',27],['java',21],['python',null]]){
+  for(const [language,target]of runCases(mode)){
     assert.match(images.images[language].imageId,/^sha256:[a-f0-9]{64}$/);
     results.push(await exercise(language,target,images.images[language].imageId));
   }
-  await writeFile(join(out,'summary.json'),JSON.stringify({status:'PASS',scope:'LSP A–B only; not GUI LIVE, runtime or gate approval',results},null,2)+'\n');
+  await writeFile(join(out,'summary.json'),JSON.stringify({...runOutcome(mode),mode,results},null,2)+'\n');
 }
 try{if(mode==='prepare')await prepare();else await run();}
 catch(error){await writeFile(join(out,`${mode}-failure.json`),JSON.stringify({status:'FAIL',error:error.stack,utc:new Date().toISOString()},null,2)+'\n');process.exitCode=1;}
