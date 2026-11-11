@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
 import { canonicalDirectory, readPrivate, receiptWriter, syncDirectory } from './runtime-files.mjs';
 import { buildOperatorPlan } from './runtime-operator.mjs';
 import { prepare, validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
@@ -138,9 +139,10 @@ export function executeRemainderPlan(plan, dependencies = {}) {
     check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed before mutation');
     invoke(['container', 'inspect', plan.failure.exactContainerId], true); // NO rm/force/prune/cleanup authority here.
     // Reused image existence/config AND manifest proof are re-inspected; cache bytes stay read-only.
+    // JSON object key order is not identity; exact fields/types and array order still are.
     for (const reused of plan.reuse) {
       const values = JSON.parse(run(['image', 'inspect', reused.imageId]).stdout);
-      check(values.length === 1 && values[0].Id === reused.imageId && values[0].Config?.User === '10001:10001' && !values[0].Config.Entrypoint?.length && equal({ Id: values[0].Id, Descriptor: values[0].Descriptor ?? null, RepoDigests: values[0].RepoDigests ?? [] }, reused.observedImage), 'Reused image identity/manifest changed');
+      check(values.length === 1 && values[0].Id === reused.imageId && values[0].Config?.User === '10001:10001' && !values[0].Config.Entrypoint?.length && isDeepStrictEqual({ Id: values[0].Id, Descriptor: values[0].Descriptor ?? null, RepoDigests: values[0].RepoDigests ?? [] }, reused.observedImage), 'Reused image identity/manifest changed');
     }
     make(path.join(root, 'stage'));
     // Reuse frozen public downloaded bytes, not a second network acquisition.
