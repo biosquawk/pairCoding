@@ -49,7 +49,7 @@ export function ReportHistory({ source, scope, currentReport, onRetryCurrent }: 
     } catch (e) { if (request === readRequest.current) setError(e instanceof Error ? e.message : String(e)); }
     finally { if (request === readRequest.current) setLoading(false); }
   };
-  return <section aria-label="Raporty sesji" className="min-w-0">
+  return <section aria-label="Raporty sesji" className="min-w-0 [overflow-wrap:anywhere]">
     {source && <div className="mb-3 space-y-2 text-xs">
       <div className="flex flex-wrap items-center gap-2">
         <label htmlFor="report-history-session" className="font-semibold">Poprzednie raporty</label>

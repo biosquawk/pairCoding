@@ -106,9 +106,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
       className="flex flex-col min-h-0 shrink-0 bg-zinc-950 border-t border-zinc-800 text-zinc-300 transition-all select-none relative"
     >
       {/* Panel Tab Bar & Window Controls */}
-      <div className="flex items-center justify-between bg-zinc-950 border-b border-zinc-800 px-3 py-1 select-none">
-        {/* Tabs */}
-        <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center justify-between gap-1 bg-zinc-950 border-b border-zinc-800 px-3 py-1 select-none">
+        {/* Tabs wrap before window controls can horizontally scroll the hidden panel. */}
+        <div className="flex flex-wrap min-w-0 items-center gap-1">
           <button
             onClick={() => onSelectTab('task')}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-all font-medium ${
@@ -167,7 +167,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
         </div>
 
         {/* Window action buttons (Collapse / Maximize) */}
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1 ml-auto">
           <button
             onClick={onToggleMaximize}
             className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
