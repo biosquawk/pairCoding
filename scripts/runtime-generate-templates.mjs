@@ -1,0 +1,13 @@
+// Pure source-template generation; no toolchain or Docker operations.
+import { writeFileSync } from 'node:fs';
+const list=[['javascript-node','node',null],['typescript-node','typescript',null],['python-3.13','python',null],...[11,17,21,27].map(r=>[`java-maven-${r}`,'java-maven',r])];
+const field=(key,label,input,help,choices=[])=>({key,label,input,help,required:true,choices,min:null,max:null});
+const profiles=list.map(([id,adapterFamily,release])=>({id,label:id,adapterFamily,imageLockKey:id,expectedTools:[{name:'node',version:'22.22.0'}],compilerRelease:release,analysis:{languageLevel:release?String(release):adapterFamily==='python'?'3.13':'ES2022',preview:false},language:release?{provider:'jdt',imageLockKey:'jdt-runtime-27',serverJvm:'27.0.1.0'}:adapterFamily==='python'?{provider:'pylsp',imageLockKey:'pylsp-runtime-3.13',serverJvm:null}:{provider:'builtin',imageLockKey:null,serverJvm:null},taskFields:[field('workingDirectory','Task directory','PATH','Relative to immutable project input.'),field('entry.kind','Entry','CHOICE','Select task mode.',(release?['JAVA_MAIN',...([21,27].includes(release)?['SPRING_BOOT']:[]),'TESTS']:adapterFamily==='python'?['SCRIPT','MODULE','TESTS']:['SCRIPT','TESTS']).map(value=>({value,label:value}))),...(release?[field('entry.className','Main class','TEXT','Fully qualified Java class.')]:[field('entry.path','Script','PATH','Literal relative source path.')]),field('tests.paths','Test sources','PATH','Literal relative test paths; empty for Maven.'),field('tests.names','Test names','TEXT','Maven exact class or class#method names; otherwise empty.')]}));
+writeFileSync('runtimes/catalog.json',JSON.stringify({schemaVersion:1,profiles},null,2)+'\n');
+for(const [dir,entry,paths,names] of [
+ ['javascript-counter',{kind:'SCRIPT',path:'main.js'},['counter.test.js'],[]],
+ ['typescript-counter',{kind:'SCRIPT',path:'main.ts'},['counter.test.ts'],[]],
+ ['python-calculator',{kind:'SCRIPT',path:'calculator.py'},['test_calculator.py'],[]],
+ ['java-pattern',{kind:'JAVA_MAIN',className:'demo.StrategyDemo'},[],['demo.StrategyDemoTest']],
+ ['spring-counter',{kind:'SPRING_BOOT',containerPort:8080,healthPath:'/sum'},[],['demo.CounterApplicationTest']]
+]) writeFileSync(`examples/${dir}/task.v2.json`,JSON.stringify({runProfiles:['RUN_MAIN','RUN_TESTS'].map(kind=>({kind,timeoutMs:120000,task:{workingDirectory:'.',entry,tests:{paths,names}}}))},null,2)+'\n');

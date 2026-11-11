@@ -1,0 +1,2 @@
+# NOT READY: operator must supply a reviewed exact pytest + transitive --require-hashes lock.
+# This intentionally does not invent a wheel hash or claim pytest is installed/prepared.

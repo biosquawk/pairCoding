@@ -1,0 +1,598 @@
+{
+  "schemaVersion": 1,
+  "profiles": [
+    {
+      "id": "javascript-node",
+      "label": "javascript-node",
+      "adapterFamily": "node",
+      "imageLockKey": "javascript-node",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": null,
+      "analysis": {
+        "languageLevel": "ES2022",
+        "preview": false
+      },
+      "language": {
+        "provider": "builtin",
+        "imageLockKey": null,
+        "serverJvm": null
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "SCRIPT",
+              "label": "SCRIPT"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.path",
+          "label": "Script",
+          "input": "PATH",
+          "help": "Literal relative source path.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    },
+    {
+      "id": "typescript-node",
+      "label": "typescript-node",
+      "adapterFamily": "typescript",
+      "imageLockKey": "typescript-node",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": null,
+      "analysis": {
+        "languageLevel": "ES2022",
+        "preview": false
+      },
+      "language": {
+        "provider": "builtin",
+        "imageLockKey": null,
+        "serverJvm": null
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "SCRIPT",
+              "label": "SCRIPT"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.path",
+          "label": "Script",
+          "input": "PATH",
+          "help": "Literal relative source path.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    },
+    {
+      "id": "python-3.13",
+      "label": "python-3.13",
+      "adapterFamily": "python",
+      "imageLockKey": "python-3.13",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": null,
+      "analysis": {
+        "languageLevel": "3.13",
+        "preview": false
+      },
+      "language": {
+        "provider": "pylsp",
+        "imageLockKey": "pylsp-runtime-3.13",
+        "serverJvm": null
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "SCRIPT",
+              "label": "SCRIPT"
+            },
+            {
+              "value": "MODULE",
+              "label": "MODULE"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.path",
+          "label": "Script",
+          "input": "PATH",
+          "help": "Literal relative source path.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    },
+    {
+      "id": "java-maven-11",
+      "label": "java-maven-11",
+      "adapterFamily": "java-maven",
+      "imageLockKey": "java-maven-11",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": 11,
+      "analysis": {
+        "languageLevel": "11",
+        "preview": false
+      },
+      "language": {
+        "provider": "jdt",
+        "imageLockKey": "jdt-runtime-27",
+        "serverJvm": "27.0.1.0"
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "JAVA_MAIN",
+              "label": "JAVA_MAIN"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.className",
+          "label": "Main class",
+          "input": "TEXT",
+          "help": "Fully qualified Java class.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    },
+    {
+      "id": "java-maven-17",
+      "label": "java-maven-17",
+      "adapterFamily": "java-maven",
+      "imageLockKey": "java-maven-17",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": 17,
+      "analysis": {
+        "languageLevel": "17",
+        "preview": false
+      },
+      "language": {
+        "provider": "jdt",
+        "imageLockKey": "jdt-runtime-27",
+        "serverJvm": "27.0.1.0"
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "JAVA_MAIN",
+              "label": "JAVA_MAIN"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.className",
+          "label": "Main class",
+          "input": "TEXT",
+          "help": "Fully qualified Java class.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    },
+    {
+      "id": "java-maven-21",
+      "label": "java-maven-21",
+      "adapterFamily": "java-maven",
+      "imageLockKey": "java-maven-21",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": 21,
+      "analysis": {
+        "languageLevel": "21",
+        "preview": false
+      },
+      "language": {
+        "provider": "jdt",
+        "imageLockKey": "jdt-runtime-27",
+        "serverJvm": "27.0.1.0"
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "JAVA_MAIN",
+              "label": "JAVA_MAIN"
+            },
+            {
+              "value": "SPRING_BOOT",
+              "label": "SPRING_BOOT"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.className",
+          "label": "Main class",
+          "input": "TEXT",
+          "help": "Fully qualified Java class.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    },
+    {
+      "id": "java-maven-27",
+      "label": "java-maven-27",
+      "adapterFamily": "java-maven",
+      "imageLockKey": "java-maven-27",
+      "expectedTools": [
+        {
+          "name": "node",
+          "version": "22.22.0"
+        }
+      ],
+      "compilerRelease": 27,
+      "analysis": {
+        "languageLevel": "27",
+        "preview": false
+      },
+      "language": {
+        "provider": "jdt",
+        "imageLockKey": "jdt-runtime-27",
+        "serverJvm": "27.0.1.0"
+      },
+      "taskFields": [
+        {
+          "key": "workingDirectory",
+          "label": "Task directory",
+          "input": "PATH",
+          "help": "Relative to immutable project input.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.kind",
+          "label": "Entry",
+          "input": "CHOICE",
+          "help": "Select task mode.",
+          "required": true,
+          "choices": [
+            {
+              "value": "JAVA_MAIN",
+              "label": "JAVA_MAIN"
+            },
+            {
+              "value": "SPRING_BOOT",
+              "label": "SPRING_BOOT"
+            },
+            {
+              "value": "TESTS",
+              "label": "TESTS"
+            }
+          ],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "entry.className",
+          "label": "Main class",
+          "input": "TEXT",
+          "help": "Fully qualified Java class.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.paths",
+          "label": "Test sources",
+          "input": "PATH",
+          "help": "Literal relative test paths; empty for Maven.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        },
+        {
+          "key": "tests.names",
+          "label": "Test names",
+          "input": "TEXT",
+          "help": "Maven exact class or class#method names; otherwise empty.",
+          "required": true,
+          "choices": [],
+          "min": null,
+          "max": null
+        }
+      ]
+    }
+  ]
+}
