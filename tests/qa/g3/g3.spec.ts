@@ -5,6 +5,7 @@ import { fixture, seed, reviewSeed, brokenSource, profile, silent, filesBelow, f
 import { Wire, open, editor, append, saved, settings, configureProfiles, requestRestore, snapshots, session, get, chat, pause, veto, run, terminal, finish, report, hide, snapshotText, treePids } from './helpers';
 import type { CoachContext } from '../../../src/server/coach/context';
 import { registerBasics } from './g3-basics';
+import { externalEdgePage } from './external-edge';
 import type { Run } from '../../../src/shared/protocol';
 
 const test = base.extend<{ make: (options?: Parameters<typeof fixture>[0]) => Promise<Fixture>; wire: Wire }>({
@@ -35,6 +36,11 @@ const test = base.extend<{ make: (options?: Parameters<typeof fixture>[0]) => Pr
     }
   },
 });
+// Ordinary native Edge only for visibility cases; other17 retain the runner-managed browser.
+const visibilityTest = test.extend({ page: async ({}, use, info) => externalEdgePage(use, info) });
+// Only recorder ownership is changed: externalEdgePage MUST attach trace on all outcomes and
+// screenshots on failure. Pinned 1.65 auto-traces connectOverCDP default contexts too; never start twice.
+visibilityTest.use({ trace: 'off', screenshot: 'off' });
 // Final GUI gaps from HUMAN a3b804e0, same execution. Existing 16 cases below unchanged.
 registerBasics(test);
 
@@ -71,11 +77,20 @@ test('TEST-014: same proposalId with different messageId restores once, retains 
   const human = seed + '# before restore\n'; await append(page, '# before restore\n'); await saved(f, wire, human);
   await page.waitForTimeout(1100); const before = await session(page, f), list = await snapshots(page, f);
   const p = await requestRestore(page, wire, 'G3 original');
+  const helloCount = wire.sent.filter(m => m.type === 'HELLO').length, connection = wire.currentConnection()!;
+  const identity = wire.identity();
   await page.getByRole('button', { name: p.yesLabel, exact: true }).click();
   await expect.poll(() => !!responseFor(wire, p.proposalId)).toBe(true);
   const first = responseFor(wire, p.proposalId); await wire.ok(first); await expect.poll(() => f.read()).toBe(seed);
   const once = await session(page, f), backups = (await snapshots(page, f)).filter(s => !list.some(old => old.snapshotId === s.snapshotId));
   expect(backups).toHaveLength(1); expect(snapshotText(f, backups[0].snapshotId, 'main.py')).toBe(human);
+  // Accepted restore deliberately resyncs LiveBackend. Do not inject into the socket it is closing.
+  // Same wait proven by ROOT's diagnostic-014, plus explicit current/authenticated identity control.
+  await expect.poll(() => wire.sent.filter(m => m.type === 'HELLO').length).toBeGreaterThan(helloCount);
+  await expect(page.getByText('Połączono z backendem.', { exact: true })).toBeVisible();
+  expect(wire.currentConnection()!.generation).toBeGreaterThan(connection.generation);
+  expect(wire.currentConnection()).toMatchObject({ closed: false, authenticated: true });
+  expect(wire.identity()).toEqual(identity); // duplicate proposal belongs to this same client/session
   const duplicate = wire.command('PROPOSAL_RESPONSE', first.payload); expect(duplicate.messageId).not.toBe(first.messageId);
   const ack = await wire.ack(duplicate); expect(ack.status).toBe('DUPLICATE'); expect(ack.error).toBeNull();
   expect((await session(page, f)).workspaceVersion).toBe(once.workspaceVersion);
@@ -116,7 +131,7 @@ for (const invalid of ['expired', 'stale', 'backup-write-denied'] as const) {
   });
 }
 
-test('TEST-016: real hidden window pauses server timer, retains veto and manual pause after return', async ({ page, make, wire }) => {
+visibilityTest('TEST-016: real hidden window pauses server timer, retains veto and manual pause after return', async ({ page, make, wire }) => {
   const f = await make(); await open(page, f, wire); await veto(page, f);
   const original = f.read(), controls = wire.received.filter(m => m.type === 'COACH_STEP_EDIT').length;
   let restore = await hide(page, f, wire);
@@ -136,10 +151,21 @@ test('TEST-016: real hidden window pauses server timer, retains veto and manual 
   const end = await session(page, f); expect(end.timer.manualPaused).toBe(true); expect(end.timer.elapsedMs).toBe(paused); expect(end.cooldownAfterVeto).toBe(true);
 });
 
-test('TEST-017: pauseOnHidden=false counts real hidden time but rejects delayed AI edit; fresh visible edit works', async ({ page, make, wire }) => {
+visibilityTest('TEST-017: pauseOnHidden=false counts real hidden time but rejects delayed AI edit; fresh visible edit works', async ({ page, make, wire }) => {
   const f = await make(); await open(page, f, wire);
-  await page.getByLabel('Pauzuj przy ukryciu', { exact: true }).uncheck();
+  // Controlled checkbox is confirmed asynchronously by WS SESSION_STATE, not immediate uncheck().
+  await expect(page.getByText('Połączono z backendem.', { exact: true })).toBeVisible();
+  const policy = page.getByLabel('Pauzuj przy ukryciu', { exact: true });
+  await expect(policy).toBeChecked(); const since = wire.sent.length;
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.visibilityState === 'visible' && document.hasFocus())).toBe(true);
+  await policy.press('Space');
+  await expect.poll(() => wire.sent.slice(since).some(m => m.type === 'TIMER_ACTION'
+    && m.payload.action === 'SET_HIDDEN_POLICY' && m.payload.pauseOnHidden === false)).toBe(true);
+  const action = wire.sent.slice(since).find(m => m.type === 'TIMER_ACTION' && m.payload.action === 'SET_HIDDEN_POLICY' && m.payload.pauseOnHidden === false);
+  await wire.ok(action);
   await expect.poll(async () => (await session(page, f)).timer.pauseOnHidden).toBe(false);
+  await expect(policy).not.toBeChecked();
   let resolve!: (v: unknown) => void, captured: Readonly<CoachContext> | undefined;
   f.provider.decideData = c => {
     if (c.messages.at(-1)?.text === 'G3 delayed while hidden' && !captured) { captured = c; return new Promise(r => { resolve = r; }); }
@@ -310,7 +336,7 @@ test('TEST-024: real ReportService AI-boundary error gives FAILED cause, durable
   expect(f.read()).toBe(seed + '# before failure\n'); expect(snapshotText(f, pending.snapshotId, 'main.py')).toBe(seed + '# before failure\n');
   const diskFacts = factsFiles(f); expect(Object.keys(diskFacts)).toHaveLength(1); expect(inputs).toHaveLength(1);
   await page.getByRole('button', { name: /^Raport/ }).click();
-  await expect(page.getByText(failed.error!.message, { exact: true })).toBeVisible();
+  await expect(page.getByText(`${failed.error!.code}: ${failed.error!.message}`, { exact: true })).toBeVisible();
   fs.writeFileSync(path.join(f.rootPath, 'main.py'), 'LATER_EDIT_BEFORE_RETRY\n');
   const [retry] = await Promise.all([page.waitForResponse(r => r.url().endsWith('/api/session/report/retry') && r.request().method() === 'POST'),
     page.getByRole('button', { name: 'Ponów generowanie raportu', exact: true }).click()]);

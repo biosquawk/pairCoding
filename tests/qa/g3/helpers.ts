@@ -9,24 +9,47 @@ import type { Proposal, Report, Run, Session, Snapshot } from '../../../src/shar
  * here; normal user decisions, settings, run, stop, finish and retry originate in GUI. */
 export class Wire {
   sent: any[] = []; received: any[] = [];
-  private transmit?: (frame: any) => void;
+  private current?: { generation: number; closed: boolean; authenticated: boolean; hello?: any; send: (raw: string) => void };
+  private generation = 0;
   async install(page: Page) {
     await page.routeWebSocket('**/ws/session', route => {
       const backend = route.connectToServer();
-      this.transmit = frame => { this.sent.push(frame); backend.send(JSON.stringify(frame)); };
-      route.onMessage(raw => { const m = JSON.parse(raw.toString()); this.sent.push(m); backend.send(raw); });
-      backend.onMessage(raw => { this.received.push(JSON.parse(raw.toString())); route.send(raw); });
+      const connection = { generation: ++this.generation, closed: false, authenticated: false, hello: undefined as any,
+        send: (raw: string) => backend.send(raw) };
+      this.current = connection;
+      route.onMessage(raw => {
+        const m = JSON.parse(raw.toString()); this.sent.push(m);
+        if (m.type === 'HELLO') { connection.hello = m; connection.authenticated = false; }
+        backend.send(raw);
+      });
+      backend.onMessage(raw => {
+        const m = JSON.parse(raw.toString()); this.received.push(m);
+        // http.ts authenticates HELLO before publishing this real session bundle.
+        if (!connection.closed && connection.hello && m.type === 'SESSION_SNAPSHOT'
+          && m.sessionId === connection.hello.sessionId && m.payload.session.sessionId === connection.hello.sessionId) {
+          connection.authenticated = true;
+        }
+        route.send(raw);
+      });
+      // Installing onClose disables Playwright's default close forwarding: preserve BOTH directions.
+      route.onClose((code, reason) => { connection.closed = true; connection.authenticated = false; void backend.close({ code, reason }); });
+      backend.onClose((code, reason) => { connection.closed = true; connection.authenticated = false; void route.close({ code, reason }); });
     });
   }
+  currentConnection() {
+    const c = this.current;
+    return c ? { generation: c.generation, closed: c.closed, authenticated: c.authenticated, helloId: c.hello?.messageId } : null;
+  }
   identity() {
-    const hello = this.sent.find(m => m.type === 'HELLO');
-    if (!hello) throw new Error('No real browser HELLO');
+    const hello = this.current?.hello;
+    if (!hello) throw new Error('No HELLO on current real browser connection');
     return { clientId: hello.clientId as string, sessionId: hello.sessionId as string };
   }
   command(type: string, payload: unknown) {
-    if (!this.transmit) throw new Error('Real WS not connected');
+    const c = this.current;
+    if (!c || c.closed || !c.authenticated) throw new Error('Current real WS is not authenticated/open');
     const frame = { protocolVersion: '3.0', messageId: randomUUID(), ...this.identity(), type, payload };
-    this.transmit(frame); return frame;
+    this.sent.push(frame); c.send(JSON.stringify(frame)); return frame;
   }
   async ack(frame: any) {
     await expect.poll(() => this.received.find(m => m.type === 'ACK' && m.payload.replyTo === frame.messageId)).toBeTruthy();
@@ -43,6 +66,9 @@ export const session = (p: Page, f: Fixture) => get<Session>(p, f, '/session');
 export const snapshots = (p: Page, f: Fixture) => get<Snapshot[]>(p, f, '/snapshots');
 export const report = (p: Page, f: Fixture, w: Wire) => get<Report>(p, f, '/session/report?sessionId=' + w.identity().sessionId);
 export const editor = (p: Page, file = 'main.py') => p.locator('.monaco-editor').getByRole('textbox', { name: `Edytor pliku ${file}`, exact: true });
+// Monaco 0.55.1 puts data-mode-id on the create() host, not its child .monaco-editor view.
+// Anchor in the actual named textbox; never use an unrelated language-bearing element or model API.
+export const editorHost = (p: Page, file: string) => editor(p, file).locator('xpath=ancestor::*[@data-mode-id][1]');
 export async function open(page: Page, f: Fixture, wire: Wire, start = true) {
   await wire.install(page); await page.goto(f.baseURL); await page.getByText('main.py', { exact: true }).first().click();
   await expect(editor(page)).toBeVisible();
@@ -119,19 +145,37 @@ export async function finish(page: Page, reason: 'COMPLETED' | 'ABANDONED'): Pro
   expect(r.status(), await r.text()).toBe(202); const result = await r.json();
   expect(result.status).toBe('PENDING'); expect(result.reason).toBe(reason); return result;
 }
-/** Actual browser minimize/restore, not a forged visibilitychange or WS WINDOW_STATE.
- * Headed Chromium is mandatory. Scope: only this Playwright-launched browser window. */
+/** Actual ordinary Edge minimize/restore, only in the external page fixture of TEST016/017.
+ * No forged visibilitychange, focus emulation or synthetic WS WINDOW_STATE. */
 export async function hide(page: Page, f: Fixture, w: Wire) {
   const cdp: CDPSession = await page.context().newCDPSession(page);
-  const { windowId } = await cdp.send('Browser.getWindowForTarget');
-  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
-  const restore = async () => { await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } }); await page.bringToFront(); await cdp.detach(); };
+  let windowId: number;
+  try { ({ windowId } = await cdp.send('Browser.getWindowForTarget')); }
+  catch (error) { await cdp.detach(); throw error; }
+  const restore = async () => {
+    const since = w.sent.length;
+    try {
+      await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'normal' } });
+      await page.bringToFront();
+      await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('visible');
+      await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(true);
+      await expect.poll(async () => (await session(page, f)).presence).toBe('FOCUSED');
+      expect(w.sent.slice(since).some(m => m.type === 'WINDOW_STATE' && m.payload.presence === 'FOCUSED')).toBe(true);
+    } finally { await cdp.detach(); }
+  };
+  const since = w.sent.length;
   try {
+    await cdp.send('Browser.setWindowBounds', { windowId, bounds: { windowState: 'minimized' } });
+    expect((await cdp.send('Browser.getWindowBounds', { windowId })).bounds.windowState).toBe('minimized');
     await expect.poll(() => page.evaluate(() => document.visibilityState)).toBe('hidden');
+    await expect.poll(() => page.evaluate(() => document.hasFocus())).toBe(false);
     await expect.poll(async () => (await session(page, f)).presence).toBe('HIDDEN');
-    expect(w.sent.some(m => m.type === 'WINDOW_STATE' && m.payload.presence === 'HIDDEN')).toBe(true);
+    expect(w.sent.slice(since).some(m => m.type === 'WINDOW_STATE' && m.payload.presence === 'HIDDEN')).toBe(true);
     return restore;
-  } catch (e) { await restore(); throw e; }
+  } catch (error) {
+    try { await restore(); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Native hide and restore failed'); }
+    throw error;
+  }
 }
 export function snapshotText(f: Fixture, id: string, p: string) {
   const file = f.frozen(id).files.find(x => x.path === p);
