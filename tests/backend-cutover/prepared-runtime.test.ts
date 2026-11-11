@@ -182,3 +182,43 @@ test('UNIT nonlocal native staging provenance is metadata, not a path to resolve
   f.receipt.request.project.root = 'C:\\staging\\old project'; f.write();
   assert.equal((await f.resolver().resolve(f.runtime, 'RUN_MAIN', run)).preparationProjectRoot, 'C:\\staging\\old project');
 });
+
+test('UNIT config Id may equal genuine OCI index digest; independent measured proof is still mandatory', async t => {
+  const f = fixture(t), inspected: any = f.inspected;
+  f.image.digest = f.image.imageId; inspected.RepoDigests = [];
+  inspected.Descriptor = { digest: f.image.digest, mediaType: 'application/vnd.oci.image.index.v1+json', size: 856 }; f.write();
+  assert.equal((await f.resolver().probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+  inspected.Descriptor = null; f.write(); await denied(f);
+  inspected.RepoDigests = ['paircoach/runtime-node@' + f.image.digest]; f.write();
+  assert.equal((await f.resolver().probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+});
+
+test('UNIT selected cache seam returns COMPLETE binary+dotfile inventory under retained explicit lease', async t => {
+  const f = fixture(t); fs.mkdirSync(path.join(f.cache, 'm2'));
+  const binary = Buffer.from([0, 255, 13, 10, 128]); fs.writeFileSync(path.join(f.cache, 'm2', 'dependency.jar'), binary);
+  fs.writeFileSync(path.join(f.cache, 'm2', '.repositories'), 'metadata\r\n');
+  let checks = 0;
+  const result = await f.resolver().resolveCache(f.runtime, 'RUN_MAIN', run, { assertCurrent: () => { checks++; } });
+  assert.equal(result.cacheRoot, f.cache); assert.equal(result.family, 'node'); assert.equal(result.workingDirectory, '.');
+  assert.equal(result.dependencySha256, f.receipt.request.dependencySha256); assert.equal(result.toolchainSha256, f.identity.toolchainHash);
+  assert.deepEqual(result.files.map(f => f.path), ['dependencies-prepared.json', 'm2/.repositories', 'm2/dependency.jar', 'tools.json']);
+  assert.equal(result.files.find(f => f.path === 'm2/dependency.jar')?.sha256, hash(binary));
+  assert.equal(result.files.find(f => f.path === 'm2/dependency.jar')?.bytes, binary.length); assert.equal(checks, 4);
+  assert.ok(Object.isFrozen(result.files[0])); assert.match(result.inventorySha256, /^[a-f0-9]{64}$/);
+});
+for (const invalid of ['symlink', 'hardlink', 'alias', 'oversized', 'lease', 'race'] as const)
+  test('UNIT complete cache seam rejects rather than excludes ' + invalid, async t => {
+    const f = fixture(t), file = path.join(f.cache, 'artifact.bin'); fs.writeFileSync(file, 'original');
+    if (invalid === 'symlink') fs.symlinkSync(file, path.join(f.cache, 'linked'));
+    if (invalid === 'hardlink') fs.linkSync(file, path.join(f.cache, 'linked'));
+    if (invalid === 'alias') fs.writeFileSync(path.join(f.cache, 'ARTIFACT.bin'), 'collision');
+    if (invalid === 'oversized') fs.truncateSync(file, 32*1024*1024 + 1);
+    if (invalid === 'race') { let count = 0; f.dependencies.inspectEngine = async () => { if (++count === 3) fs.writeFileSync(file, 'raced'); return f.engine; }; }
+    await assert.rejects(f.resolver().resolveCache(f.runtime, 'RUN_MAIN', run, { assertCurrent: () => { if (invalid === 'lease') throw Error('revoked'); } }), { code: 'PREPARE_REQUIRED' });
+  });
+
+test('UNIT actual inspect may omit empty Entrypoint; nonempty or malformed entrypoint still refused', async t => {
+  const f = fixture(t), config: any = f.inspected.Config; delete config.Entrypoint; f.write();
+  assert.equal((await f.resolver().probe(f.runtime, 'RUN_MAIN', run)).canRun, true);
+  for (const entrypoint of [['/unreviewed'], '']) { config.Entrypoint = entrypoint; f.write(); await denied(f); }
+});

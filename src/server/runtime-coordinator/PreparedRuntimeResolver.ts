@@ -10,6 +10,10 @@ import type { ResolvedRuntime, RuntimeModeProbe } from '../runtime-config';
 import type { ImageLockEntry, ModeReadiness, RunKind, RunProfileV2, ToolVersion } from '../../shared/runtime-v2';
 import { validateTaskForProfile } from '../../shared/validation-v2';
 import { canonical, canonicalDirectory, readRecord, sha256 } from './storage';
+import { readRunSourceInventory } from '../execution/ImmutableInput';
+import { dependencyHash } from '../../../scripts/runtime-dependencies.mjs';
+import { resolvePreparedToolchainIdentity } from '../../../scripts/runtime-prepare.mjs';
+import { safeRelative } from '../execution/files';
 
 export interface PreparedRuntimeResolverOptions { readonly outputRoots: readonly string[] }
 export interface PreparedToolchainIdentity {
@@ -47,6 +51,18 @@ export interface PreparedRuntimeSelection {
   readonly image: Readonly<ImageLockEntry>;
   readonly caches: readonly Readonly<ManagedDependencyCache>[];
 }
+export interface PreparedCacheFile { readonly path: string; readonly sha256: string; readonly bytes: number }
+export interface VerifiedPreparedCache extends PreparedRuntimeSelection {
+  readonly cacheRoot: string;
+  readonly family: ManagedDependencyCache['family'];
+  readonly workingDirectory: string;
+  readonly dependencySha256: string;
+  readonly toolchainSha256: string;
+  readonly files: readonly Readonly<PreparedCacheFile>[];
+  readonly inventorySha256: string;
+}
+/** Internal actual coordinator/WriteGate lease. Never deserialize a client callback or READY flag. */
+export interface PreparedCacheLease { assertCurrent(): void }
 export class PreparedRuntimeError extends Error {
   readonly code = 'PREPARE_REQUIRED';
   constructor() { super('Current prepared runtime, OCI image identity, tools and dependencies could not be verified. Explicitly prepare this project and task working directory, publish the measured image lock, and select its output with --prepared-runtime. Editing remains available.'); }
@@ -78,9 +94,9 @@ function image(value: unknown, lock: ImageLockEntry): void {
   // CLI JSON array and a single parsed inspect object are both read-only transport results.
   const i = object(Array.isArray(value) ? (requireThat(value.length === 1), value[0]) : value);
   const config = object(i.Config);
-  requireThat(digest(lock.imageId) && digest(lock.digest) && lock.digest !== lock.imageId && i.Id === lock.imageId &&
+  requireThat(digest(lock.imageId) && digest(lock.digest) && i.Id === lock.imageId &&
     i.Os === 'linux' && i.Architecture === 'amd64' && config.User === '10001:10001' &&
-    (config.Entrypoint === null || Array.isArray(config.Entrypoint) && config.Entrypoint.length === 0));
+    (config.Entrypoint === undefined || config.Entrypoint === null || Array.isArray(config.Entrypoint) && config.Entrypoint.length === 0));
   const descriptor = i.Descriptor ? object(i.Descriptor) : null;
   const manifestTypes = ['application/vnd.oci.image.manifest.v1+json', 'application/vnd.oci.image.index.v1+json',
     'application/vnd.docker.distribution.manifest.v2+json', 'application/vnd.docker.distribution.manifest.list.v2+json'];
@@ -113,6 +129,40 @@ function freeze<T>(v: T): T {
   return v;
 }
 
+/** FULL cache, not Run source policy: binary dependencies and dotfiles are included unchanged.
+ * Fixed bounds: 20k files/entries, depth64,32MiB/file,512MiB total. No symlink/hardlink/devices,
+ * aliases or silent exclusions. Exceeding a bound is NOTREADY, never a truncated inventory. */
+function cacheInventory(root: string): readonly Readonly<PreparedCacheFile>[] {
+  canonicalDirectory(root);
+  const result: PreparedCacheFile[] = [], aliases = new Set<string>();
+  let bytes = 0, entries = 0;
+  const metadata = (s: fs.BigIntStats) => [s.dev,s.ino,s.mode,s.nlink,s.mtimeNs,s.ctimeNs].join(':');
+  const walk = (directory: string, prefix: string, depth: number): void => {
+    requireThat(depth <= 64); canonicalDirectory(directory);
+    const before = fs.lstatSync(directory, { bigint: true }), names = fs.readdirSync(directory).sort();
+    requireThat(names.length <= 20000);
+    for (const name of names) {
+      const relative = prefix ? prefix + '/' + name : name;
+      requireThat(++entries <= 20000 && safeRelative(relative) && !aliases.has(relative.toLowerCase()));
+      aliases.add(relative.toLowerCase());
+      const file = path.join(directory, name), stat = fs.lstatSync(file, { bigint: true });
+      requireThat(!stat.isSymbolicLink());
+      if (stat.isDirectory()) walk(file, relative, depth + 1);
+      else {
+        requireThat(stat.isFile() && stat.nlink === 1n && stat.size >= 0n && stat.size <= 32n*1024n*1024n);
+        bytes += Number(stat.size); requireThat(bytes <= 512*1024*1024);
+        const content = readRecord(file, 32*1024*1024)!;
+        requireThat(content.length === Number(stat.size));
+        result.push({ path: relative, sha256: sha256(content), bytes: content.length });
+      }
+    }
+    canonicalDirectory(directory);
+    requireThat(metadata(fs.lstatSync(directory, { bigint: true })) === metadata(before) && canonical(fs.readdirSync(directory).sort()) === canonical(names));
+  };
+  walk(root, '', 0);
+  return result.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+
 export class PreparedRuntimeResolver implements RuntimeModeProbe {
   private readonly roots: readonly string[];
   constructor(options: PreparedRuntimeResolverOptions, private readonly dependencies: PreparedRuntimeDependencies) {
@@ -127,6 +177,23 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
     try { await this.resolve(runtime, mode, run); return { canRun: true, problem: null }; }
     catch { return { canRun: false, problem: { code: 'PREPARE_REQUIRED', message: new PreparedRuntimeError().message,
       recovery: 'Run explicit runtime preparation and select the verified output using --prepared-runtime <absolute-outputRoot>. Check the actual engine and measured OCI image lock. No host fallback is used.', retryable: true } }; }
+  }
+  /** Actual selected-cache seam for immutable language copies. Caller retains the SAME actual
+   * root/control/source lease through this call AND subsequent hash-verified ShadowStore copy. */
+  async resolveCache(runtimeInput: ResolvedRuntime, mode: RunKind, runInput: RunProfileV2,
+      lease: PreparedCacheLease): Promise<VerifiedPreparedCache> {
+    try {
+      const runtime = structuredClone(runtimeInput), run = structuredClone(runInput);
+      lease.assertCurrent();
+      const selected = await this.resolve(runtime, mode, run); lease.assertCurrent();
+      requireThat(selected.caches.length === 1);
+      const cache = selected.caches[0], files = cacheInventory(cache.directory);
+      const again = await this.resolve(runtime, mode, run); lease.assertCurrent();
+      requireThat(canonical(selected) === canonical(again) && canonical(cacheInventory(cache.directory)) === canonical(files));
+      lease.assertCurrent();
+      return freeze({ ...selected, cacheRoot: cache.directory, family: cache.family, workingDirectory: run.task.workingDirectory,
+        dependencySha256: cache.dependencyHash, toolchainSha256: cache.toolchainHash, files, inventorySha256: sha256(canonical(files)) });
+    } catch { throw new PreparedRuntimeError(); }
   }
   /** Call afresh under the same WriteGate lease during capture. This does not cache previous READY. */
   async resolve(runtimeInput: ResolvedRuntime, mode: RunKind, runInput: RunProfileV2): Promise<PreparedRuntimeSelection> {
@@ -197,4 +264,13 @@ export class PreparedRuntimeResolver implements RuntimeModeProbe {
       return freeze(matches[0]);
     } catch { throw new PreparedRuntimeError(); } // No private parser/path/daemon stderr in public problem.
   }
+}
+
+/** Production constructor: exact K-admitted producer/executor policies, no copied hash/walker. */
+export function createPreparedRuntimeResolver(options: PreparedRuntimeResolverOptions,
+    transport: Pick<DockerTransport, 'run'>): PreparedRuntimeResolver {
+  return new PreparedRuntimeResolver(options, {
+    readRunSourceInventory, dependencyHash, resolvePreparedToolchainIdentity,
+    ...createPreparedRuntimeInspection(transport),
+  });
 }
