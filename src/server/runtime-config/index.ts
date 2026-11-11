@@ -21,13 +21,27 @@ function freeze<T>(value: T): T {
   return value;
 }
 function jsonFile(file: string): unknown {
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+  const limit = 4 * 1024 * 1024;
+  const unsafe = (): never => { throw Error('Expected an unchanged bounded regular JSON file'); };
+  const regular = (s: fs.BigIntStats): boolean => s.isFile() && !s.isSymbolicLink() && s.nlink > 0n && s.size >= 0n && s.size <= BigInt(limit);
+  const same = (a: fs.BigIntStats, b: fs.BigIntStats): boolean => regular(b) &&
+    a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.nlink === b.nlink && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+  const before = fs.lstatSync(file, { bigint: true });
+  if (!regular(before)) return unsafe();
+  // Optional platform flag is not the identity boundary: check path AND opened fd.
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
   try {
-    const stat = fs.fstatSync(fd);
-    if (!stat.isFile() || stat.size > 4 * 1024 * 1024) throw Error('Expected a bounded regular JSON file');
-    const bytes = fs.readFileSync(fd);
-    if (bytes.length > 4 * 1024 * 1024) throw Error('Configuration grew beyond bound');
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (!same(before, fs.fstatSync(fd, { bigint: true }))) return unsafe();
+    const bytes = Buffer.alloc(Number(before.size) + 1);
+    let count = 0;
+    while (count < bytes.length) {
+      const n = fs.readSync(fd, bytes, count, bytes.length - count, null);
+      if (n === 0) break;
+      count += n;
+    }
+    if (BigInt(count) !== before.size || !same(before, fs.fstatSync(fd, { bigint: true })) ||
+      !same(before, fs.lstatSync(file, { bigint: true }))) return unsafe();
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, count)));
   } finally { fs.closeSync(fd); }
 }
 /** New generation on EVERY load, including failures. Env is explicitly injected, not forwarded to processes. */

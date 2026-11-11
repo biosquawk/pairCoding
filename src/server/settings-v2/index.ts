@@ -65,16 +65,37 @@ function safeParents(directory: string): void {
 }
 function readRegular(file: string, missing = false): Buffer | null {
   safeParents(path.dirname(file));
-  let fd: number;
-  try { fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW); }
-  catch (error) { if (missing && (error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error; }
+  const unsafe = (): never => fail('UNSAFE_SETTINGS_FILE','Expected an unchanged bounded single-link regular settings file.');
+  const regular = (s: fs.BigIntStats): boolean => s.isFile() && !s.isSymbolicLink() && s.nlink === 1n && s.size >= 0n && s.size <= BigInt(MAX_BYTES);
+  const same = (a: fs.BigIntStats, b: fs.BigIntStats): boolean => regular(b) &&
+    a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.nlink === b.nlink && a.mtimeNs === b.mtimeNs && a.ctimeNs === b.ctimeNs;
+  let before: fs.BigIntStats;
+  try { before = fs.lstatSync(file, { bigint: true }); }
+  catch (error) {
+    // Only absence at the initial path observation is a missing source. Disappearance
+    // after that observation is a substitution race, never permission to create settings.
+    if (missing && (error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+    return unsafe();
+  }
+  if (!regular(before)) return unsafe();
+  let fd: number | undefined;
   try {
-    const s = fs.fstatSync(fd);
-    if (!s.isFile() || s.nlink !== 1 || s.size > MAX_BYTES) fail('UNSAFE_SETTINGS_FILE','Expected a bounded unlinked regular settings file.');
-    const bytes = fs.readFileSync(fd);
-    if (bytes.length > MAX_BYTES) fail('SETTINGS_TOO_LARGE','Settings exceed the persistence bound.');
-    return bytes;
-  } finally { fs.closeSync(fd); }
+    // O_NOFOLLOW is defence in depth only: Windows does not expose this constant.
+    fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+    if (!same(before, fs.fstatSync(fd, { bigint: true }))) return unsafe();
+    // Read at most the observed size + one byte, even if another writer grows the file.
+    const bytes = Buffer.alloc(Number(before.size) + 1);
+    let count = 0;
+    while (count < bytes.length) {
+      const n = fs.readSync(fd, bytes, count, bytes.length - count, null);
+      if (n === 0) break;
+      count += n;
+    }
+    if (BigInt(count) !== before.size || !same(before, fs.fstatSync(fd, { bigint: true })) ||
+      !same(before, fs.lstatSync(file, { bigint: true }))) return unsafe();
+    return bytes.subarray(0, count);
+  } catch { return unsafe(); }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 const syncDirectory = (directory: string) => {
   safeParents(directory);
