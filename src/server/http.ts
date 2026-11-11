@@ -396,8 +396,28 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     const real=fs.realpathSync(file),rootReal=fs.realpathSync(root);
     if(!real.startsWith(rootReal+path.sep)) fail(403,'PATH_FORBIDDEN','Niedozwolony zasób.');
     const mime:Record<string,string>={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.json':'application/json','.svg':'image/svg+xml','.woff2':'font/woff2','.ttf':'font/ttf'};
-    res.writeHead(200,{'Content-Type':mime[path.extname(file)]||'application/octet-stream','X-Content-Type-Options':'nosniff','Cache-Control':'no-cache','Referrer-Policy':'no-referrer'});
-    if(method==='HEAD') res.end(); else fs.createReadStream(file).pipe(res);
+    // Keep headers uncommitted until data arrives so an open/early read error can be a 500.
+    res.setHeader('Content-Type',mime[path.extname(file)]||'application/octet-stream');
+    res.setHeader('X-Content-Type-Options','nosniff');
+    res.setHeader('Cache-Control','no-cache');
+    res.setHeader('Referrer-Policy','no-referrer');
+    if(method==='HEAD') {res.end();return;}
+    const source=fs.createReadStream(file);
+    const stop=()=>{source.destroy();};
+    res.once('close',stop);
+    res.once('error',stop);
+    source.on('error',error=>{
+      source.unpipe(res);
+      source.destroy();
+      if(res.destroyed || res.writableEnded) return;
+      if(res.headersSent) res.destroy();
+      else respond(res,500,apiError(error));
+    });
+    source.once('close',()=>{
+      res.off('close',stop);
+      res.off('error',stop);
+    });
+    source.pipe(res);
   }
   server.on('upgrade',(req,socket,head)=>{
     try { trust(req); if(req.url!=='/ws/session') fail(404,'NOT_FOUND','Nieznany WS.');
