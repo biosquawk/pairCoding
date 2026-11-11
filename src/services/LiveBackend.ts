@@ -1,4 +1,5 @@
 import type * as Wire from '../shared/protocol';
+import type { ReportSummary } from './reportHistory';
 import type { CoachEditStep, EndReason, ProjectSettings, WindowPresence } from '../types/paircoach';
 import type { ClientState, ServerMessage, ServerPayloads, UpdatedFile } from './liveTypes';
 import { emptyLiveState, mapDocument, mapProposal, mapReport, mapRun, mapSettings } from './liveMapper';
@@ -813,6 +814,32 @@ export class LiveBackend {
       attempt.reading = false;
       if (attempt.readAgain) { attempt.readAgain = false; void this.reconcileFinish(); }
     }
+  }
+  // Read-only history is deliberately outside state.report and finish reconciliation.
+  getReportHistoryScope(): string | null {
+    return this.synced && !this.stopped && this.project && this.session
+      ? JSON.stringify([this.project.projectId, this.session.sessionId, this.generation]) : null;
+  }
+  private historyGuard() {
+    const scope = this.getReportHistoryScope();
+    if (!scope) throw new Error('Połącz z projektem, aby odczytać poprzednie raporty.');
+    return () => {
+      if (scope !== this.getReportHistoryScope()) throw new Error('Projekt lub sesja uległy zmianie. Odśwież listę raportów.');
+    };
+  }
+  async listReports(): Promise<ReportSummary[]> {
+    const guard = this.historyGuard();
+    const result = await this.http<{ reports: ReportSummary[] }>('/api/session/reports');
+    guard();
+    return result.reports;
+  }
+  async readReport(sessionId: string) {
+    const guard = this.historyGuard();
+    if (!sessionId.trim()) throw new Error('Wybierz sesję raportu.');
+    const report = await this.http<Wire.Report>(`/api/session/report?sessionId=${encodeURIComponent(sessionId)}`);
+    guard();
+    if (report.sessionId !== sessionId) throw new Error('Odpowiedź dotyczy innej sesji raportu.');
+    return mapReport(report);
   }
   async retryReport() { try { this.state.report = mapReport(await this.http<Wire.Report>('/api/session/report/retry', 'POST', this.commandBody())); this.publish(); } catch (error) { this.fail(error); } }
   async updateProjectSettings(settings: ProjectSettings) {

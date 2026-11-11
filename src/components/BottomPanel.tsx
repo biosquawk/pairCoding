@@ -11,6 +11,8 @@ import {
   SessionReport,
 } from '../types/paircoach';
 import { SafeMarkdown } from './SafeMarkdown';
+import { ReportHistory } from './ReportHistory';
+import type { ReportHistorySource } from '../services/reportHistory';
 import {
   AlertCircle,
   Bot,
@@ -34,6 +36,8 @@ interface BottomPanelProps {
   activeProposal: ActionProposal | null;
   activeRun: ExecutionRun | null;
   report: SessionReport | null;
+  reportHistorySource?: ReportHistorySource;
+  reportHistoryScope?: string | null;
   height: number;
   isMaximized: boolean;
   isCollapsed: boolean;
@@ -52,6 +56,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   activeProposal,
   activeRun,
   report,
+  reportHistorySource,
+  reportHistoryScope,
   height,
   isMaximized,
   isCollapsed,
@@ -356,39 +362,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
           {/* TAB 4: Raport */}
           {activeTab === 'report' && (
             <div className="h-full overflow-y-auto p-4 max-w-4xl mx-auto">
-              {!report ? (
-                <div className="text-center py-8 text-zinc-500">
-                  <FileText className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">Raport końcowy zostanie wygenerowany po zakończeniu lub porzuceniu próby.</p>
-                  <p className="text-xs text-zinc-600 mt-1">
-                    Możesz kliknąć przycisk <strong>„🏁 Zakończ”</strong> na górnym pasku, aby zamknąć sesję.
-                  </p>
-                </div>
-              ) : report.status === 'PENDING' ? (
-                <div className="flex flex-col items-center justify-center py-12 gap-3 text-zinc-400">
-                  <RefreshCw className="w-6 h-6 animate-spin text-blue-400" />
-                  <p className="text-xs">Generowanie podsumowania sesji treningowej przez Trenera AI...</p>
-                </div>
-              ) : report.status === 'FAILED' ? (
-                <div className="p-4 rounded-lg bg-rose-950/40 border border-rose-800 text-rose-200 text-xs">
-                  <div className="flex items-center gap-2 font-bold mb-2 text-rose-300">
-                    <AlertCircle className="w-4 h-4 text-rose-400" />
-                    <span>Nie udało się wygenerować raportu końcowego</span>
-                  </div>
-                  <p className="mb-3 text-zinc-300">{report.error || 'Wystąpił nieoczekiwany błąd serwera.'}</p>
-                  <button
-                    onClick={onRetryReport}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-rose-700 hover:bg-rose-600 text-white font-semibold transition-colors"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>Ponów generowanie raportu</span>
-                  </button>
-                </div>
-              ) : (
-                <div>
-                  <SafeMarkdown content={report.markdown || ''} />
-                </div>
-              )}
+              <ReportHistory key={reportHistoryScope ?? 'offline'} scope={reportHistoryScope ?? null}
+                source={reportHistorySource} currentReport={report} onRetryCurrent={onRetryReport} />
             </div>
           )}
         </div>

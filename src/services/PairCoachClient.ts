@@ -212,6 +212,12 @@ export class PairCoachClient {
     simulator.finishExercise(reason, simulateFailure);
   }
 
+  public getReportHistoryScope() {
+    return this.transportMode === 'LIVE_BACKEND' ? this.live.getReportHistoryScope() : null;
+  }
+  public listReports() { return this.live.listReports(); }
+  public readReport(sessionId: string) { return this.live.readReport(sessionId); }
+
   public retryReport() {
     if (this.transportMode === 'LIVE_BACKEND') return this.live.retryReport();
     simulator.retryReport();

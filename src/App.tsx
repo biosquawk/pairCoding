@@ -312,6 +312,8 @@ export default function App() {
             activeProposal={state.activeProposal}
             activeRun={state.activeRun}
             report={state.report}
+            reportHistorySource={state.transportMode === 'LIVE_BACKEND' ? client : undefined}
+            reportHistoryScope={client.getReportHistoryScope()}
             height={bottomPanelHeight}
             isMaximized={isBottomMaximized}
             isCollapsed={isBottomCollapsed}
