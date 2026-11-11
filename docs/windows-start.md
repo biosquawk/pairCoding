@@ -97,6 +97,10 @@ Nie zmieniaj NODE_ENV na production: standardowy start używa lokalnego
 `/dev/bootstrap` do tokenu. Nie kopiuj odpowiedzi bootstrapu; token nie jest
 hasłem użytkownika do wpisania. Serwer ma pozostać wyłącznie na loopback.
 
+## Model Codex
+
+W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-sol` i `reasoning_effort: "medium"`. Trener i raport korzystają z tych samych ustawień lokalnego Codex CLI. Po edycji pliku zrestartuj serwer. Opcjonalne nadpisania to `PAIRCOACH_CODEX_MODEL`, `PAIRCOACH_CODEX_REASONING_EFFORT` oraz `PAIRCOACH_CONFIG` (pełna ścieżka innego JSON). Nie są potrzebne dodatkowy klucz ani URL API.
+
 ## 3. Start → zgoda AI → edytuj/czat
 
 1. Zobacz `challenge.md` w zakładce zadania i otwórz `solution.js` w drzewie.

@@ -27,6 +27,25 @@ Dostęp do AI wymaga konfiguracji dostawcy oraz zaznaczenia zgody w ustawieniach
 
 Szczegółowe polecenia PowerShell, konfiguracja Codexa i przebieg pierwszego zadania: [instrukcja Windows](docs/windows-start.md).
 
+## Konfiguracja modelu Codex
+
+Plik [paircoach.config.json](paircoach.config.json) w katalogu aplikacji:
+
+```json
+{
+  "codex": {
+    "model": "gpt-6.1-sol",
+    "reasoning_effort": "medium"
+  }
+}
+```
+
+Trener i raport końcowy uruchamiają lokalną instancję `codex exec --model gpt-6.1-sol` z `model_reasoning_effort="medium"`. Używają istniejącego logowania Codexa. Konfiguracja nie wymaga klucza API ani URL API.
+
+Po zmianie pliku zrestartuj serwer. `PAIRCOACH_CONFIG` może wskazać inny plik JSON pełną ścieżką. Opcjonalne nadpisania: `PAIRCOACH_CODEX_MODEL` i `PAIRCOACH_CODEX_REASONING_EFFORT`. Ustawienia zapisane w konfiguracji użytkownika Codexa nie zmieniają tych wartości — aplikacja przekazuje je jawnie. Błędny plik lub niepoprawna wartość zatrzymuje konfigurację dostawcy zamiast wybierać inny model.
+
+W Windows plik konfiguracji znajduje się w rozpakowanym katalogu aplikacji, obok `package.json`. `PAIRCOACH_COACH_PROVIDER=codex` wybiera dostawcę, a `PAIRCOACH_CODEX_EXE` nadal wskazuje lokalny `codex.exe`.
+
 ## Kod i sprawdzenia
 
 - [Backend](src/server/): HTTP/WebSocket, pliki, kontrola zapisu, sesje, uruchamianie testów, raporty oraz dostawcy AI.

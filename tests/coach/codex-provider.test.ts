@@ -144,3 +144,17 @@ test('public Finish selects Codex report without Gemini key and filters private 
   const record=await f.read();assert.doesNotMatch(record.input,/NEVER_SEND_PRIVATE_FILE|PRIVATE_TEST_HTTP_TOKEN|rawBase64|outputTail/);
   assert.equal(record.schema.required[0],'markdown');
 });
+
+test('coach and report subprocesses receive identical pinned config; API credentials stay outside child',async t=>{
+  const f=await fake(t,`const report=JSON.parse(fs.readFileSync(argv[argv.indexOf('--output-schema')+1],'utf8')).required[0]==='markdown';emit({type:'turn.started'});emit({type:'item.completed',item:{type:'agent_message',text:JSON.stringify(report?{markdown:'Raport Codex.'}:{decision:{kind:'REPLY',text:'Odpowiedź Codex.'}})}});emit({type:'turn.completed'});`);
+  const oldKey=process.env.OPENAI_API_KEY,oldUrl=process.env.OPENAI_BASE_URL;
+  process.env.OPENAI_API_KEY='SYNTHETIC_DO_NOT_FORWARD';process.env.OPENAI_BASE_URL='https://synthetic.invalid';
+  t.after(()=>{if(oldKey===undefined)delete process.env.OPENAI_API_KEY;else process.env.OPENAI_API_KEY=oldKey;if(oldUrl===undefined)delete process.env.OPENAI_BASE_URL;else process.env.OPENAI_BASE_URL=oldUrl;});
+  await f.provider.decide(context,new AbortController().signal);const coach=await f.read();
+  assert.equal(await f.provider.generateReport({aiConsent:true},'Report',new AbortController().signal),'Raport Codex.');const report=await f.read();
+  for(const record of [coach,report]){
+    assert.equal(record.argv[record.argv.indexOf('--model')+1],'gpt-6.1-sol');
+    assert(record.argv.includes('model_reasoning_effort="medium"'));
+    assert.equal(record.env.OPENAI_API_KEY,undefined);assert.equal(record.env.OPENAI_BASE_URL,undefined);
+  }
+});

@@ -53,7 +53,7 @@ function git(cwd, args) {
   return r.stdout;
 }
 const text = b => b.toString('utf8').trim();
-const top = new Set(['package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
+const top = new Set(['paircoach.config.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
 // Allow tracked test sources/support, never raw QA output or local runtime data.
 function allowed(name) {
   const parts = name.toLowerCase().split('/');
@@ -71,8 +71,8 @@ function commandClosure(pkg, paths) {
     preview: ['vite preview', ['vite.config.ts'], ['vite'], 'Run build first; frontend preview only, not API'],
     clean: ['node scripts/clean.mjs', ['scripts/clean.mjs'], []],
     lint: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
-    server: ['tsx src/server/index.ts', ['src/server/index.ts'], ['tsx']],
-    start: ['tsx src/server/index.ts', ['src/server/index.ts'], ['tsx']],
+    server: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
+    start: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
     'dev:full': ['concurrently --kill-others "npm run server" "npm run dev"', ['src/server/index.ts', 'vite.config.ts', 'index.html'], ['concurrently', 'tsx', 'vite']],
     typecheck: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
     test: ['tsx --test tests/**/*.test.ts', ['playwright.config.ts'], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],

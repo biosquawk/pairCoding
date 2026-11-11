@@ -175,6 +175,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     const apiKey=process.env.GEMINI_API_KEY;
     const useCodex=process.env.PAIRCOACH_COACH_PROVIDER?.trim().toLowerCase()==='codex';
     if(!configured && !useCodex && !apiKey) return undefined; // ReportService's explicit local-facts fallback.
+    const codexProvider=!configured && useCodex ? new CodexCoachProvider() : undefined;
     return async (frozen,signal)=>{
       if(frozen.aiConsent!==true) throw new Error('AI_CONSENT_REQUIRED');
       const settings=frozen.settings as Settings;
@@ -205,7 +206,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       const projected=JSON.parse(JSON.stringify(safe,(_key,value)=>typeof value==='string'?redactSecrets(value,[token,apiKey||'']):value)) as ReportAIFacts;
       signal.throwIfAborted();
       if(configured) return configured(projected,signal);
-      if(useCodex) return new CodexCoachProvider().generateReport(projected, REPORT_SYSTEM_PROMPT, signal);
+      if(codexProvider) return codexProvider.generateReport(projected, REPORT_SYSTEM_PROMPT, signal);
       const {GoogleGenAI}=await import('@google/genai');
       signal.throwIfAborted();
       const ai=new GoogleGenAI({apiKey:apiKey!});
