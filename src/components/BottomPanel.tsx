@@ -3,6 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { EditorChatSubmissionP2, type EditorChatSenderP2 } from '../services/editorChatP2';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActionProposal,
@@ -42,7 +43,7 @@ interface BottomPanelProps {
   isMaximized: boolean;
   isCollapsed: boolean;
   onSelectTab: (tab: 'task' | 'chat' | 'console' | 'report') => void;
-  onSendMessage: (msg: string) => void;
+  onSendMessage: EditorChatSenderP2;
   onProposalResponse: (proposalId: string, accept: boolean) => void;
   onRetryReport: () => void;
   onToggleCollapse: () => void;
@@ -69,6 +70,10 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   onToggleMaximize,
 }) => {
   const [inputText, setInputText] = useState('');
+  const inputRevisionRef = useRef(0);
+  const submissionRef = useRef(new EditorChatSubmissionP2());
+  const [isSending, setIsSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
   const consoleBottomRef = useRef<HTMLDivElement>(null);
 
@@ -88,9 +93,9 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
 
   const handleSend = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!inputText.trim()) return;
-    onSendMessage(inputText.trim());
-    setInputText('');
+    void submissionRef.current.submit({ text: inputText, revision: inputRevisionRef.current,
+      currentRevision: () => inputRevisionRef.current, send: onSendMessage,
+      clear: () => setInputText(''), error: setSendError, busy: setIsSending });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -270,10 +275,11 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               </div>
 
               {/* Chat Input form (Native input/textarea supporting Windows+H dictation) */}
-              <form onSubmit={handleSend} className="p-2 border-t border-zinc-800 bg-zinc-950 flex items-center gap-2">
+              {sendError && <p role="alert" className="px-3 py-2 text-xs text-amber-300">{sendError}</p>}
+              <form aria-busy={isSending} onSubmit={handleSend} className="p-2 border-t border-zinc-800 bg-zinc-950 flex items-center gap-2">
                 <textarea
                   value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
+                  onChange={(e) => { inputRevisionRef.current++; setInputText(e.target.value); }}
                   onKeyDown={handleKeyDown}
                   placeholder="Napisz do Trenera AI... (Shift+Enter dla nowej linii, w pełni zgodne z dyktowaniem Win+H)"
                   rows={1}
@@ -281,7 +287,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                 />
                 <button
                   type="submit"
-                  disabled={!inputText.trim()}
+                  disabled={isSending || !inputText.trim()}
                   className="p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white rounded transition-colors"
                   title="Wyślij wiadomość"
                 >
