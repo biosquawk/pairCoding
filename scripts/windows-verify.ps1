@@ -69,12 +69,14 @@ try {
   $Tests = @(Get-ChildItem -LiteralPath 'tests/execution' -Filter '*.test.ts' -File | Sort-Object Name | ForEach-Object { $_.FullName })
   if ($Tests.Count -eq 0) { throw 'No execution tests; cannot claim Windows run/stop evidence.' }
   Invoke-NodeCheck 'execution' (@('--import','tsx','--test') + $Tests)
-  $Recovery = Join-Path $Repo 'tests/core/recovery.test.ts'
-  if (Test-Path -LiteralPath $Recovery -PathType Leaf) {
-    Invoke-NodeCheck 'snapshot-recovery' @('--import','tsx','--test',$Recovery)
-  } else {
-    $Results.Add([pscustomobject]@{ check = 'snapshot-recovery'; exitCode = $null; result = 'NOT_RUN'; reason = 'GATE003 recovery implementation/test not present in candidate' })
-  }
+  # Mandatory existing crash/restart suite; its child/helpers are required preflight inputs.
+  $RecoveryTests = @('tests/snapshots/snapshot-crash.test.ts')
+  $Recovery = @($RecoveryTests | ForEach-Object {
+    $File = Join-Path $Repo $_
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { throw 'Missing required snapshot-recovery test; cannot claim Windows PASS.' }
+    $File
+  })
+  Invoke-NodeCheck 'snapshot-recovery' (@('--import','tsx','--test') + $Recovery)
 } finally {
   Set-Location $PreviousCwd
   foreach ($Key in $OldEnvironment.Keys) { [Environment]::SetEnvironmentVariable($Key, $OldEnvironment[$Key], 'Process') }

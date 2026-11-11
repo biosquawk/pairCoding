@@ -57,6 +57,8 @@ test('real synthetic Git -> ZIP exact closure -> trusted archive -> verified dis
   const manifestPath = path.join(output, 'manifest.json'), rawManifest = fs.readFileSync(manifestPath), manifest = JSON.parse(rawManifest);
   assert.equal(manifest.sourceCommit, f.revision); assert.equal(manifest.sourceVerification.execution, 'NOT_RUN_BY_PACKAGER');
   assert.equal(manifest.commands.length, 10);
+  assert.deepEqual(manifest.sourceVerification.recoveryTests, ['tests/snapshots/snapshot-crash.test.ts']);
+  for (const name of recoveryFiles) assert.ok(manifest.sourceVerification.requiredFiles.includes(name), name);
   for (const cmd of manifest.commands) for (const name of cmd.requiredFiles) assert.ok(list.includes(name));
   for (const name of manifest.sourceVerification.requiredFiles) assert.ok(list.includes(name));
   const zip = fs.readFileSync(path.join(output, manifest.archive.name)), entries = zipFiles(zip);
@@ -110,4 +112,28 @@ test('current docs agree on Codex trainer/report, model/effort, ephemeral, Compu
     assert.match(body, /bez (dodatkowego |nowego )?klucza|nie wymaga klucza/i);
     assert.doesNotMatch(body, /Codex jako CoachProvider nie oznacza Codex do raportu/);
   }
+});
+
+const recoveryFiles = ['tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'];
+test('Windows recovery selection resolves existing suite and mandatory package/copy closure', () => {
+  const ps = fs.readFileSync(path.join(repo, 'scripts/windows-verify.ps1'), 'utf8');
+  const selected = /\$RecoveryTests = @\(([^)]+)\)/.exec(ps);
+  assert.ok(selected, 'explicit mandatory recovery selection');
+  assert.deepEqual([...selected[1].matchAll(/'([^']+)'/g)].map(m => m[1]), [recoveryFiles[0]]);
+  assert.match(ps, /Invoke-NodeCheck 'snapshot-recovery' \(@\('--import','tsx','--test'\) \+ \$Recovery\)/);
+  assert.doesNotMatch(ps, /tests\/core\/recovery\.test\.ts/);
+  assert.match(ps, /if \(\$env:OS -ne 'Windows_NT'\)/, 'Windows-only guard unchanged');
+  for (const name of recoveryFiles) {
+    assert.ok(fs.statSync(path.join(repo, name)).isFile(), name);
+    assert.ok(requiredFiles.includes(name), `mandatory verifier input: ${name}`);
+    assert.ok(allowedSource(name), `finite allowlist: ${name}`);
+  }
+  // Existing suite's local support references, not a replacement or dummy recovery test.
+  const suite = fs.readFileSync(path.join(repo, recoveryFiles[0]), 'utf8');
+  assert.match(suite, /from '\.\/helpers'/); assert.match(suite, /new URL\('\.\/snapshot-child\.ts'/);
+});
+for (const name of recoveryFiles) test(`packager refuses missing mandatory recovery input ${name}`, t => {
+  const f = fixture(t); fs.unlinkSync(path.join(f.root, name)); f.revision = f.commit();
+  const output = path.join(f.base, 'rejected'); pack(f, ['--output', output], 1);
+  assert.equal(fs.existsSync(output), false);
 });

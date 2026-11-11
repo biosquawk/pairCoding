@@ -165,9 +165,15 @@ source-verification.log; brak pomiaru nie oznacza PASS. Nie zmieniaj źródła p
 Następnie kopia wykonuje npm ci (własny cache), tsc, build i tests/execution;
 testy uruchamiają własne procesy i badają własne drzewa, bez globalnych kill.
 
-Jeśli `tests/core/recovery.test.ts` istnieje, skrypt wykona również prawdziwy
-zestaw snapshot/recovery P1; brak testu to **NOT_RUN**, exit2. Windows walidacja
-nie zastępuje REST/WS ani przeglądarkowego E2E/AC027 przygotowywanego przez P3.
+Wymagany `snapshot-recovery` uruchamia `tests/snapshots/snapshot-crash.test.ts`
+przez `node --import tsx --test`. Pakiet, manifest i zweryfikowana kopia muszą
+zawierać także `tests/snapshots/snapshot-child.ts` i `tests/snapshots/helpers.ts`;
+brak któregokolwiek jest błędem preflight **przed npm**, nie opcjonalnym pominięciem.
+Istniejące niezmienione testy obejmują rzeczywisty hard-kill/restart, przerwane
+recovery, idempotentny drugi restart, obce podmiany i niezaufany journal.
+ETAP8 sprawdza wybór/kompletność na kopii i syntetycznym ZIP, **nie wykonanie
+native recovery**; pełny Windows run pozostaje PENDING_FINAL_QA po9.
+Windows walidacja nie zastępuje REST/WS ani przeglądarkowego E2E/AC027 P3.
 Skrypt zachowuje logi, results.json, environment.json i input-sha256.json w
 wydrukowanym katalogu evidence. Exit0 = wszystkie obecne wymagane kontrole PASS;
 exit1 = FAIL; exit2 = niepełny kandydat/NOT_RUN. Prześlij K ścieżki dowodów oraz

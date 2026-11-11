@@ -134,7 +134,7 @@ function main() {
     portablePaths.add(folded);
   }
   const paths = new Set(selected.map(e => e.path));
-  for (const name of [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs']) {
+  for (const name of [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts']) {
     if (!paths.has(name)) throw new Error(`Brak wymaganego pliku: ${name}`);
   }
   const pkg = JSON.parse(git(root, ['show', `${commit}:package.json`]).toString('utf8'));
@@ -152,7 +152,9 @@ function main() {
       trust: 'External manifest SHA256 from K/operator trusted channel; colocated SHA256SUMS is not trust',
       requiredFiles: ['README.md', 'paircoach.config.json', 'docs/WINDOWS.md', 'docs/windows-start.md',
         'docs/windows-package.md', 'docs/windows-coach-report-solarized.md',
-        'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'],
+        'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs',
+        'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'],
+      recoveryTests: ['tests/snapshots/snapshot-crash.test.ts'],
       commands: [
         'powershell.exe -NoProfile -File scripts/windows-verify.ps1 -Source <source> -Revision <40SHA> [-TrustedManifest <external-manifest> -ManifestSha256 <trusted64SHA>]',
         'node scripts/verify-source-revision.mjs --source <source> --revision <40SHA> --destination <new-copy> --evidence <new-evidence-file> [--trusted-manifest <external-manifest> --manifest-sha256 <trusted64SHA>]',

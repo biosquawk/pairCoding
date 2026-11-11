@@ -11,7 +11,7 @@ const fullSHA = /^[a-f0-9]{40}$/;
 const hashSHA = /^[a-f0-9]{64}$/;
 const top = new Set(['README.md', 'paircoach.config.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
 const scripts = new Set(['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs']);
-export const requiredFiles = [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', ...scripts, 'scripts/package-windows.mjs'];
+export const requiredFiles = [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', ...scripts, 'scripts/package-windows.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'];
 // Mirrors the packager's finite selection, tested against actual ZIP output.
 export function allowedSource(name) {
   const parts = name.toLowerCase().split('/');

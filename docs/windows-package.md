@@ -53,6 +53,11 @@ Allowlist: README.md, paircoach.config.json, package.json, package-lock.json, ts
 index.html, metadata.json, playwright.config.ts, `src/**`, `docs/windows*.md`, `docs/WINDOWS.md`,
 `scripts/package*.mjs`, **scripts/clean.mjs, scripts/windows-verify.ps1, scripts/verify-source-revision.mjs** i śledzone źródła/support
 `tests/**` (TS/TSX/JS/JSX/MJS/CJS/JSON/XML/TXT/MD/PY/JAVA/PS1, tests/qa/.gitignore).
+Wymagane wejścia Windows recovery to `tests/snapshots/snapshot-crash.test.ts`,
+`tests/snapshots/snapshot-child.ts` i `tests/snapshots/helpers.ts`; są w manifest
+sourceVerification.requiredFiles i zweryfikowanej kopii. sourceVerification.recoveryTests
+wskazuje pierwszy plik jako zestaw do wykonania; brak supportu także blokuje preflight.
+Sam manifest/ZIP nie jest dowodem uruchomienia native recovery (po9).
 Denylist nadal wyklucza .git, node_modules, .env*, klucze PEM/KEY/PFX/P12,
 credentials/secrets, .paircoach, runtime/.runtime, tmp/.tmp, dist, artifacts,
 logs, traces, screenshots, reports, test-results, playwright-report, coverage.

@@ -186,3 +186,14 @@ test('Git clean-status alone is not byte attestation (assume-unchanged binary co
   assert.equal(git(f.source, 'status', '--porcelain'), '');
   const r = run(f, { expected: 1 }); assert.match(r.stderr, /GIT_SOURCE_BYTES_MISMATCH/);
 });
+
+for (const name of ['tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts']) {
+  test(`Git preflight rejects committed missing recovery input ${name}`, t => {
+    const f = fixture(t); fs.unlinkSync(path.join(f.source, name)); f.revision = f.commit();
+    const r = run(f, { expected: 1 }); assert.match(r.stderr, /MISSING_REQUIRED_FILE/);
+  });
+  test(`trusted archive cannot omit mandatory recovery input ${name}`, t => {
+    const f = fixture(t), trust = archiveMode(f, m => ({ ...m, files: m.files.filter(f => f.path !== name) }));
+    const r = run(f, { trust, expected: 1 }); assert.match(r.stderr, /MISSING_REQUIRED_FILE/);
+  });
+}
