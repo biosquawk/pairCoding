@@ -18,6 +18,8 @@ export interface CoachOptions {
   emit: (type: string, payload: unknown) => void;
   onProposal: (decision: Extract<CoachDecision, { kind: 'PROPOSE' }>) => void;
   provider?: CoachProvider;
+  /** Synchronous admission policy; omitted only by standalone adapters without a server transition. */
+  canAnalyze?: () => boolean;
   sensitiveValues?: readonly string[];
 }
 type Ready = { requestId: string; workspaceVersion: number; ready: boolean };
@@ -63,12 +65,13 @@ export class CoachAdapter {
 
   private allowed(): boolean {
     const { session, workspace } = this.options;
-    return !this.closed && workspace.settings.aiConsent && session.canCoach() &&
+    return !this.closed && this.options.canAnalyze?.() !== false && workspace.settings.aiConsent && session.canCoach() &&
       session.getSession().lifecycle === 'RUNNING' && session.getSession().presence === 'FOCUSED';
   }
 
   trigger(reason: 'EDIT' | 'CHAT' | 'RUN' | 'START' | 'OVERTIME', message?: ChatEntry): void {
-    if (this.closed) return;
+    // Admission precedes even fallback replies, status changes and deferred triggers.
+    if (this.closed || this.options.canAnalyze?.() === false) return;
     if (message?.author === 'STUDENT' && !this.messages.some(item => item.messageId === message.messageId)) {
       this.messages.push(structuredClone(message));
       if (this.messages.length > 20) this.messages.shift();
@@ -106,6 +109,8 @@ export class CoachAdapter {
   updateRun(run: Run): void {
     if (this.closed || !run.finishedAt || this.lastRun?.runId === run.runId) return;
     this.lastRun = structuredClone(run);
+    // Keep terminal facts for later context without unlocking veto or scheduling analysis during finish.
+    if (this.options.canAnalyze?.() === false) return;
     this.options.session.noteNewFact('RUN');
     this.trigger('RUN');
   }

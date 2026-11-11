@@ -36,6 +36,8 @@ export interface ServiceContext {
   workspace: WorkspaceService; session: SessionController; gate: WriteGate;
   emit: (type: string, payload: unknown) => void;
   onProposal: (decision: Extract<CoachDecision, {kind:'PROPOSE'}>) => void;
+  /** Custom coach services must honor this policy for admission and late asynchronous decisions. */
+  canAnalyze?: () => boolean;
 }
 export interface CoachService {
   trigger(reason: 'EDIT'|'CHAT'|'RUN'|'START'|'OVERTIME', message?: ChatEntry): void;
@@ -138,7 +140,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     let boundCoach:CoachService|undefined, boundExecution:ExecutionServices|undefined;
     const listeners:{source:WorkspaceService|SessionController;event:string;handler:(...args:any[])=>void}[]=[];
     const publish=(type:string,payload:unknown)=>{if(active)emit(type,payload);};
-    const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);}};
+    const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);},
+      canAnalyze:()=>active && !transitioning && !closing};
     const on=(source:WorkspaceService|SessionController,event:string,handler:(...args:any[])=>void)=>{
       source.on(event,handler);listeners.push({source,event,handler});
     };
