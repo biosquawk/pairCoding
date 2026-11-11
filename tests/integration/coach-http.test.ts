@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createPairCoachServer } from '../../src/server/http';
+import { createPairCoachServer, type ReportAIFacts } from '../../src/server/http';
 import { LocalFallbackProvider, type CoachProvider } from '../../src/server/coach/provider';
 import type { CoachContext } from '../../src/server/coach/context';
 import { workspaceFiles, Peer, id, settings } from '../qa/helpers';
@@ -17,10 +17,10 @@ const edit = (c:Readonly<CoachContext>) => ({kind:'EDIT',purpose:'Injected two-s
 const hint = (c:Readonly<CoachContext>) => ({kind:'HINT',severity:'NEUTRAL',text:'Injected integration hint',path:'main.py',
   documentVersion:c.documents.find(d=>d.path==='main.py')!.version,range:null,showPointer:true,evidenceIds:[]});
 
-async function fixture(t:TestContext, provider:CoachProvider, consent=true) {
+async function fixture(t:TestContext, provider:CoachProvider, consent=true, reportGenerate?: (facts:ReportAIFacts, signal:AbortSignal)=>Promise<string>) {
   const dirs=await workspaceFiles(t,{'main.py':'value = 0\n','.env.fixture':'SYNTHETIC_EXCLUDED_ONLY'});
   const token=`integration-sensitive-${id()}`;
-  const app=createPairCoachServer({...dirs,port:0,token,enableCoach:true,coachProvider:provider});
+  const app=createPairCoachServer({...dirs,port:0,token,enableCoach:true,coachProvider:provider,enableExecution:!!reportGenerate,reportGenerate});
   // These settings represent the user's approved input; provider cannot change them.
   app.workspace.updateSettings({...settings,aiConsent:consent,contextPatterns:['**/*']});
   const port=await app.listen(), baseURL=`http://127.0.0.1:${port}`;
@@ -120,4 +120,18 @@ test('G2 default factory exact token redaction and explicit local fallback prese
     'Fallback reason is delivered as an actual WS event or retained initial session chat');
   assert.equal(fallback.app.session.getSession().aiStatus,'OFF');await fallback.write('manual work with fallback\n');
   f.peer.assertProtocol();fallback.peer.assertProtocol();
+});
+
+
+test('Finish includes actual hint bubbles in frozen AI report conversation',async t=>{
+  let captured:ReportAIFacts|undefined;
+  const f=await fixture(t,{name:'INJECTED',mode:'INJECTED',async decide(c){return c.trigger?.reason==='CHAT'?hint(c):silent;}},true,async facts=>{captured=facts;return '# Raport\nUwzględniono podpowiedź trenera.';});
+  await f.chat('Pomóż mi zacząć.');
+  await f.peer.take(m=>m.type==='COACH_HINT_BUBBLE');
+  const result=await f.http('POST','/api/session/finish',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,reason:'COMPLETED'});
+  assert.equal(result.status,202);
+  await f.peer.take(m=>m.type==='SESSION_REPORT'&&m.payload.status==='READY');
+  assert(captured);
+  assert(captured.chat.some(m=>m.author==='STUDENT'&&m.text==='Pomóż mi zacząć.'));
+  assert.equal(captured.chat.filter(m=>m.author==='COACH'&&m.text==='Injected integration hint').length,1);
 });

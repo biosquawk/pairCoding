@@ -522,6 +522,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               suggestOnTriggerCharacters: false,
               wordBasedSuggestions: 'off',
               minimap: { enabled: false },
+              bracketPairColorization: { enabled: false },
               fontSize: 13,
               fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
               fontLigatures: true,
