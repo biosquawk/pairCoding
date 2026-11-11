@@ -75,6 +75,8 @@ export class LanguageServerSession {
     this.options.assertCurrent(this.shadow);
   }
   private cancelAll(): void { this.documentRevision++; for (const r of this.requests.values()) r.controller.abort(); this.requests.clear(); }
+  /** Revoke queued/in-flight completions synchronously before a controlled mutable shadow refresh. */
+  cancelCompletions(): void { this.cancelAll(); }
   /** Synchronous revoke BEFORE any await. Unknown Stop keeps this SAME actual process owner for reconcile. */
   invalidate(problem = 'Language source/scope changed'): void {
     if (!this.accepting) return;

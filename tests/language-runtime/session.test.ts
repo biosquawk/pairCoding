@@ -242,3 +242,14 @@ test('same-tick close cancels complete even before pending RPC registration', as
   await f.session.close(f.doc.stamp); await rejection;
   assert.equal(f.process.frames.some(v => v.method === 'textDocument/completion'), false);
 });
+
+test('registry cancellation facade rejects queued and in-flight completion synchronously without retiring session', async t => {
+  const f = fixture(t); await f.session.open(f.doc);
+  const queued = f.session.complete(request(f.doc)); f.session.cancelCompletions(); await assert.rejects(queued, /Cancelled/);
+  assert.equal(f.process.frames.some(v => v.method === 'textDocument/completion'), false);
+  f.process.autoComplete = false;
+  const pending = f.session.complete(request(f.doc)), rejected = assert.rejects(pending, /cancel/i); await tick();
+  assert.equal(f.process.pending.length, 1); f.session.cancelCompletions(); await rejected;
+  assert.equal(f.process.retired, 0); assert.equal(f.process.started, 1);
+  f.process.autoComplete = true; assert.equal((await f.session.complete(request(f.doc))).items.length, 1);
+});
