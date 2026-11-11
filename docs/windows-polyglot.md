@@ -156,8 +156,17 @@ przed następnym procesem. Nie obchodź jej przez dowolny niepusty config, usuwa
 metadanych, globalne env ani ręczny retry. Poprawka nie zmienia pinów/narzędzi/OCI/cache.
 Rzeczywista kontrola tego helpera info→buildx inspect→info potwierdziła 3 puste config
 oraz osobny stan Buildx, ale **nie** actual build/tokenSeeds ani Windows.
-Źródłowy odbiór i warunkowe dopuszczenie operatora do nowego planu nie są terminalnym
-wynikiem prepare. Dwa stare testy zgodności prywatnego env/transport seam pozostają
+Następny rzeczywisty przebieg operatora na tych źródłach zakończył się **FAIL exit1**
+po 7,495 s: `FAILED_RETAIN_AND_RECONCILE`, `Reused image identity/manifest changed`.
+Wykonał tylko 4 odczyty Docker, bez nowych jobs/build/pull/kontenerów. Zachowany counter
+na rzeczywistym receipt wskazuje błąd porównania kolejności kluczy JSON: Id, Descriptor
+oraz RepoDigests są semantycznie identyczne, lecz guard odrzuca inną kolejność pól.
+To błąd produktu w operator-only remainder, nie brak uprawnień ani dowód zmiany obrazu;
+nie dowodzi też poprawności publicznego `--execute`. Poprawka P1_4 wymaga osobnego
+odbioru źródła i nowego planu/guardów operatora, z zachowaniem wszystkich kontroli
+obrazu/manifestu. Nie przestawiaj ręcznie pól receipt, nie osłabiaj guardu i nie
+ponawiaj/resume/overwrite tego wyniku. Nie powstał zasób wymagający cleanup.
+Źródłowy odbiór 5a0f nie jest zakończonym prepare. Dwa stare testy zgodności prywatnego env/transport seam pozostają
 FAIL, bez zmiany ich asercji; pełny zestaw nie jest zielony. Producent i backend nadal
 wymagają spójnej integracji. Nie uruchamiaj starego planu ani operator-only remainder.
 Historyczny celowany smoke rzeczywistego CLI `6417183` na izolowanej źródłowej kopii bez Git w WSL potwierdził
@@ -244,8 +253,10 @@ musi potwierdzić dokładną tożsamość, `Internal===true` i `Driver==='bridge
 Wbudowana zewnętrzna sieć Docker `bridge` **nie spełnia** tego warunku. Nie twórz sieci
 z zadania, nie wybieraj host/arbitrary network. Brak tej sieci daje czytelny not-ready
 wyłącznie trybu service, nie trwałe wyłączenie Spring. Osobne jawne przygotowanie sieci
-przez operatora i jego dowód pozostają **pending integration** — brak tu zamrożonej
-publicznej komendy, nie zastępuj jej ręcznym `docker network create`.
+i jego dowód pozostają **pending integration** — obecne CLI/prepare 5a0f nie
+przygotowuje tej sieci. Potrzebna jest jawna publiczna ścieżka prepare powiązana
+z TĄ SAMĄ stabilną tożsamością instalacji backendu, bez drugiego installationId.
+Brak tu zamrożonej publicznej komendy; nie zastępuj jej ręcznym `docker network create`.
 Port wyłącznie 127.0.0.1, health, twardy Stop i orphan recovery pozostają obowiązkowe.
 To zatwierdzone defaults v2, nie potwierdzenie aktualnego HTTP/index/Runner ani service PASS.
 
