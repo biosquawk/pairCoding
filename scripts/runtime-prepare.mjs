@@ -69,25 +69,44 @@ function inventory(set) {
   if(JSON.stringify(actual.sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0))!==JSON.stringify([...set.files].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0))) throw new Error('Prepare inventory differs');
   return actual;
 }
-export function prepare(request,execute=false,deadline=Infinity) {
+// Single producer-owned identity formula. Reads installed source/validated metadata only;
+// deliberately does not require former staging/project/output roots to exist, and never writes/spawns.
+function preparedIdentity(r) {
+  const dispatcherFiles=['scripts/runtime-task.mjs','scripts/runtime-pom.mjs','scripts/runtime-spec.mjs','scripts/runtime-cache.mjs','scripts/runtime-tools.mjs','scripts/runtime-dependencies.mjs','scripts/runtime-artifacts.mjs','docker/runtime.Dockerfile'].map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)}));
+  const toolchainHash=hash(Buffer.from(JSON.stringify({base:r.baseImage,node:r.nodeImage,maven:mavenImage,tools:[...r.tools.files].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0),versions:r.expectedTools,dispatcher:dispatcherFiles})));
+  return {toolchainHash,dispatcherFiles};
+}
+export function resolvePreparedToolchainIdentity(request) {
+  return preparedIdentity(validateProductionRequest(validatePrepareRequest(request)));
+}
+export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null) {
   const r=validatePrepareRequest(request); inventory(r.tools); inventory(r.project);
   if(execute) validateProductionRequest(r);
-  const dispatcherFiles=['scripts/runtime-task.mjs','scripts/runtime-pom.mjs','scripts/runtime-spec.mjs','scripts/runtime-cache.mjs','scripts/runtime-tools.mjs','scripts/runtime-dependencies.mjs','scripts/runtime-artifacts.mjs','docker/runtime.Dockerfile'].map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)}));
-  const toolchainHash=hash(Buffer.from(JSON.stringify({base:r.baseImage,node:r.nodeImage,maven:mavenImage,tools:[...r.tools.files].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0),versions:r.expectedTools,dispatcher:dispatcherFiles}))), out=path.resolve(r.outputRoot);
+  const {toolchainHash,dispatcherFiles}=execute?resolvePreparedToolchainIdentity(r):preparedIdentity(r),out=path.resolve(r.outputRoot);
   // All writes restricted to new explicit owned directory; no retry overwrites of uncertain operations.
   const publish=receiptWriter(out);
   const receipt={schemaVersion:1,status:execute?'STARTED':'PLAN_ONLY_NOT_PREPARED',startedAt:new Date().toISOString(),request:r,toolchainHash,dispatcherFiles,durability:{regularFile:'WRITABLE_HANDLE_FSYNC_REQUIRED',directory:process.platform==='win32'?'WIN32_DIRECTORY_FSYNC_MAY_BE_UNAVAILABLE':'POSIX_FSYNC_REQUIRED',privacy:process.platform==='win32'?'TRUSTED_PRIVATE_PARENT_INHERITED_ACL':'MODE_0700'},commands:[]};
   let publicationFailed=false;
   const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}}; save();
-  const run=(args)=>{
+  const invoke=(args)=>{
     if(Date.now()>=deadline) throw new Error('Preparation global budget reached; retain/reconcile');
     const startedAt=new Date().toISOString(),res=spawnSync('docker',args,{env:{PATH:process.env.PATH,HOME:path.join(out,'docker-home')},shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
     receipt.commands.push({argv:['docker',...args],startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
     if(res.error || res.status!==0) throw new Error('Preparation operation failed; retain receipt/resources, reconcile by exact inspection before retry.'); return res.stdout;
   };
+  const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
+  const observeEngine=()=>{
+    const engine=JSON.parse(invoke(engineArgs));
+    if(!exact(engine,['ID','ServerVersion','OSType','Architecture']) || Object.values(engine).some(v=>typeof v!=='string' || !v || v.length>256) || engine.OSType!=='linux' || !['x86_64','amd64'].includes(engine.Architecture)) throw new Error('Actual engine identity missing/unsupported');
+    return engine;
+  };
+  const checkEngine=()=>{const actual=observeEngine();if(JSON.stringify(actual)!==JSON.stringify(receipt.engine))throw new Error('Preparation engine changed; retain/reconcile');};
+  const run=args=>{checkEngine();return invoke(args);};
   try {
     if(!execute) return receipt;
-    mkdirSync(path.join(out,'docker-home')); const context=path.join(out,'context'); mkdirSync(context); mkdirSync(path.join(context,'tools')); mkdirSync(path.join(context,'scripts'));
+    mkdirSync(path.join(out,'docker-home')); receipt.engine=observeEngine();save();
+    if(expectedEngine && JSON.stringify(receipt.engine)!==JSON.stringify(expectedEngine))throw new Error('Reviewed preparation engine differs');
+    const context=path.join(out,'context'); mkdirSync(context); mkdirSync(path.join(context,'tools')); mkdirSync(path.join(context,'scripts'));
     for(const f of r.tools.files) { const dest=path.join(context,'tools',f.path); ownedParents(path.join(context,'tools'),path.dirname(f.path)); copyFileSync(path.join(r.tools.root,f.path),dest); }
     for(const f of ['runtime-task.mjs','runtime-pom.mjs','runtime-spec.mjs','runtime-cache.mjs','runtime-tools.mjs','runtime-dependencies.mjs','runtime-artifacts.mjs']) copyFileSync(path.join(repo,'scripts',f),path.join(context,'scripts',f));
     copyFileSync(path.join(repo,'docker/runtime.Dockerfile'),path.join(context,'Dockerfile'));
@@ -99,6 +118,7 @@ export function prepare(request,execute=false,deadline=Infinity) {
     const image=JSON.parse(run(['image','inspect',r.imageTag]));
     if(image.length!==1 || !/^sha256:[a-f0-9]{64}$/.test(image[0].Id) || image[0].Config.User!=='10001:10001' || image[0].Config.Entrypoint?.length) throw new Error('Image inspect identity missing');
     receipt.imageId=image[0].Id; receipt.imageInspect=image[0];
+    receipt.observedImage={Id:image[0].Id,RepoDigests:image[0].RepoDigests??[],Descriptor:image[0].Descriptor??null}; // never substitute config/image ID for manifest identity
     const cache=path.join(out,'cache',r.family,toolchainHash,r.dependencySha256); ownedParents(out,path.relative(out,cache)); chmodSync(cache,0o777);
     const name=`paircoach-${r.installationId}-prepare-${r.key}`; receipt.containerName=name; receipt.status='CONTAINER_INTENT'; save();
     const common=['--pull=never','--name',name,'--label',`paircoach.installation=${r.installationId}`,'--label','paircoach.role=prepare','--user','10001:10001','--cap-drop=ALL','--security-opt=no-new-privileges','--read-only','--network=bridge','--memory=2g','--cpus=2','--pids-limit=256','--log-driver=json-file','--log-opt','max-size=10m','--log-opt','max-file=1','--tmpfs','/tmp:rw,nosuid,size=256m,mode=1777','--tmpfs','/workspace:rw,nosuid,size=1g,uid=10001,gid=10001','--mount',`type=bind,source=${r.project.root},target=/input,readonly`,'--mount',`type=bind,source=${cache},target=/cache/0`];
@@ -108,10 +128,15 @@ export function prepare(request,execute=false,deadline=Infinity) {
     const state=JSON.parse(run(['inspect',name]));
     if(state.length!==1 || state[0].State.Running || state[0].State.ExitCode!==0 || state[0].Config.Image!==image[0].Id || state[0].Config.Labels?.['paircoach.installation']!==r.installationId || state[0].Config.Labels?.['paircoach.role']!=='prepare') throw new Error('Prepare terminal ownership uncertain');
     receipt.container=state[0]; receipt.status='CACHE_PREPARED_IMAGE_PIN_NOT_PUBLISHED'; save();
-    run(['logs',name]); inventory(r.project); receipt.status='COLLECTED_DURABLE'; save();
+    run(['logs',name]); inventory(r.project);
+    const tools=readPrivate(path.join(cache,'tools.json'),65536),dependencies=readPrivate(path.join(cache,'dependencies-prepared.json'),65536);
+    const actualTools=JSON.parse(tools.bytes),evidence=JSON.parse(dependencies.bytes);
+    if(!Array.isArray(actualTools) || r.expectedTools.some(t=>!actualTools.some(a=>a.name===t.name && a.version===t.version)) || evidence.family!==r.family || evidence.workingDirectory!==r.workingDirectory || evidence.dependencySha256!==r.dependencySha256 || JSON.stringify(evidence.tools)!==JSON.stringify(actualTools))throw new Error('Prepared cache/tool evidence differs');
+    receipt.cacheEvidence={root:cache,tools:{path:'tools.json',sha256:hash(tools.bytes),actual:actualTools},dependencies:{path:'dependencies-prepared.json',sha256:hash(dependencies.bytes),actual:evidence}};
+    receipt.status='COLLECTED_DURABLE'; save();
     // Operators publish production images.lock only after separate exact tools/offline check. Local imageId is NOT invented registry digest.
     if(!/^sha256:[a-f0-9]{64}$/.test('sha256:'+state[0].Id)) throw new Error('Terminal container ID malformed');
-    run(['rm',state[0].Id]); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
+    run(['rm',state[0].Id]); checkEngine(); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
   } catch(err) { receipt.status='FAILED_RETAIN_AND_RECONCILE'; receipt.error=err.message; if(!publicationFailed)save(); throw err; }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url)===path.resolve(process.argv[1])) {

@@ -13,7 +13,7 @@ export function prepareLanguageImages(root,lock,{run,save,receipt}) {
  for(const kind of ['java','python']) {
   const context=path.join(root,'language-contexts',kind);make(context);
   const key=kind==='java'?'jdt-runtime-27':'pylsp-runtime-3.13',tag=kind==='java'?'paircoach/language-jdt:stage09':'paircoach/language-pylsp:stage09';
-  const item={key,status:'BUILD_INTENT',imageTag:tag,tools:[]};receipt.language.push(item);save();
+  const item={key,engine:receipt.engine,status:'BUILD_INTENT',imageTag:tag,tools:[]};receipt.language.push(item);save();
   put(path.join(context,'Dockerfile'),readPrivate(path.join(repo,`docker/language-${kind}.Dockerfile`),65536).bytes);
   if(kind==='java') {
    const a=lock.language.artifacts.find(a=>a.kind==='jdt');put(path.join(context,'jdt.tar.gz'),artifact(a,path.join(root,'stage/language/jdt.tar.gz')));

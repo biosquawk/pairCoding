@@ -6,7 +6,7 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
-import {prepare,validatePrepareRequest,validateProductionRequest} from './runtime-prepare.mjs';
+import {prepare,validatePrepareRequest,validateProductionRequest,resolvePreparedToolchainIdentity} from './runtime-prepare.mjs';
 import {canonicalDirectory,readPrivate,receiptWriter} from './runtime-files.mjs';
 import {dependencyHash} from './runtime-dependencies.mjs';
 import {encodeSpec} from './runtime-spec.mjs';
@@ -42,7 +42,8 @@ export function correctedExercise(job) {
  });
 }
 const combinations=[['javascript-node','javascript-counter'],['typescript-node','typescript-counter'],['python-3.13','python-calculator'],...[11,17,21,27].map(r=>['java-maven-'+r,'java-pattern']),...[21,27].map(r=>['java-maven-'+r,'spring-counter'])];
-export function buildOperatorPlan(operatorRoot) {
+export function buildOperatorPlan(operatorRoot,phase='PREPARE_ONLY') {
+ if(!['PREPARE_ONLY','FINAL_QA_OFFLINE'].includes(phase))throw new Error('Explicit reviewed preparation/final offline phase required');
  const root=path.resolve(operatorRoot);if(root!==operatorRoot || /[,\x00-\x1f]/.test(root)) throw new Error('Canonical explicit absolute operator root required');
  const lock=json(path.join(repo,'runtimes/production-inputs.lock.json')),catalog=json(path.join(repo,'runtimes/catalog.json'));
  const tools=lock.artifacts.filter(a=>a.kind==='npm').flatMap(a=>a.files.map(f=>({path:'node_modules/'+a.name+'/'+f.path,sha256:f.sha256}))).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
@@ -56,10 +57,10 @@ export function buildOperatorPlan(operatorRoot) {
   validatePrepareRequest(request);validateProductionRequest(request);
   return {id,profile,example,correction:repairs[example],assets,request};
  });
- return {schemaVersion:1,operatorEngine:lock.operatorLane,language:lock.language,scope:'PREPARATION_AND_OFFLINE_FIXTURE_SMOKE_ONLY_NOT_ACK_AUTHORITY_OR_FINAL_QA',operatorRoot:root,maxHeavyConcurrency:1,maxElapsedMs:2700000,maxCommandMs:480000,sourceInventory:sourcePaths().map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)})),jobs};
+ return {schemaVersion:1,phase,offlineFixtureContainers:phase==='PREPARE_ONLY'?0:18,operatorEngine:lock.operatorLane,language:lock.language,scope:phase==='PREPARE_ONLY'?'PREPARE_ONLY_NOT_OFFLINE_OR_PRODUCT_ACCEPTANCE':'FINAL_QA_OFFLINE_FIXTURE_CHECKS_NOT_GUI_OR_ACK_ACCEPTANCE',operatorRoot:root,maxHeavyConcurrency:1,maxElapsedMs:2700000,maxCommandMs:480000,sourceInventory:sourcePaths().map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)})),jobs};
 }
 function validateFrozen(plan) {
- if(JSON.stringify(plan)!==JSON.stringify(buildOperatorPlan(plan.operatorRoot))) throw new Error('Frozen plan/source/pins/assets differ; do not execute');
+ if(JSON.stringify(plan)!==JSON.stringify(buildOperatorPlan(plan.operatorRoot,plan.phase))) throw new Error('Frozen plan/source/pins/assets differ; do not execute');
 }
 export function junitSmoke(xmls,expectFailure) {
  if(!xmls.length) throw new Error('Missing fresh JUnit XML');
@@ -76,21 +77,35 @@ export function junitSmoke(xmls,expectFailure) {
  if(!tests || skipped || (expectFailure?failures===0:failures!==0)) throw new Error('Offline fixture testcase evidence differs');
  return {tests,failures,skipped,scope:'SMOKE_COUNTS_ONLY_PRODUCT_PARSER_UNCHANGED'};
 }
+// Caller persists exit/log/artifact collection BEFORE entering this exact-ID cleanup.
+export function cleanupOfflineFixture(state,imageId,run) {
+ const owned=s=>s && /^[a-f0-9]{64}$/.test(s.Id) && s.State?.Running===false && Number.isInteger(s.State.ExitCode) && s.Config?.Image===imageId && s.Config.Labels?.['paircoach.installation']==='stage09-runtime-assets' && s.Config.Labels?.['paircoach.role']==='offline-smoke';
+ if(!owned(state))throw new Error('Cleanup initial terminal identity uncertain');
+ const inspected=JSON.parse(run(['inspect',state.Id]).stdout);
+ if(inspected.length!==1 || !owned(inspected[0]) || inspected[0].Id!==state.Id || inspected[0].State.ExitCode!==state.State.ExitCode)throw new Error('Cleanup identity changed');
+ const final=inspected[0];run(['rm',final.Id]);
+}
 export function executeOperatorPlan(plan) {
  validateFrozen(plan);const root=canonicalDirectory(plan.operatorRoot),start=Date.now();
  const actualTools=walk(path.join(root,'stage/tools')).map(({path,sha256})=>({path,sha256})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
  if(JSON.stringify(actualTools)!==JSON.stringify(plan.jobs[0].request.tools.files))throw new Error('Staged tool inventory differs');
  // Published staging receipt is necessary but never sufficient for readiness.
  if(json(path.join(root,'download-journal/receipt.json')).status!=='STAGED_NOT_PREPARED')throw new Error('Assets not staged');
- const publish=receiptWriter(path.join(root,'session')),receipt={scope:plan.scope,status:'STARTED',startedAt:new Date().toISOString(),planSha256:hash(JSON.stringify(plan,null,2)+'\n'),jobs:[],commands:[]};
+ const session=path.join(root,plan.phase==='PREPARE_ONLY'?'session':'final-qa-session');
+ const publish=receiptWriter(session),receipt={phase:plan.phase,scope:plan.scope,status:'STARTED',startedAt:new Date().toISOString(),planSha256:hash(JSON.stringify(plan,null,2)+'\n'),jobs:[],commands:[]};
  let publicationFailed=false;
  const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}};save();
  const checkBudget=()=>{if(Date.now()-start>plan.maxElapsedMs) throw new Error('Global preparation budget reached; retain/reconcile, no retry');validateFrozen(plan);};
- const run=(args,allowNonzero=false)=>{
-  checkBudget();const began=new Date().toISOString(),r=spawnSync('docker',args,{shell:false,env:{PATH:process.env.PATH,HOME:path.join(root,'session/docker-home')},encoding:'utf8',timeout:Math.min(plan.maxCommandMs,plan.maxElapsedMs-(Date.now()-start)),maxBuffer:4*1024*1024});
+ const invoke=(args,allowNonzero=false)=>{
+  checkBudget();const began=new Date().toISOString(),r=spawnSync('docker',args,{shell:false,env:{PATH:process.env.PATH,HOME:path.join(session,'docker-home')},encoding:'utf8',timeout:Math.min(plan.maxCommandMs,plan.maxElapsedMs-(Date.now()-start)),maxBuffer:4*1024*1024});
   receipt.commands.push({argv:['docker',...args],startedAt:began,finishedAt:new Date().toISOString(),exit:r.status,signal:r.signal,error:r.error?.message??null,stdout:r.stdout,stderr:r.stderr});save();
   if(r.error || r.signal || !allowNonzero && r.status!==0)throw new Error('Unknown/failed Docker operation; retain exact receipts/resources; inspect before any retry');
   return r;
+ };
+ const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
+ const run=(args,allowNonzero=false)=>{
+  if(args[0]!=='info') {const actual=JSON.parse(invoke(engineArgs).stdout);if(JSON.stringify(actual)!==JSON.stringify(plan.operatorEngine))throw new Error('Reviewed operator engine changed; retain/reconcile');}
+  return invoke(args,allowNonzero);
  };
  const make=(d,mode=0o700)=>{canonicalDirectory(path.dirname(d));fs.mkdirSync(d,{mode});canonicalDirectory(d);};
  const put=(p,bytes,mode=0o600)=>{canonicalDirectory(path.dirname(p));const fd=fs.openSync(p,'wx',mode);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
@@ -100,19 +115,27 @@ export function executeOperatorPlan(plan) {
   }
  };
  try {
-  make(path.join(root,'session/docker-home'));
+  make(path.join(session,'docker-home'));
   const engine=JSON.parse(run(['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}']).stdout);
   if(JSON.stringify(engine)!==JSON.stringify(plan.operatorEngine))throw new Error('Reviewed operator engine changed; no mutations allowed');
   receipt.engine=engine;save();
-  for(const d of ['projects','jobs','requests','offline'])make(path.join(root,d));
-  const require=createRequire(path.join(root,'stage/tools/probe.cjs')),{XMLParser,XMLValidator}=require('fast-xml-parser');
+  if(plan.phase==='PREPARE_ONLY')for(const d of ['projects','jobs','requests'])make(path.join(root,d));
+  else {
+   const previous=json(path.join(root,'session/receipt.json'));
+   if(previous.phase!=='PREPARE_ONLY' || previous.status!=='PREPARE_ONLY_COMPLETE_OFFLINE_DEFERRED_NOT_PRODUCT_ACCEPTANCE' || JSON.stringify(previous.engine)!==JSON.stringify(engine))throw new Error('Final offline phase requires completed same-engine preparation');
+   make(path.join(root,'offline'));
+  }
+  const xml=plan.phase==='FINAL_QA_OFFLINE'?createRequire(path.join(root,'stage/tools/probe.cjs'))('fast-xml-parser'):null;
   for(const job of plan.jobs) {
-   checkBudget();materialize(job.request.project.root,job.assets,0o644);put(path.join(root,'requests',job.id+'.json'),Buffer.from(JSON.stringify(job.request,null,2)+'\n'));
+   checkBudget();if(plan.phase==='PREPARE_ONLY') {materialize(job.request.project.root,job.assets,0o644);put(path.join(root,'requests',job.id+'.json'),Buffer.from(JSON.stringify(job.request,null,2)+'\n'));}
    const item={id:job.id,status:'PREPARE_INTENT',offline:[]};receipt.jobs.push(item);save();
-   const prepared=prepare(job.request,true,start+plan.maxElapsedMs);checkBudget();item.imageId=prepared.imageId;item.prepareReceipt=path.join(job.request.outputRoot,'receipt.json');
+   const prepared=plan.phase==='PREPARE_ONLY'?prepare(job.request,true,start+plan.maxElapsedMs,engine):json(path.join(job.request.outputRoot,'receipt.json'));
+   if(JSON.stringify(prepared.engine)!==JSON.stringify(engine) || JSON.stringify(prepared.request)!==JSON.stringify(job.request) || prepared.toolchainHash!==resolvePreparedToolchainIdentity(job.request).toolchainHash || prepared.status!=='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION')throw new Error('Prepared receipt/request/engine/installed-source correlation differs');
+   checkBudget();item.imageId=prepared.imageId;item.prepareReceipt=path.join(job.request.outputRoot,'receipt.json');
    const image=JSON.parse(run(['image','inspect',prepared.imageId]).stdout)[0];item.observedImage={Id:image.Id,RepoDigests:image.RepoDigests??[],Descriptor:image.Descriptor??null};
    if(image.Id!==prepared.imageId)throw new Error('Prepared image changed');
    item.readiness='NOTREADY_UNTIL_REVIEWED_ACTUAL_DIGEST_TOOLS_OFFLINE_RECEIPTS';save();
+   if(plan.phase==='PREPARE_ONLY') {item.status='PREPARED_TOOLS_CHECKED_OFFLINE_DEFERRED';save();continue;}
    const cache=path.join(job.request.outputRoot,'cache',job.profile.adapterFamily,prepared.toolchainHash,job.request.dependencySha256);
    const task=JSON.parse(Buffer.from(job.assets.find(f=>f.path==='task.v2.json').bytes,'base64').toString()).runProfiles.find(p=>p.kind==='RUN_TESTS').task;
    for(const corrected of [false,true]) {
@@ -127,22 +150,21 @@ export function executeOperatorPlan(plan) {
     if(!state || state.State.Running || state.Config.Image!==prepared.imageId || state.Config.Labels?.['paircoach.installation']!=='stage09-runtime-assets' || state.Config.Labels?.['paircoach.role']!=='offline-smoke' || state.State.ExitCode!==result.status)throw new Error('Offline terminal ownership/exit uncertain');
     entry.container=state;run(['logs',name]);const files=walk(artifacts);entry.artifacts=files.map(({path,sha256})=>({path,sha256}));
     const actualInput=json(path.join(artifacts,'runtime-input.json'));if(actualInput.runId!==runId || actualInput.manifestSha256!==manifest)throw new Error('Offline dispatcher input correlation missing');
-    entry.junit=junitSmoke(files.filter(f=>f.path.endsWith('.xml')).map(f=>({xml:Buffer.from(f.bytes,'base64').toString(),parser:XMLParser,validator:XMLValidator})),!corrected);
+    entry.junit=junitSmoke(files.filter(f=>f.path.endsWith('.xml')).map(f=>({xml:Buffer.from(f.bytes,'base64').toString(),parser:xml.XMLParser,validator:xml.XMLValidator})),!corrected);
     if(corrected?state.State.ExitCode!==0:state.State.ExitCode===0)throw new Error('Offline fixture exit differs');
     entry.status='COLLECTED_DURABLE';save(); // Durable exit/artifact digests BEFORE exact nonforce cleanup.
     // Recheck terminal ownership immediately before rm; uncertainty never authorizes force/global cleanup.
-    const final=JSON.parse(run(['inspect',name]).stdout)[0];if(final.Id!==state.Id || final.State.Running || final.Config.Image!==prepared.imageId || final.Config.Labels?.['paircoach.installation']!=='stage09-runtime-assets' || final.Config.Labels?.['paircoach.role']!=='offline-smoke')throw new Error('Cleanup identity changed');
-    run(['rm',name]);entry.status='OFFLINE_FIXTURE_SMOKE_PASS_REMOVED';save();
+    cleanupOfflineFixture(state,prepared.imageId,run);entry.status='OFFLINE_FIXTURE_SMOKE_PASS_REMOVED';save();
    }
    item.status='PREPARED_OFFLINE_SMOKE_REQUIRES_K_REVIEW';save();
   }
-  prepareLanguageImages(root,json(path.join(repo,'runtimes/production-inputs.lock.json')),{run,save,receipt});
-  receipt.status='PREPARATION_AND_OFFLINE_SMOKE_COMPLETE_NOT_PRODUCT_ACCEPTANCE';save();return receipt;
+  if(plan.phase==='PREPARE_ONLY')prepareLanguageImages(root,json(path.join(repo,'runtimes/production-inputs.lock.json')),{run,save,receipt});
+  receipt.status=plan.phase==='PREPARE_ONLY'?'PREPARE_ONLY_COMPLETE_OFFLINE_DEFERRED_NOT_PRODUCT_ACCEPTANCE':'FINAL_OFFLINE_FIXTURES_COMPLETE_NOT_GUI_OR_PRODUCT_ACCEPTANCE';save();return receipt;
  }catch(e){receipt.status='FAILED_RETAIN_AND_RECONCILE';receipt.error=e.message;if(!publicationFailed)save();throw e;}
 }
 if(process.argv[1] && fileURLToPath(import.meta.url)===path.resolve(process.argv[1])) {
- try {const [mode,input,output]=process.argv.slice(2);if(process.argv.length!==5)throw new Error('Exact three arguments required');if(mode==='plan'&&input&&output) {const bytes=Buffer.from(JSON.stringify(buildOperatorPlan(input),null,2)+'\n');canonicalDirectory(path.dirname(path.resolve(output)));fs.writeFileSync(output,bytes,{flag:'wx',mode:0o600});console.log(hash(bytes));}
+ try {const [mode,input,output]=process.argv.slice(2);if(process.argv.length!==5)throw new Error('Exact three arguments required');if(['plan','plan-final-offline'].includes(mode)&&input&&output) {const bytes=Buffer.from(JSON.stringify(buildOperatorPlan(input,mode==='plan'?'PREPARE_ONLY':'FINAL_QA_OFFLINE'),null,2)+'\n');canonicalDirectory(path.dirname(path.resolve(output)));fs.writeFileSync(output,bytes,{flag:'wx',mode:0o600});console.log(hash(bytes));}
  else if(mode==='execute'&&input&&/^[a-f0-9]{64}$/.test(output??'')) {const bytes=readPrivate(path.resolve(input),4*1024*1024).bytes;if(hash(bytes)!==output)throw new Error('Frozen plan SHA mismatch');executeOperatorPlan(JSON.parse(bytes));}
- else throw new Error('Usage: node scripts/runtime-operator.mjs plan ABS_OPERATOR_ROOT NEW_PLAN.json | execute PLAN.json EXACT_PLAN_SHA256');
+ else throw new Error('Usage: node scripts/runtime-operator.mjs plan|plan-final-offline ABS_OPERATOR_ROOT NEW_PLAN.json | execute PLAN.json EXACT_PLAN_SHA256');
  }catch(e){console.error(e.message);process.exitCode=1;}
 }
