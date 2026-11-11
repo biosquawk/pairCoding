@@ -1,0 +1,41 @@
+{
+  "baseSHA": "8b3f41930a3cd39fe6543b596af049dc8a671b99",
+  "baseTree": "600a16b00939d63c0f718a6195796b2ed544ca92",
+  "sourceUpdate": "4d11e466-15ce-45b6-b91a-6c5094624518",
+  "task": "c08ef4f2-9330-43cc-ab0d-df1d5925359b",
+  "exactSnippet": {
+    "path": "raw/Demo.java",
+    "sha256": "d9a01bba6dd72195bddce0aa57afe4eba51d761d8eacf7097bfa121d674704c8",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-lsp-5a10b46-run01/java21-wire.jsonl",
+    "sourceSha256": "69335be831451baeb31a16dafdef90dbb43f1f914a5fa8442d99e0f28ddd408d",
+    "line": 24,
+    "utc": "2026-11-11T19:52:12.983Z",
+    "version": 1
+  },
+  "references": {
+    "fullContract": {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/STAGE09-POLYGLOT-CONTRACT.md",
+      "sha256": "f587ec4b4e78f76d814b5183aa9bbf62c1688a229e621ec364ec2789baefbe69"
+    },
+    "commonContract": {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/K/paircoach-seq09-ab/common-contract-v2.md",
+      "sha256": "248876f801cdd5e2cd4a336245ac5cd2f586a2f1ebe4cda32814c247dac9a8ce"
+    },
+    "dockerfile": {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-ab-lsp/repo/spike/stage09/lsp/Dockerfile.java",
+      "sha256": "bf9d0759d22859e485d91a3b18e312dd71506289d7ef0dccc8d8d71685d41a75"
+    },
+    "actualSummary": {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-host-operator/lsp-preview-policy-attempt-summary.json",
+      "sha256": "1835e4d268e0a04eecaed471d69615da811779bd42e0ea595a83f76e5aafaaa3"
+    },
+    "originalWire": {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-lsp-5a10b46-run01/java21-wire.jsonl",
+      "sha256": "69335be831451baeb31a16dafdef90dbb43f1f914a5fa8442d99e0f28ddd408d"
+    },
+    "originalSpike": {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-ab-lsp/repo/spike/stage09/lsp/spike.mjs",
+      "sha256": "8e0876256e9f9cc733cc20029c219b7d324dcbf07a392ebabf361d62a9c31a82"
+    }
+  }
+}

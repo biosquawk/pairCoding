@@ -1,0 +1,12 @@
+{
+  "Probe.java": "d835f31605638a9839e6c0ac9c37d9ac9c89f76911ed701c0366af37b04c8313",
+  "README.md": "20aebb9bec4b340761bc6d15ff4bdf572de0635e8e7f02adf4dbcee9c57031c7",
+  "compatibility.json": "55092a6f4a9620b2ef3672181017e783ae3fabf6af067db237dd384cf930dc8e",
+  "harness.mjs": "c2565798854915bc0ad417ee246497699c336a6258cf289d842c65d21deedfa7",
+  "harness.test.mjs": "3ae1e18ee81ab691dddedf9261c346cc109fd2e4dc32c63be906fb029d52340b",
+  "provenance.json": "45098cfd894e85e403c0c3140aeb51a3a54f26edc9eb4c2253c3722b7b33797f",
+  "sources/preview/Demo.java": "d9a01bba6dd72195bddce0aa57afe4eba51d761d8eacf7097bfa121d674704c8",
+  "sources/type-error/TypeError.java": "139a25f46226095c673f41b2c49db01fa063c7cd7d298f72c5e4094184a32df7",
+  "sources/valid/Valid.java": "9ad1ea9bbeca81b174b1d668d74aa08d7f87548a623b6905a4f5fa4cc7eeb033",
+  "test_static.py": "c49a82d32c38bafa662cf4a7d2849081a2bfec36e57058d4167f619b30fe71a3"
+}
