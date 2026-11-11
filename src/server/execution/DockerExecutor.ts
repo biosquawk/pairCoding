@@ -121,8 +121,16 @@ export class DockerExecutor implements ExecutionPort {
     const r=approvedRuntime(this.policy,profile);
     const reply=await this.checked(['image','inspect',r.image.imageId]);
     const data=JSON.parse(reply.stdout);
-    requireThat(Array.isArray(data)&&data.length===1&&data[0].Id===r.image.imageId,'Image identity mismatch');
-    requireThat(r.image.digest===data[0].Id || (data[0].RepoDigests??[]).some((s:string)=>s.endsWith('@'+r.image.digest)),'Image digest mismatch');
+    const sha256Digest=(value:unknown):value is string=>typeof value==='string'&&value.length===71&&/^sha256:[a-f0-9]{64}$/.test(value);
+    requireThat(sha256Digest(r.image.imageId)&&sha256Digest(r.image.digest),'Invalid locked image identity');
+    requireThat(Array.isArray(data)&&data.length===1&&data[0]&&data[0].Id===r.image.imageId,'Image identity mismatch');
+    // Config Id is NOT a manifest digest. Local builds may have only Descriptor;
+    // registered images may instead expose RepoDigests. Both bind to this inspected config.
+    const actual=data[0];
+    const descriptorMatches=actual.Descriptor?.digest===r.image.digest;
+    const repoMatches=Array.isArray(actual.RepoDigests)&&actual.RepoDigests.some((value:unknown)=>
+      typeof value==='string'&&/^[^@\s]+@sha256:[a-f0-9]{64}$/.test(value)&&value.endsWith('@'+r.image.digest));
+    requireThat(descriptorMatches||repoMatches,'Image manifest digest mismatch');
   }
   async readiness(profile:RuntimeProfile,configurationGeneration:string):Promise<ExecutionReadiness>{
     let p:RuntimeProblem|null=null;

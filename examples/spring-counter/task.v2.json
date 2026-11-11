@@ -1,0 +1,40 @@
+{
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SPRING_BOOT",
+          "containerPort": 8080,
+          "healthPath": "/sum"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.CounterApplicationTest"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SPRING_BOOT",
+          "containerPort": 8080,
+          "healthPath": "/sum"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.CounterApplicationTest"
+          ]
+        }
+      }
+    }
+  ]
+}
