@@ -229,7 +229,7 @@ export default function App() {
       )}
 
       {/* Main Workspace Area */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 min-h-0 flex overflow-hidden relative">
         {/* Left Panel: File Tree */}
         <div style={{ width: `min(${fileTreeWidth}px, 36vw)` }} className="shrink-0 h-full overflow-hidden">
           <FileTree
@@ -258,9 +258,9 @@ export default function App() {
         />
 
         {/* Center & Bottom: Editor and Bottom Panels */}
-        <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
+        <div className="flex-1 min-h-0 min-w-0 flex flex-col h-full overflow-hidden">
           {/* Middle: Shared Monaco Editor */}
-          <div className="flex-1 overflow-hidden relative">
+          <div className="flex-1 min-h-0 overflow-hidden relative">
             <EditorPanel
               projectId={state.scenario.id}
               files={state.files}

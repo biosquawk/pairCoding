@@ -116,7 +116,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       {/* Main Top Row */}
       <div className="flex flex-wrap items-center justify-between px-3 py-2 gap-2">
         {/* Left Section: Brand & Write Owner Status */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap min-w-0 items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 via-rose-600 to-blue-600 flex items-center justify-center font-bold text-white shadow-md text-sm tracking-wider">
               PC
@@ -166,7 +166,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             {/* AI Status */}
             <span
               title={`Status silnika AI: ${aiStatus}`}
-              className="text-[11px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 hidden xl:inline-flex items-center gap-1"
+              className="text-[11px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 inline-flex items-center gap-1"
             >
               <Sparkles className={`w-3 h-3 ${aiStatus === 'THINKING' ? 'text-amber-400 animate-spin' : 'text-zinc-500'}`} />
               <span className="font-mono text-[10px]">AI: {aiStatus}</span>

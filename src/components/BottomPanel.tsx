@@ -96,8 +96,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
 
   return (
     <div
-      style={{ height: isCollapsed ? '38px' : isMaximized ? '100%' : `${height}px` }}
-      className="flex flex-col bg-zinc-950 border-t border-zinc-800 text-zinc-300 transition-all select-none relative"
+      style={{ height: isCollapsed ? '38px' : isMaximized ? '100%' : `min(${height}px, 45vh)` }}
+      className="flex flex-col min-h-0 shrink-0 bg-zinc-950 border-t border-zinc-800 text-zinc-300 transition-all select-none relative"
     >
       {/* Panel Tab Bar & Window Controls */}
       <div className="flex items-center justify-between bg-zinc-950 border-b border-zinc-800 px-3 py-1 select-none">
@@ -181,7 +181,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
 
       {/* Panel Body (hidden if collapsed) */}
       {!isCollapsed && (
-        <div className="flex-1 overflow-hidden select-text">
+        <div className="flex-1 min-h-0 overflow-hidden select-text">
           {/* TAB 1: Zadanie (Safe Markdown) */}
           {activeTab === 'task' && (
             <div className="h-full overflow-y-auto p-4 max-w-4xl mx-auto">

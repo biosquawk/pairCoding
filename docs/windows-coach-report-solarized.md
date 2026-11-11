@@ -8,6 +8,6 @@ Oficjalny opis [trybu nieinteraktywnego Codexa](https://developers.openai.com/co
 
 Lokalny raport ma kolejne numery uruchomień i czas w minutach/sekundach. Identyfikatory pozostają w danych dowodowych. Raport AI otrzymuje taką samą instrukcję czytelności i rozróżnia rozmowę AI od edycji kodu.
 
-Wspólna paleta paneli i Monaco: Solarized Dark (#002b36 / #073642), stonowane akcenty i składnia. Nie zmieniono układu ani sterowania edytorem.
+Wspólna paleta paneli i Monaco: Solarized Dark (#002b36 / #073642), stonowane akcenty i składnia. Panele mają minimalną wysokość 0 w kontenerach flex, dolny panel dopasowuje wysokość do okna, a pasek statusu zawija się w węższym widoku. Status myślenia AI pozostaje widoczny także poniżej szerokości 1280 px.
 
 Testy celowane WSL: 66/66 PASS (adapter, transport Codex, zatrzymanie procesu, raport, integracja HTTP i kolejność Run). Typecheck i build: PASS. Osobny odbiór Windows i nowe ćwiczenie są zapisane w dowodach wydania.
