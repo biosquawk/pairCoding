@@ -1,3 +1,4 @@
+import { exportMavenReports } from './runtime-artifacts.mjs';
 // Image-internal dispatcher. Never run on the host. No arbitrary commands or shell.
 import { createHash } from 'node:crypto';
 import { spawnSync, spawn } from 'node:child_process';
@@ -49,7 +50,7 @@ export function runTask(spec) {
     if (!new RegExp(`^javac ${s.release}(?:[. +\\r\\n]|$)`).test(Buffer.concat([version.stdout,version.stderr]).toString())) throw new Error('TARGET_PROFILE_CONFLICT: actual javac');
     // Compiles with selected javac, not ECJ/JDT. No release/preview rewrite; effective pom must already agree.
     if (s.mode === 'RUN_TESTS') {
-      exe = mvn; args = [...options,'test','-Dsurefire.reportsDirectory=/artifacts/junit'];
+      exe = mvn; args = [...options,'test'];
       if (s.task.tests.names.length) args.push('-Dtest='+s.task.tests.names.join(','));
     } else if (s.task.entry.kind === 'SPRING_BOOT') {
       if (report.effective.springVersion !== '4.1.2') throw new Error('Spring task requires reviewed pinned Spring Boot4.1.2');
@@ -64,7 +65,12 @@ export function runTask(spec) {
   const child = spawn(exe,args,{ cwd:executionCwd,env,shell:false,stdio:'inherit' });
   const term = () => child.kill('SIGTERM'); process.on('SIGTERM',term); process.on('SIGINT',term);
   child.once('error',err => { console.error(err.message); process.exitCode=1; });
-  child.once('exit',(code,signal) => { process.off('SIGTERM',term); process.off('SIGINT',term); process.exitCode=signal ? 128 : code ?? 1; });
+  child.once('exit',(code,signal) => {
+    process.off('SIGTERM',term); process.off('SIGINT',term);
+    try { if(s.family==='java-maven' && s.mode==='RUN_TESTS') exportMavenReports(cwd,artifact); }
+    catch(error) { console.error(error.message); process.exitCode=1; return; }
+    process.exitCode=signal ? 128 : code ?? 1;
+  });
   return child;
 }
 export function verifyBuildCopy(inputRoot,workspaceRoot) {

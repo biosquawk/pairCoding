@@ -1,3 +1,4 @@
+import { exportMavenReports } from '../../scripts/runtime-artifacts.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -145,4 +146,14 @@ test('dispatcher verifies executor-populated copy, never recopies empty/differen
  await writeFile(path.join(work,'main.js'),'old');assert.throws(()=>verifyBuildCopy(input,work),/differs/);
  const env=buildChildEnvironment('node','/workspace/subtask');assert.equal(env.HOME,'/workspace/.paircoach/runtime/home');assert.equal(Object.hasOwn(env,'PYTHONPATH'),false);assert.equal(Object.hasOwn(env,'NODE_OPTIONS'),false);assert.equal(Object.hasOwn(env,'GEMINI_API_KEY'),false);assert.equal(Object.hasOwn(env,'JAVA_TOOL_OPTIONS'),false);
  assert.equal(buildChildEnvironment('python','/workspace/subtask').PYTHONPATH,'/cache/0/site-packages:/workspace/subtask');assert.throws(()=>buildChildEnvironment('python','/workspace/../escape'));
+});
+
+test('fresh Maven standard reports are bounded-exported only after exit; missing/links never synthetic success',async()=>{
+ const root=await mkdtemp(path.join(process.env.TMPDIR!,'runtime-junit-')),task=path.join(root,'task'),out=path.join(root,'artifacts');await mkdir(task);await mkdir(out);
+ assert.equal(exportMavenReports(task,out),0);
+ const reports=path.join(task,'target','surefire-reports');await mkdir(reports,{recursive:true});await writeFile(path.join(reports,'TEST-Example.xml'),xmls[0]);
+ assert.equal(exportMavenReports(task,out),1);
+ assert.throws(()=>exportMavenReports(task,out)); // never overwrite current artifacts with old content
+ const other=path.join(root,'out2');await mkdir(other);await symlink(path.join(reports,'TEST-Example.xml'),path.join(reports,'TEST-Alias.xml'));
+ assert.throws(()=>exportMavenReports(task,other),/Unsafe/);
 });

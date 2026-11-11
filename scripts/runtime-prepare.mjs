@@ -59,7 +59,7 @@ export function prepare(request,execute=false) {
     if(!execute) return receipt;
     mkdirSync(path.join(out,'docker-home')); const context=path.join(out,'context'); mkdirSync(context); mkdirSync(path.join(context,'tools')); mkdirSync(path.join(context,'scripts'));
     for(const f of r.tools.files) { const dest=path.join(context,'tools',f.path); mkdirSync(path.dirname(dest),{recursive:true}); copyFileSync(path.join(r.tools.root,f.path),dest); }
-    for(const f of ['runtime-task.mjs','runtime-pom.mjs','runtime-spec.mjs','runtime-cache.mjs','runtime-tools.mjs','runtime-dependencies.mjs']) copyFileSync(path.join(repo,'scripts',f),path.join(context,'scripts',f));
+    for(const f of ['runtime-task.mjs','runtime-pom.mjs','runtime-spec.mjs','runtime-cache.mjs','runtime-tools.mjs','runtime-dependencies.mjs','runtime-artifacts.mjs']) copyFileSync(path.join(repo,'scripts',f),path.join(context,'scripts',f));
     copyFileSync(path.join(repo,'docker/runtime.Dockerfile'),path.join(context,'Dockerfile'));
     inventory(r.tools); inventory(r.project);
     // Explicit pulls only here, NEVER in Run. Build uses local images/pull=false.
