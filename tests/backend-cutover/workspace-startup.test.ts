@@ -118,3 +118,37 @@ test('SEAM unsafe snapshot recovery fails before scanning/incrementing versions 
   assert.deepEqual(fs.readFileSync(f.file('.paircoach/workspace-v2/versions.json')), versions);
   const lease = new JournalLease(f.file('.paircoach/workspace-v2/lease.lock')); lease.close();
 });
+test('SEAM canonical dataDir refuses an alternate factory ledger before ANY initialization, even while canonical owner is live', async t => {
+  const f = fixture(t), outside = path.join(f.root, 'alternate-session-store');
+  const before = fs.readdirSync(f.root).sort();
+  await assert.rejects(createRuntimeWorkspace({ rootPath: f.root, dataDir: outside }), { code: 'INVALID_V2_DATA_DIR' });
+  assert.deepEqual(fs.readdirSync(f.root).sort(), before); assert.equal(fs.existsSync(outside), false);
+  const a = await f.open(); const versions = fs.readFileSync(f.file('.paircoach/workspace-v2/versions.json'));
+  await assert.rejects(createRuntimeWorkspace({ rootPath: f.root, dataDir: outside }), { code: 'INVALID_V2_DATA_DIR' });
+  assert.equal(fs.existsSync(outside), false); assert.deepEqual(fs.readFileSync(f.file('.paircoach/workspace-v2/versions.json')), versions);
+  a.close();
+});
+test('SEAM canonical dataDir explicit SAME directory shares durable history, never a second kernel bypass', async t => {
+  const f = fixture(t), a = await f.open(); await save(a);
+  await assert.rejects(createRuntimeWorkspace({ rootPath: f.root, dataDir: f.file('.paircoach') }), /own|busy|lease/i);
+  a.close();
+  const b = await createRuntimeWorkspace({ rootPath: f.root, dataDir: f.file('.paircoach') });
+  try { assert.equal(b.workspace.workspaceVersion, 1); assert.deepEqual(b.readSettings().settings, settings); }
+  finally { b.close(); }
+});
+test('SEAM prior canonical history missing versions or prior settings material never grants replacement version zero', async t => {
+  const f = fixture(t), a = await f.open(); await save(a); a.close();
+  fs.unlinkSync(f.file('.paircoach/workspace-v2/versions.json'));
+  const statePath = f.file('.paircoach/settings.json.v2-state'), stateFiles = fs.readdirSync(statePath).sort();
+  await assert.rejects(f.open(), { code: 'WORKSPACE_RECOVERY_REQUIRED' });
+  assert.equal(fs.existsSync(f.file('.paircoach/workspace-v2/versions.json')), false);
+  assert.deepEqual(fs.readdirSync(statePath).sort(), stateFiles);
+  const fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'prior-settings-'));
+  try {
+    fs.mkdirSync(path.join(fresh, '.paircoach'), { mode: 0o700 }); fs.mkdirSync(path.join(fresh, '.paircoach/settings.json.v2-state'), { mode: 0o700 });
+    fs.writeFileSync(path.join(fresh, '.paircoach/settings.json.v2-state/retained-original'), 'prior durable evidence');
+    await assert.rejects(createRuntimeWorkspace({ rootPath: fresh }), { code: 'WORKSPACE_RECOVERY_REQUIRED' });
+    assert.equal(fs.existsSync(path.join(fresh, '.paircoach/workspace-v2')), false);
+    assert.equal(fs.readFileSync(path.join(fresh, '.paircoach/settings.json.v2-state/retained-original'), 'utf8'), 'prior durable evidence');
+  } finally { fs.rmSync(fresh, { recursive: true, force: true }); }
+});
