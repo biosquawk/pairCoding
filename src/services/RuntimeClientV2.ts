@@ -16,8 +16,14 @@ export interface RuntimeClientV2Dependencies {
     saveSettings(body: UpdateSettingsRequestV2, signal: AbortSignal): Promise<unknown>; // returns ProjectV2
   };
 }
+/** Local authority contract, NOT a new wire DTO. The read wrapper must reconcile this exact
+ * mutation to a definitive outcome on the authenticated server before returning its snapshot.
+ * A cached Project/readiness event or a read while that request may still commit is insufficient. */
+export interface RuntimeUnconfirmedMutationV2 {
+  kind: 'RUN' | 'SAVE'; requestId: string; projectId: string; sessionId: string; clientId: string; expectedWorkspaceVersion: number;
+}
 export interface RuntimeClientV2State {
-  project: ProjectV2 | null; execution: ExecutionView | null; run: RunV2 | null; pending: 'RUN' | 'STOP' | 'SAVE' | null; error: string | null;
+  project: ProjectV2 | null; execution: ExecutionView | null; run: RunV2 | null; pending: 'RUN' | 'STOP' | 'SAVE' | null; error: string | null; reconciliationRequired: boolean;
 }
 export type SettingsSaveResultV2 = { ok: true; project: ProjectV2 } | { ok: false; message: string };
 const clone = <T,>(v: T): T => structuredClone(v);
@@ -36,14 +42,21 @@ function validProject(value: unknown): value is ProjectV2 {
     (project.capabilities.execution.runtime.profileId === null || project.capabilities.language.profileId === project.capabilities.execution.runtime.profileId);
 }
 export class RuntimeClientV2 {
-  private state: RuntimeClientV2State = { project: null, execution: null, run: null, pending: null, error: null };
+  private state: RuntimeClientV2State = { project: null, execution: null, run: null, pending: null, error: null, reconciliationRequired: false };
   private listeners = new Set<() => void>();
   private operation: AbortController | null = null;
   private revision = 0;
   private disposed = false;
   private bound: RuntimeAuthorityV2 | null = null;
+  // Reconnect/invalidate is not evidence that a dispatched mutation did not happen.
+  private unresolved = new Map<string, { mutation: RuntimeUnconfirmedMutationV2; inFlight: boolean }>();
+  private scope(a: Pick<RuntimeAuthorityV2, 'projectId' | 'sessionId'>): string { return JSON.stringify([a.projectId, a.sessionId]); }
+  private requiresReconciliation(): boolean {
+    const a = this.dependencies.current();
+    return !!a && this.unresolved.has(this.scope(a));
+  }
   constructor(private readonly dependencies: RuntimeClientV2Dependencies) {}
-  snapshot(): RuntimeClientV2State { return clone(this.state); }
+  snapshot(): RuntimeClientV2State { return { ...clone(this.state), reconciliationRequired: this.requiresReconciliation() }; }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
   private publish() { for (const listener of this.listeners) listener(); }
   /** Admission for legacy/mixed/unknown raw settings: read-only readiness is still available.
@@ -68,7 +81,7 @@ export class RuntimeClientV2 {
   }
   invalidate(): void {
     this.operation?.abort(); this.operation = null; this.bound = null; this.revision++;
-    this.state = { project: null, execution: null, run: null, pending: null, error: null }; this.publish();
+    this.state = { project: null, execution: null, run: null, pending: null, error: null, reconciliationRequired: false }; this.publish();
   }
   private authority(): RuntimeAuthorityV2 {
     const a = this.dependencies.current(), bound = this.bound;
@@ -78,27 +91,70 @@ export class RuntimeClientV2 {
       throw new Error('Sesja nieaktualna lub offline. Odśwież połączenie; edycja ręczna pozostaje dostępna.');
     return clone(a);
   }
-  private async perform<T>(kind: RuntimeClientV2State['pending'], action: (a: RuntimeAuthorityV2, signal: AbortSignal) => Promise<T>,
+  /** Starts a NEW, authenticated authoritative read AFTER the mutation has settled locally.
+   * The wrapper receives the exact request identity and must establish its definitive server
+   * outcome (including no later commit) before returning ProjectV2 + current RunV2|null.
+   * Never wrap a pre-existing Promise, cached snapshot, readiness or receipt-presence check.
+   * No retry, fabricated Run/ABORTED, or caller-provided boolean can clear this fence.
+   * When such a backend read is unavailable, keep the fence; ordinary editor use is unaffected. */
+  async reconcile(read: (mutation: Readonly<RuntimeUnconfirmedMutationV2>, signal: AbortSignal) => Promise<{ project: unknown; run: unknown }>): Promise<boolean> {
+    const a = this.dependencies.current();
+    if (this.disposed || this.operation || !a?.connected) return false;
+    const authority = clone(a), key = this.scope(a), unresolved = this.unresolved.get(key);
+    if (!unresolved || unresolved.inFlight) return false;
+    const operation = new AbortController(), revision = this.revision;
+    this.operation = operation;
+    try {
+      const value = await read(clone(unresolved.mutation), operation.signal), current = this.dependencies.current();
+      if (this.disposed || operation.signal.aborted || this.operation !== operation || revision !== this.revision ||
+        this.unresolved.get(key) !== unresolved || !current?.connected ||
+        (['projectId','sessionId','clientId','connectionGeneration'] as const).some(k => authority[k] !== current[k]) ||
+        !value || !Object.hasOwn(value, 'run') || value.run === undefined || !this.applyProject(value.project, value.run))
+        throw new Error('Odczyt nie rozstrzygnął niepotwierdzonej operacji. Zachowano blokadę ponowienia i formularz.');
+      this.unresolved.delete(key); this.state.error = null;
+      return true;
+    } catch (error) {
+      if (this.operation === operation) this.state.error = error instanceof Error ? error.message : 'Nie potwierdzono odczytu stanu operacji.';
+      return false;
+    } finally {
+      if (this.operation === operation) this.operation = null;
+      this.publish();
+    }
+  }
+  private async perform<T>(kind: RuntimeClientV2State['pending'], action: (a: RuntimeAuthorityV2, signal: AbortSignal, dispatched: (requestId: string) => void) => Promise<T>,
     accept: (value: T, a: RuntimeAuthorityV2) => void): Promise<boolean> {
     if (this.operation || this.disposed) return false;
+    if (kind !== 'STOP' && this.requiresReconciliation()) {
+      this.state.error = 'Wynik poprzedniej operacji jest nieznany. Wymagany autoryzowany odczyt jej rozstrzygnięcia przed nowym Run lub zapisem. Zachowano formularz; edycja ręczna pozostaje dostępna.';
+      this.publish(); return false;
+    }
     const operation = new AbortController(); this.operation = operation;
     const revision = this.revision;
+    const dispatch: { sent?: { key: string; entry: { mutation: RuntimeUnconfirmedMutationV2; inFlight: boolean } } } = {};
     try {
       const a = this.authority(); this.state.pending = kind; this.state.error = null; this.publish();
-      const value = await action(a, operation.signal), current = this.dependencies.current();
+      const value = await action(a, operation.signal, requestId => {
+        if (kind !== 'RUN' && kind !== 'SAVE') return;
+        const key = this.scope(a), entry = { mutation: { kind, requestId, projectId: a.projectId, sessionId: a.sessionId, clientId: a.clientId, expectedWorkspaceVersion: a.workspaceVersion }, inFlight: true };
+        this.unresolved.set(key, entry); dispatch.sent = { key, entry };
+      }), current = this.dependencies.current();
       if (operation.signal.aborted || this.operation !== operation || revision !== this.revision || !current ||
         Object.keys(a).some(key => a[key as keyof RuntimeAuthorityV2] !== current[key as keyof RuntimeAuthorityV2]))
         throw new Error('Odpowiedź dotyczy nieaktualnej sesji lub wersji. Odśwież stan; zachowano wpisane ustawienia.');
-      accept(value, a); return true;
+      accept(value, a);
+      if (dispatch.sent && this.unresolved.get(dispatch.sent.key) === dispatch.sent.entry) this.unresolved.delete(dispatch.sent.key);
+      return true;
     } catch (error) {
       if (this.operation === operation) this.state.error = error instanceof Error ? error.message : 'Operacja niepotwierdzona. Odśwież stan przed ponowieniem.';
       return false;
     } finally {
-      if (this.operation === operation) { this.operation = null; this.state.pending = null; this.publish(); }
+      if (dispatch.sent) dispatch.sent.entry.inFlight = false;
+      if (this.operation === operation) { this.operation = null; this.state.pending = null; }
+      this.publish();
     }
   }
   async run(mode: RunKind): Promise<boolean> {
-    return this.perform('RUN', async (a, signal) => {
+    return this.perform('RUN', async (a, signal, dispatched) => {
       const project = this.state.project;
       if (!project) throw new Error('LEGACY_RUN_PROFILE_REQUIRES_MIGRATION. Przygotuj i zapisz jawne ustawienia V2; ręczna edycja pozostaje dostępna.');
       const readiness = project.capabilities.execution.modes[mode];
@@ -107,6 +163,7 @@ export class RuntimeClientV2 {
       const body = { requestId: this.dependencies.requestId(), clientId: a.clientId, sessionId: a.sessionId,
         expectedWorkspaceVersion: a.workspaceVersion, mode, configurationGeneration: a.configurationGeneration };
       if (!validateRunRequestV2(body)) throw new Error('Niepoprawne żądanie wykonania.');
+      dispatched(body.requestId);
       return this.dependencies.http.run(body, signal);
     }, (value, a) => {
       if (!validateRunV2(value) || value.mode !== mode || value.configurationGeneration !== a.configurationGeneration ||
@@ -128,10 +185,11 @@ export class RuntimeClientV2 {
   }
   async saveSettings(settings: SettingsV2, expectedWorkspaceVersion: number): Promise<SettingsSaveResultV2> {
     const captured = clone(settings); let saved: ProjectV2 | null = null;
-    const ok = await this.perform('SAVE', async (a, signal) => {
+    const ok = await this.perform('SAVE', async (a, signal, dispatched) => {
       if (!a.canSaveSettings || a.workspaceVersion !== expectedWorkspaceVersion) throw new Error('Konflikt wersji ustawień. Zachowano formularz; odczytaj nową wersję przed ponownym zapisem.');
       const body = { requestId: this.dependencies.requestId(), clientId: a.clientId, sessionId: a.sessionId, expectedWorkspaceVersion, settings: captured };
       if (!validateUpdateSettingsRequestV2(body)) throw new Error('Niepoprawne ustawienia V2.');
+      dispatched(body.requestId);
       return this.dependencies.http.saveSettings(body, signal);
     }, (value, a) => {
       if (!validProject(value) || value.projectId !== a.projectId || value.sessionId !== a.sessionId || value.workspaceVersion <= expectedWorkspaceVersion ||
