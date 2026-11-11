@@ -153,6 +153,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         'editorWidget.background': '#073642',
         'editorSuggestWidget.background': '#073642',
         'editorGutter.background': '#002b36',
+        'editorBracketHighlight.foreground1': '#839496',
+        'editorBracketHighlight.foreground2': '#839496',
+        'editorBracketHighlight.foreground3': '#839496',
+        'editorBracketHighlight.foreground4': '#839496',
+        'editorBracketHighlight.foreground5': '#839496',
+        'editorBracketHighlight.foreground6': '#839496',
+
       },
     });
 
