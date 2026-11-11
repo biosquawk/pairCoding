@@ -144,14 +144,22 @@ W pełnym źródle generator, catalog, production pins i language prepare mają 
 metadane Java/Javac `27.0.1.0.2`; nie zmieniaj ich na `27.0.1.0` ani nie ignoruj
 ścisłej kontroli narzędzi. Wcześniejsze prepare z błędnymi metadanymi zakończyło się FAIL,
 nie gotowością Java27. Odbiór źródła nie upoważnia do ponawiania tego wykonania.
-Nowy dowód operatora wykazał dodatkowy problem tych źródeł: nawet samo `buildx inspect`
-zapisuje własne metadane klienta w dedykowanym config, a guard wymagający jego pustki
-przed każdą komendą odrzuca ten legalny stan. Kontrola z osobnym child-only
-`BUILDX_CONFIG` zachowała pusty config poświadczeń; to **nie** dowód builda ani Windows.
-P1_4 ma dostarczyć poprawione, zamrożone źródło do niezależnego review; obecne identyfikatory
-nie są potwierdzeniem poprawki. Operator wstrzymał wyłącznie wykonanie remainder `b602/648`;
-praca nad backendem, LSP, FE i pakowaniem trwa dalej. Nie obchodź odmowy przez dowolny
-niepusty config, usuwanie metadanych, globalne env ani ręczny retry.
+Historyczny dowód operatora wykazał dodatkowy problem źródeł b602: nawet samo
+`buildx inspect` zapisywało metadane i blokowało następną komendę przez guard pustego config.
+K odebrał źródłową poprawkę **`5a0f7fe5deee33350e0e5fe2b90de2b3c35a0f91`**
+(tree `0510efc57d6da372683d31cf563857384fccb5d8`, na b602): osobne owned
+`BUILDX_CONFIG`/HOME oraz NOWY pusty credential config dla każdej komendy zewnętrznej
+i zagnieżdżonej, wspólna capability producenta. Znane seed/lock są wyłącznie
+sprawdzane stat i zachowane, nigdy czytane, używane ponownie ani kasowane;
+obce pliki/config.json, link lub zmiana tożsamości powodują odmowę po trwałym receipt,
+przed następnym procesem. Nie obchodź jej przez dowolny niepusty config, usuwanie
+metadanych, globalne env ani ręczny retry. Poprawka nie zmienia pinów/narzędzi/OCI/cache.
+Rzeczywista kontrola tego helpera info→buildx inspect→info potwierdziła 3 puste config
+oraz osobny stan Buildx, ale **nie** actual build/tokenSeeds ani Windows.
+Źródłowy odbiór i warunkowe dopuszczenie operatora do nowego planu nie są terminalnym
+wynikiem prepare. Dwa stare testy zgodności prywatnego env/transport seam pozostają
+FAIL, bez zmiany ich asercji; pełny zestaw nie jest zielony. Producent i backend nadal
+wymagają spójnej integracji. Nie uruchamiaj starego planu ani operator-only remainder.
 Historyczny celowany smoke rzeczywistego CLI `6417183` na izolowanej źródłowej kopii bez Git w WSL potwierdził
 `PLAN_ONLY` bez zapisu i procesów potomnych (7 profili oraz Spring21/27), a także odmowę
 fragmentu settings, obcej flagi i istniejącego outputu. Używał istniejących zależności,
@@ -205,6 +213,41 @@ przepisana na PASS. Konsument nadal nie jest potwierdzony; kandydat **nie spełn
 Nie obchodź odmowy przez ręczne docker run, receipt-presence ani fikcyjny lock.
 Offline proof pozostaje osobno wymagany po prepare; samo pobranie obrazów i zależności
 lub tiny tool probe go nie zastępuje.
+
+## 2a. Zarządzany stan i transport — kontrakt integracji, nie dowód wykonania
+
+Po integracji konsument ma wyznaczać `config-dir` z rodzica **rzeczywiście wybranego
+pliku runtime config**, nie z settings/dataDir/cwd/TMPDIR ani wyszukiwania env.
+Stan ma trafić do `<config-dir>/.paircoach-runtime/projects/<sha256(UTF8 canonicalProjectRoot)>/`
+z `installation.json`, `runs`, `journal`: prywatny, kanoniczny, bez linków i rozłączny
+w obie strony z oryginalnym workspace oraz zatwierdzonymi read-only prepared/cache roots.
+To nie nowe pole JSON ani flaga. Nie wybieraj writable state przez `--prepared-runtime`.
+Stabilny installationId i dziennik mają przetrwać restart; konflikt/częściowy stan wymaga
+recovery, nie resetu tożsamości. UNBOUND nie tworzy katalogu ani fikcyjnego projektu.
+Gdy położenie config powoduje overlap lub brak zapisu, Run ma pokazać `CONFIG_ERROR`;
+HTTP, ręczny edytor i recovery działają dalej. Użyj rzeczywistego runtime config poza
+konfliktującym projektem/read-only root, nie ukrytego fallbacku. Settings/dataDir/tmp
+nie stanowią zgody na RW oryginalnego kodu.
+
+Zatwierdzony klient to `/usr/bin/docker` w WSL/Linux albo
+`C:\Program Files\Docker\Docker\resources\bin\docker.exe` na Windows;
+endpoint odpowiednio `unix:///var/run/docker.sock` lub `npipe:////./pipe/docker_engine`.
+Brak klienta/daemona wyłącza wykonanie, nie edytor; bez instalacji automatycznej,
+PATH discovery, executable z zadania/profilu ani fallbacku hostowego.
+Transport używa tylko własnego prywatnego pustego config pod managed root i zatwierdzonego
+env, nie odziedziczonych poświadczeń/DOCKER_HOST/DOCKER_CONFIG ani globalnej zmiany env.
+Run nie wykonuje prepare/build/plugin; prepare pozostaje osobnym jawnym krokiem.
+
+Run/Test mają `network=none` i read-only zatwierdzony cache. Spring RUN_MAIN wymaga
+**wcześniej przygotowanej sieci `paircoach-<installationId>-service`**; read-only inspect
+musi potwierdzić dokładną tożsamość, `Internal===true` i `Driver==='bridge'`.
+Wbudowana zewnętrzna sieć Docker `bridge` **nie spełnia** tego warunku. Nie twórz sieci
+z zadania, nie wybieraj host/arbitrary network. Brak tej sieci daje czytelny not-ready
+wyłącznie trybu service, nie trwałe wyłączenie Spring. Osobne jawne przygotowanie sieci
+przez operatora i jego dowód pozostają **pending integration** — brak tu zamrożonej
+publicznej komendy, nie zastępuj jej ręcznym `docker network create`.
+Port wyłącznie 127.0.0.1, health, twardy Stop i orphan recovery pozostają obowiązkowe.
+To zatwierdzone defaults v2, nie potwierdzenie aktualnego HTTP/index/Runner ani service PASS.
 
 ## 3. Jeden scenariusz po integracji prepare i backendu
 
