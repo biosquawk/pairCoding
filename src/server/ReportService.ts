@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
-  realpathSync, renameSync, unlinkSync, writeFileSync, type Stats } from 'node:fs';
+  realpathSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 import type { ChatEntry, Report, Run, Session, Snapshot } from '../shared/protocol';
 import { AppError } from './errors';
@@ -117,8 +117,8 @@ export class ReportService {
     if (lstatSync(dir).isSymbolicLink()) throw new AppError(403, 'UNSAFE_REPORT_STORAGE', 'Dowiązanie w magazynie raportów.');
     return dir;
   }
-  private removeOwnFile(file: string, identity: Stats, exactContent?: string): void {
-    const current = lstatSync(file);
+  private removeOwnFile(file: string, identity: BigIntStats, exactContent?: string): void {
+    const current = lstatSync(file, { bigint: true });
     if (current.isFile() && current.dev === identity.dev && current.ino === identity.ino &&
         (exactContent === undefined || readFileSync(file, 'utf8') === exactContent)) unlinkSync(file);
   }
@@ -126,13 +126,14 @@ export class ReportService {
     try { return lstatSync(file).isDirectory(); } // Leave the foreign obstruction itself untouched.
     catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT'; }
   }
-  private writeExclusive(file: string, content: string): Stats {
+  private writeExclusive(file: string, content: string): BigIntStats {
     // A failed open (especially EEXIST) gives us no ownership and must never run cleanup.
     const fd = openSync(file, 'wx', 0o600);
-    let identity: Stats | undefined;
+    let identity: BigIntStats | undefined;
     let failure: { error: unknown } | undefined;
     try {
-      identity = fstatSync(fd); // Capture ownership before a partial write/fsync can fail.
+      // Exact dev/ino, including Windows values above 2^53, captured before write/fsync can fail.
+      identity = fstatSync(fd, { bigint: true });
       writeFileSync(fd, content, 'utf8'); fsyncSync(fd);
     } catch (error) { failure = { error }; }
     try { closeSync(fd); } catch (error) { failure ??= { error }; }
