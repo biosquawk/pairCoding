@@ -91,3 +91,10 @@ test('public content observation triggers completion at post-type cursor, never 
   const h=harness();h.primary.change('obj.');await Promise.resolve();await Promise.resolve();assert.equal(h.requests.length,1);assert.equal(h.requests[0].trigger,'.');assert.equal(shown(h).length,1);h.bridge.dispose();
   const moved=harness();moved.primary.change('obj.');moved.position={lineNumber:1,column:2};await Promise.resolve();assert.equal(moved.requests.length,0);moved.bridge.dispose();
 });
+test('new profile/provider/configuration authority opens current buffers; it cannot reuse an old scope implicitly',async()=>{
+  const h=harness();const before=h.sync.length;
+  h.authorityStamp={...h.authorityStamp,providerGeneration:'provider-next',configurationGeneration:'config-next',profileId:'profile-next'};
+  await h.bridge.requestCompletion(null);assert.equal(h.requests.length,0,'not yet opened in new scope');
+  h.revision++;h.emit({type:'AUTHORITY_CHANGED'});assert.equal(h.sync.length,before+2);assert.equal(h.sync.at(-1).kind,'OPEN');
+  assert.equal(h.sync.at(-1).document.stamp.profileId,'profile-next');await h.bridge.requestCompletion(null);assert.equal(h.requests.length,1);h.bridge.dispose();
+});

@@ -45,6 +45,7 @@ interface Entry {
   listener: M.IDisposable; reason?: MutationReason; sent?: OpenOrChange;
   tombstone: boolean;
 }
+const sameScope = (a:DocumentStamp,b:DocumentStamp) => (['projectId','sessionId','path','profileId','connectionGeneration','configurationGeneration','providerGeneration','shadowGeneration','modelLifetime','controlEpoch'] as const).every(k=>a[k]===b[k]);
 interface Flight { request: CompleteRequest; abort: AbortController; entry: Entry }
 /** Defense in depth: native registered providers are separately disabled via public mode configuration. */
 export const SAFE_SUGGEST_OPTIONS: M.editor.IStandaloneEditorConstructionOptions = {
@@ -202,7 +203,7 @@ export class MonacoLspBridge {
       const entry = this.active(); if (!entry) return;
       const state = this.state(entry), pos = this.editor.getPosition();
       if (!mayAccept(state) || !pos || !entry.sent ||
-        (!sameStamp(entry.sent.stamp,state.stamp) && (entry.sent.content !== state.content || entry.sent.stamp.localModelVersion !== state.stamp.localModelVersion))) return;
+        (!sameScope(entry.sent.stamp,state.stamp) || entry.sent.content !== state.content || entry.sent.stamp.localModelVersion !== state.stamp.localModelVersion)) return;
       if (expected && (!sameStamp(state.stamp,expected.stamp) || pos.lineNumber!==expected.position.lineNumber || pos.column!==expected.position.column)) return;
       const request: CompleteRequest = {requestId:crypto.randomUUID(),stamp:{...state.stamp},position:{line:pos.lineNumber,column:pos.column},trigger};
       const flight: Flight = {request,abort:new AbortController(),entry}; this.flight = flight;
@@ -232,8 +233,13 @@ export class MonacoLspBridge {
       if (states.length && states.every(s => s && (this.prepareFloor === null || s.revision > this.prepareFloor) && !s.controlPrepare && !s.vetoPending && s.connected && s.synced && s.writeOwner === 'STUDENT' && !s.conflict)) {
         this.prepareFloor = null; this.blocked = false;
       }
-      // Reconnect opens current buffers, not a replay of mutations; ordinary ACK does not send anything.
-      this.entries.forEach(entry => { if (!entry.sent) this.sync(entry,'OPEN','OPEN'); });
+      // New server scope opens CURRENT buffers, never replays mutations. ACK metadata alone is NOT a new scope.
+      this.entries.forEach(entry => {
+        if (entry.tombstone) return;
+        try { if (entry.sent && !sameScope(entry.sent.stamp,this.state(entry).stamp)) entry.sent=undefined; }
+        catch { return; }
+        if (!entry.sent) this.sync(entry,'OPEN','OPEN');
+      });
       return;
     }
     if (event.type === 'FILE_OPERATION') {
