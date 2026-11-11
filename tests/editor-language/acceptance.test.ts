@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createCompletionAcceptance } from '../../src/services/editor-language/acceptance';
-import { contentSha256, normalizeContent } from '../../src/services/editor-language/codec';
+import { contentSha256, normalizeContent } from '../../src/language/uriCodec';
 import type { AcceptanceState, CompleteResult, CompletionCandidate, DocumentStamp } from '../../src/shared/language-v2';
 export const stamp = (content='obj.', overrides:Partial<DocumentStamp>={}):DocumentStamp => ({
   projectId:'projekt',sessionId:'session',path:'src/Zażółć space 😀.ts',profileId:'neutral',connectionGeneration:'connection',configurationGeneration:'config',providerGeneration:'provider',shadowGeneration:'shadow',modelLifetime:'lifetime',localModelVersion:1,baseDocumentVersion:2,documentVersion:null,contentSha256:contentSha256(content),controlEpoch:0,requestGeneration:1,...overrides,

@@ -1,6 +1,6 @@
 import type { AcceptanceResult, AcceptanceState, CompleteResult, CompletionAcceptanceFacade, CompletionCandidate, DocumentStamp } from '../../shared/language-v2';
 import { validateCompleteResult, validateCompletionEdits, validateDocumentStamp } from '../../shared/validation-v2';
-import { contentSha256, normalizeContent } from './codec';
+import { contentSha256, normalizeContent } from '../../language/uriCodec';
 export const sameStamp = (a: Readonly<DocumentStamp>, b: Readonly<DocumentStamp>) =>
   Object.keys(a).length === Object.keys(b).length && Object.keys(a).every(k => a[k as keyof DocumentStamp] === b[k as keyof DocumentStamp]);
 export const mayAccept = (s: AcceptanceState) => s.writeOwner === 'STUDENT' && s.connected === true && s.synced === true &&

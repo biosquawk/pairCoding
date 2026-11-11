@@ -1,7 +1,7 @@
 import type * as M from 'monaco-editor';
 import type { CompleteRequest, CompleteResult, CompletionItem } from '../../shared/language-v2';
 import { validateCompletionEdits } from '../../shared/validation-v2';
-import { normalizeContent } from './codec';
+import { normalizeContent } from '../../language/uriCodec';
 /** Public TS/JS worker factory is injected by language registry; no family selection in GUI/bridge. */
 export type BuiltinWorkerFactory = (model: M.editor.ITextModel) => Promise<{
   getCompletionsAtPosition(fileName: string, position: number): Promise<{

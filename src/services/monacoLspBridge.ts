@@ -4,8 +4,8 @@ import { validateCompletionEdits, validateDiagnosticsResult, validateDocumentSta
 import { disableNativeCompletionProviders } from './editor-language/native';
 export { disableNativeCompletionProviders } from './editor-language/native';
 import { createCompletionAcceptance, mayAccept, sameStamp } from './editor-language/acceptance';
-import { contentSha256, fromModelUri, normalizeContent } from './editor-language/codec';
-export { toModelUri, fromModelUri, toWorkspaceUri, fromWorkspaceUri, normalizeContent, contentSha256 } from './editor-language/codec';
+import { contentSha256, fromModelUri, normalizeContent } from '../language/uriCodec';
+export { toModelUri, fromModelUri, toWorkspaceUri, fromWorkspaceUri, normalizeContent, contentSha256 } from '../language/uriCodec';
 export { createCompletionAcceptance } from './editor-language/acceptance';
 
 export interface ModelSnapshot {

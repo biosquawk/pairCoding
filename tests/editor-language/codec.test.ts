@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { toModelUri,fromModelUri,toWorkspaceUri,fromWorkspaceUri,normalizeContent } from '../../src/services/editor-language/codec';
+import { toModelUri,fromModelUri,toWorkspaceUri,fromWorkspaceUri,normalizeContent } from '../../src/language/uriCodec';
 // Actual Monaco public URI implementation (not an editor/browser integration test).
 import { URI } from 'monaco-editor/esm/vs/base/common/uri.js';
 test('one canonical project hex authority and POSIX/Unicode/spaces/nonBMP/decode-once roundtrip',()=>{
