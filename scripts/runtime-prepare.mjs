@@ -79,7 +79,13 @@ function preparedIdentity(r) {
 export function resolvePreparedToolchainIdentity(request) {
   return preparedIdentity(validateProductionRequest(validatePrepareRequest(request)));
 }
-export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null) {
+// Optional PUBLIC transport: explicit local endpoint + already-owned empty config. Defaults unchanged.
+export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null,transport=null) {
+  if(transport!==null) {
+    if(!transport || !['unix:///var/run/docker.sock','npipe:////./pipe/docker_engine'].includes(transport.endpoint) || !path.isAbsolute(transport.configDirectory) || Object.keys(transport).some(k=>!['endpoint','configDirectory','spawnSync'].includes(k)) || transport.spawnSync!==undefined && typeof transport.spawnSync!=='function') throw new Error('Explicit local Docker transport required');
+    canonicalDirectory(transport.configDirectory);
+    if(readdirSync(transport.configDirectory).length)throw new Error('Dedicated Docker config must remain empty; no credential forwarding');
+  }
   const r=validatePrepareRequest(request); inventory(r.tools); inventory(r.project);
   if(execute) validateProductionRequest(r);
   const {toolchainHash,dispatcherFiles}=execute?resolvePreparedToolchainIdentity(r):preparedIdentity(r),out=path.resolve(r.outputRoot);
@@ -90,8 +96,10 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
   const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}}; save();
   const invoke=(args)=>{
     if(Date.now()>=deadline) throw new Error('Preparation global budget reached; retain/reconcile');
-    const startedAt=new Date().toISOString(),res=spawnSync('docker',args,{env:{PATH:process.env.PATH,HOME:path.join(out,'docker-home')},shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
-    receipt.commands.push({argv:['docker',...args],startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
+    const actualArgs=transport?['--host',transport.endpoint,'--config',transport.configDirectory,...args]:args;
+    if(transport && (canonicalDirectory(transport.configDirectory),readdirSync(transport.configDirectory).length))throw new Error('Dedicated Docker config changed; retain/reconcile');
+    const startedAt=new Date().toISOString(),res=(transport?.spawnSync??spawnSync)('docker',actualArgs,{env:{PATH:process.env.PATH,HOME:path.join(out,'docker-home')},shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
+    receipt.commands.push({argv:['docker',...actualArgs],...(transport?{endpoint:transport.endpoint,configDirectory:transport.configDirectory}:{}),startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
     if(res.error || res.status!==0) throw new Error('Preparation operation failed; retain receipt/resources, reconcile by exact inspection before retry.'); return res.stdout;
   };
   const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];

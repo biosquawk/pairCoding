@@ -5,12 +5,13 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {canonicalDirectory,readPrivate} from './runtime-files.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),hash=b=>createHash('sha256').update(b).digest('hex');
-export function prepareLanguageImages(root,lock,{run,save,receipt}) {
+export function prepareLanguageImages(root,lock,{run,save,receipt},kinds=['java','python']) {
+ if(!Array.isArray(kinds)||!kinds.length||kinds.length>2||new Set(kinds).size!==kinds.length||kinds.some(k=>!['java','python'].includes(k)))throw new Error('Explicit nonempty unique language kinds required');
  const make=d=>{canonicalDirectory(path.dirname(d));fs.mkdirSync(d,{mode:0o700});canonicalDirectory(d);};
  const put=(p,b)=>{canonicalDirectory(path.dirname(p));const fd=fs.openSync(p,'wx',0o600);try{fs.writeFileSync(fd,b);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
  const artifact=(a,p)=>{const b=readPrivate(p,128*1024*1024).bytes;if(b.length!==a.bytes||hash(b)!==a.sha256)throw new Error('Language staging hash differs');return b;};
  make(path.join(root,'language-contexts'));receipt.language=[];save();
- for(const kind of ['java','python']) {
+ for(const kind of kinds) {
   const context=path.join(root,'language-contexts',kind);make(context);
   const key=kind==='java'?'jdt-runtime-27':'pylsp-runtime-3.13',tag=kind==='java'?'paircoach/language-jdt:stage09':'paircoach/language-pylsp:stage09';
   const item={key,engine:receipt.engine,status:'BUILD_INTENT',imageTag:tag,tools:[]};receipt.language.push(item);save();
