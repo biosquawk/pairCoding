@@ -7,6 +7,7 @@ import '../shared/monacoSetup';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
 import type * as monacoType from 'monaco-editor';
+import { MonacoLspBridge, SAFE_SUGGEST_OPTIONS, disableNativeCompletionProviders, toModelUri, fromModelUri, normalizeContent, type EditorLanguageBinding } from '../services/monacoLspBridge';
 import { observeMonacoViewP2 } from '../services/editorViewP2';
 import { CoachHintBubble as HintBubble } from './CoachHintBubble';
 import type { HintRect } from './hintBubbleGeometryP2';
@@ -28,7 +29,9 @@ import {
   X,
 } from 'lucide-react';
 
-interface EditorPanelProps {
+export interface EditorPanelProps {
+  /** Optional wave1 injection; transport owner must provide the synchronous pre-CONTROL_PREPARE hook. */
+  languageBinding?: EditorLanguageBinding;
   projectId: string;
   files: ProjectFile[];
   openTabs: string[];
@@ -54,6 +57,7 @@ interface EditorPanelProps {
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
   projectId,
+  languageBinding,
   files,
   openTabs,
   activePath,
@@ -75,6 +79,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   onProposalResponse,
   onResolveConflict,
 }) => {
+  const languageBridgeRef = useRef<MonacoLspBridge | null>(null);
   const editorRef = useRef<monacoType.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<Monaco | null>(null);
   const isApplyingCoachStepRef = useRef(false);
@@ -104,14 +109,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     return 'plaintext';
   };
 
-  const modelUri = (monaco: Monaco, path: string) => monaco.Uri.from({ scheme: 'paircoach', authority: client.getState().scenario.id, path: `/${path}` });
+  const modelUri = (monaco: Monaco, path: string) => monaco.Uri.parse(toModelUri(projectId,path));
+  const pathForModel = (model: monacoType.editor.ITextModel | null, scope = projectId) => {
+    try { return model ? fromModelUri(scope,model.uri.toString()) : null; } catch { return null; }
+  };
 
   // Handle Monaco Editor mount
   const handleEditorMount: OnMount = (editor, monaco) => {
     editorRef.current = editor;
     monacoRef.current = monaco;
     // The new instance starts locked until the pre-paint model/ownership effects run.
-    editor.updateOptions({ readOnly: true });
+    disableNativeCompletionProviders(monaco);
+    editor.updateOptions({ ...SAFE_SUGGEST_OPTIONS, readOnly: true });
     // Monaco owns disposal. Never leave callbacks pointing at its disposed instance.
     editor.onDidDispose(() => {
       if (editorRef.current !== editor) return;
@@ -181,7 +190,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     let model = monaco.editor.getModel(uri);
 
     if (!model) {
-      model = monaco.editor.createModel(activeFile.content, getLanguageForPath(activeFile.path), uri);
+      model = monaco.editor.createModel(normalizeContent(activeFile.content), getLanguageForPath(activeFile.path), uri);
     } else {
       // Model exists; ensure language is correct
       monaco.editor.setModelLanguage(model, getLanguageForPath(activeFile.path));
@@ -206,6 +215,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     }
   }, [projectId, activePath, editorGeneration, activeFile?.loaded]);
 
+  // Binding lifecycle is per project/editor; no second model, socket or persistence path.
+  useLayoutEffect(() => {
+    const editor=editorRef.current,monaco=monacoRef.current;
+    if (!editor || !monaco || !languageBinding || languageBinding.projectId!==projectId) return;
+    const bridge=new MonacoLspBridge(monaco,editor,languageBinding);
+    languageBridgeRef.current=bridge;
+    return () => { if (languageBridgeRef.current===bridge) languageBridgeRef.current=null; bridge.dispose(); };
+  }, [projectId, languageBinding, editorGeneration]);
+
   // A listener generation is bound to the actual Monaco model and authenticated connection.
   useLayoutEffect(() => {
     const editor = editorRef.current;
@@ -222,7 +240,19 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       if (previousModel && previousModel !== nextModel) client.clearEditorView(previousScope);
       const boundScope = scope;
       if (!boundScope) return;
-      disposeObservation = observeMonacoViewP2(editor, projectId, activePath,
+      // Adapt only the legacy VIEW observer's URI shape; the actual model has ONE canonical URI.
+      const observationModel = nextModel && pathForModel(nextModel) === activePath ? {
+        uri:{scheme:'paircoach',authority:projectId,path:`/${activePath}`},
+        getValue: () => nextModel.getValue(), isDisposed: () => nextModel.isDisposed(),
+      } : null;
+      const viewEditor = {
+        getModel: () => editor.getModel()===nextModel ? observationModel : null,
+        getPosition: () => editor.getPosition(), getSelection: () => editor.getSelection(),
+        onDidChangeCursorPosition: editor.onDidChangeCursorPosition.bind(editor),
+        onDidChangeCursorSelection: editor.onDidChangeCursorSelection.bind(editor),
+        onDidChangeModelContent: editor.onDidChangeModelContent.bind(editor),
+      };
+      disposeObservation = observeMonacoViewP2(viewEditor, projectId, activePath,
         () => boundScope === client.getEditorViewScope(), view => client.updateEditorView(view));
     };
     const modelListener = editor.onDidChangeModel(bind);
@@ -235,11 +265,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   useEffect(() => client.onFileUpdated((file) => {
     if (!file.isExternalOrSnapshot || !monacoRef.current) return;
     const model = monacoRef.current.editor.getModel(modelUri(monacoRef.current, file.path));
-    if (model && model.getValue() !== file.content) {
+    if (model && normalizeContent(model.getValue()) !== normalizeContent(file.content)) {
       isApplyingCoachStepRef.current = true;
-      try { model.setValue(file.content); } finally { isApplyingCoachStepRef.current = false; }
+      try {
+        const mutate=()=>model.setValue(normalizeContent(file.content));
+        if (languageBridgeRef.current) languageBridgeRef.current.withMutationReason(model,'EXTERNAL_FILE_SYNC',mutate); else mutate();
+      } finally { isApplyingCoachStepRef.current = false; }
     }
-  }), []);
+  }), [projectId]);
 
   // Protocol 3.0 has no stepIndex/totalSteps. Close the whole intervention at STUDENT/veto.
   const closeInterventions = () => {
@@ -269,7 +302,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       if (!model) {
         const file = client.getState().files.find(f => f.path === step.path);
         if (!file || file.loaded === false) return;
-        model = monaco.editor.createModel(file.content, getLanguageForPath(step.path), uri);
+        model = monaco.editor.createModel(normalizeContent(file.content), getLanguageForPath(step.path), uri);
       }
       if (editor.getModel() !== model) {
         const old = editor.getModel();
@@ -305,7 +338,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
       isApplyingCoachStepRef.current = true;
       try {
-        model.pushEditOperations(
+        const mutate = () => model.pushEditOperations(
           [],
           [
             {
@@ -317,6 +350,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           () => null
         );
 
+        if (languageBridgeRef.current) languageBridgeRef.current.withMutationReason(model,'COACH_STEP_EDIT',mutate); else mutate();
+
         // Only the actual Monaco mutation may acknowledge STEP_RENDERED. Never echo CODE_CHANGED.
         client.stepRendered(step, model.getValue());
       } finally {
@@ -325,13 +360,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     return unsubStep;
-  }, [editorGeneration]);
+  }, [projectId,editorGeneration]);
 
   // Transport events lock Monaco synchronously; React rerender is not the write barrier.
   useEffect(() => client.onStateChanged(state => {
     const model = editorRef.current?.getModel();
-    const path = model?.uri.path.replace(/^\//, '');
-    const file = model?.uri.authority === state.scenario.id ? state.files.find(f => f.path === path) : undefined;
+    const path = pathForModel(model ?? null,state.scenario.id);
+    const file = path ? state.files.find(f => f.path === path) : undefined;
     editorRef.current?.updateOptions({ readOnly: state.writeOwner === 'COACH' || (state.writeOwner === 'SYNCING' && !state.isOffline) || !file || file.loaded === false || !!file.readOnly });
     if (state.writeOwner !== 'COACH') closeInterventions();
   }), []);
@@ -525,11 +560,13 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             onChange={(newVal) => {
               if (!isApplyingCoachStepRef.current && newVal !== undefined) {
                 const model = editorRef.current?.getModel();
-                if (!model || model.uri.authority !== client.getState().scenario.id) return;
-                onContentChange(model.uri.path.replace(/^\//, ''), newVal);
+                const path=pathForModel(model ?? null,client.getState().scenario.id);
+                if (!path) return;
+                onContentChange(path, normalizeContent(newVal));
               }
             }}
             options={{
+              ...SAFE_SUGGEST_OPTIONS,
               readOnly: !editorRef.current || writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !activeFile || activeFile.loaded === false || !!activeFile.readOnly,
               ariaLabel: activeFile && activeFile.loaded !== false ? `Edytor pliku ${activeFile.path}` : 'Edytor bez otwartego pliku',
               quickSuggestions: false,
