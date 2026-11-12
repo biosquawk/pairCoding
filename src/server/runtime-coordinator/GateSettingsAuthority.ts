@@ -7,20 +7,22 @@ import { canonical, sha256 } from './storage';
 import { AppError } from '../errors';
 export class GateSettingsAuthority implements SettingsTransactionAuthority {
   private readonly stages = new Map<string, { expected: SettingsTransactionIdentity;
-    beforeBegin: (identity: Readonly<SettingsTransactionIdentity>, lease: SettingsWriteLease) => void }>();
+    beforeBegin: (identity: Readonly<SettingsTransactionIdentity>, lease: SettingsWriteLease) => void;
+    committed?: () => void }>();
   /** INTERNAL Store-owned identity reaches the projection only under the SAME real write lease.
    * Staging must be synchronous/durable and precede beginSettings and every Store side effect.
    * Never invoke a second lease or await a projection while holding this synchronous authority.
    */
   async saveStaged(store: SettingsV2Store, original: SaveSettingsInput,
-      beforeBegin: (identity: Readonly<SettingsTransactionIdentity>, lease: SettingsWriteLease) => void): Promise<SettingsSaveReceipt> {
+      beforeBegin: (identity: Readonly<SettingsTransactionIdentity>, lease: SettingsWriteLease) => void,
+      committed?: () => void): Promise<SettingsSaveReceipt> {
     const input = structuredClone(original), r = input.request;
     const identity: SettingsTransactionIdentity = { requestId: r.requestId, clientId: r.clientId, sessionId: r.sessionId,
       expectedWorkspaceVersion: r.expectedWorkspaceVersion,
       payloadSha256: sha256(JSON.stringify({ settings: r.settings, source: input.expectedSourceSha256 })) };
     const key = canonical([r.sessionId, r.clientId, r.requestId]);
     if (this.stages.has(key)) throw new AppError(409, 'SETTINGS_BUSY', 'Original SAVE staging is already in progress.');
-    this.stages.set(key, { expected: identity, beforeBegin });
+    this.stages.set(key, { expected: identity, beforeBegin, committed });
     try { return await store.save(input); }
     finally { this.stages.delete(key); }
   }
@@ -60,6 +62,8 @@ export class GateSettingsAuthority implements SettingsTransactionAuthority {
       // A failed outcome publication is UNKNOWN, never guessed ABORTED or retried.
       const outcome = ledger.finishSettings(original, mutation);
       if (outcome.state !== 'COMMITTED') throw Error('Settings commit has no durable receipt');
+      // The actual durable effect is authoritative now; update neutral policy BEFORE state publication.
+      authLease.assertCurrent(); stage?.committed?.();
       try { this.workspace._publishSettingsReceipt(outcome.receipt); }
       catch { /* Durable outcome is already definitive. Listener failure cannot abort/replay it. */ }
       return outcome.receipt;

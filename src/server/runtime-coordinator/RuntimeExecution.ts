@@ -9,7 +9,7 @@ import { copyAcknowledgedInput, readRunSourceInventory } from '../execution/Immu
 import { createTaskRuntimeAdapterRegistry } from '../runtime-adapters';
 import type { DockerTransport } from '../execution/DockerTransport';
 import type { ExecutionHandle, ExecutionPort, ExecutionReadiness, PlanContext } from '../execution/ports';
-import type { RuntimeProfile, RunRequestV2, ModeReadiness } from '../../shared/runtime-v2';
+import type { RuntimeProfile, RunRequestV2, ModeReadiness, SettingsV2 } from '../../shared/runtime-v2';
 import type { RuntimeConfiguration, RuntimeReadinessDependencies } from '../runtime-config';
 import { AppError } from '../errors';
 import { canonical } from './storage';
@@ -56,13 +56,13 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     if (!executor) throw new AppError(409, 'RUN_HANDLE_UNAVAILABLE', 'No exact retained executor for this Run. Preserve the original request and reconcile.');
     return executor;
   };
-  const readiness: ExecutionPort['readiness'] = async (profile, generation) => {
+  const readinessFor = (proposed?: SettingsV2): ExecutionPort['readiness'] => async (profile, generation) => {
     check();
     if (!configuration.resolved || generation !== configuration.configurationGeneration || !same(profile, configuration.resolved.profile))
       throw new AppError(409, 'CONFIGURATION_STALE', 'Runtime configuration changed.');
     const source = core.readSettings(), modes = {} as ExecutionReadiness['modes'];
     for (const mode of ['RUN_MAIN','RUN_TESTS'] as const) {
-      const run = source.settings?.runProfiles.find(run => run.kind === mode);
+      const run = (proposed ?? source.settings)?.runProfiles.find(run => run.kind === mode);
       if (!run) { modes[mode] = denied('TASK_CONFIG_INVALID', 'This mode has no explicitly saved V2 task.'); continue; }
       const valid = await adapters.get(profile).validate(profile, run); check();
       if (!valid.valid) { modes[mode] = { canRun: false, problem: valid.problem }; continue; }
@@ -82,6 +82,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     if (core.readSettings().sourceSha256 !== source.sourceSha256) throw new AppError(409, 'PROJECT_STATE_CHANGED', 'Settings changed during readiness.');
     return { configurationGeneration: generation, modes };
   };
+  const readiness = readinessFor();
   // All actual process operations go to the SAME executor retained at real capture, never a new policy
   // selected from a later draft/configuration. The wrapper is only neutral lifecycle routing.
   const port: ExecutionPort = {
@@ -150,5 +151,6 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       },
     });
   }
-  return { runner, start, readiness: dependencies, journal };
+  return { runner, start, readiness: dependencies,
+    readinessForSettings: (settings: SettingsV2): RuntimeReadinessDependencies => ({ execution: { readiness: readinessFor(structuredClone(settings)) }, probe: prepared }), journal };
 }

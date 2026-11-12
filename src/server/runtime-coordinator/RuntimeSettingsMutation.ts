@@ -34,12 +34,13 @@ export class RuntimeSettingsMutation {
         receipt.workspaceVersion !== stage.result.workspaceVersion || !['OK','DUPLICATE'].includes(receipt.status))
       throw Error('Actual SAVE receipt does not prove the original staged response');
   }
-  async execute(original: SaveSettingsInput, buildOriginal: (lease: SettingsWriteLease, files: FileEntry[]) => ProjectV2): Promise<MutationOutcome<ProjectV2>> {
+  async execute(original: SaveSettingsInput, buildOriginal: (lease: SettingsWriteLease, files: FileEntry[]) => ProjectV2, committed?: () => void, prepare?: () => Promise<void>): Promise<MutationOutcome<ProjectV2>> {
     const input = structuredClone(original), identity = this.identity(input.request);
     // Capture BEFORE durable admission yields; Store request has no epoch field. A Veto
     // between journal reservation and authority FIFO admission must not adopt the new epoch.
     const epoch = this.core.session.state.controlEpoch;
     return this.journal.execute(identity, async () => {
+      await prepare?.();
       const receipt = await this.core.settingsAuthority.saveStaged(this.core.settingsStore, input, (actualIdentity, lease) => {
         lease.assertCurrent();
         if (this.core.session.state.controlEpoch !== epoch) throw Error('Original SAVE control epoch was revoked');
@@ -51,7 +52,7 @@ export class RuntimeSettingsMutation {
         if (canonical(project.files) !== canonical(files)) throw Error('Original SAVE file projection changed');
         lease.assertCurrent();
         this.journal.stageSettings(identity, { identity: structuredClone(actualIdentity), result: project });
-      });
+      }, committed);
       const stage = this.journal.readSettingsStage<ProjectV2>(identity);
       if (!stage) throw Error('Store committed without original SAVE result stage');
       this.validateStage(input.request, stage); this.validateReceipt(stage, receipt);

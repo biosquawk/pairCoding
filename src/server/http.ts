@@ -14,8 +14,8 @@ import type { Settings } from '../shared/protocol';
 import {projectRunFacts, type RunFacts} from './coach/runFacts';
 import type { ChatEntry, CoachDecision, Proposal, Report, Run } from '../shared/protocol';
 import { apiError, CommandLedger, TransportError, validateRequest, type CommandLedgerOptions, type ClientMessage } from './transport';
-import { validateV2Request } from '../shared/validation-v2';
-import type { ProjectV2, SessionBundleV2 } from '../shared/runtime-v2';
+import { validateReconcileMutationRequestV2, validateMutationOutcomeV2, validateV2WireShape, validateV2Request } from '../shared/validation-v2';
+import type { ProjectV2, SessionBundleV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import type { LanguageView } from '../shared/language-v2';
 import { createRuntimeExecution } from './runtime-coordinator/RuntimeExecution';
 import { createRuntimeExecutionLayout } from './runtime-coordinator/RuntimeExecutionLayout';
@@ -24,7 +24,12 @@ import type { DockerTransport } from './execution/DockerTransport';
 import type { RuntimeEnvironment, RuntimeReadinessDependencies } from './runtime-config';
 import { createRuntimeStartup, requireRuntimeWorkspace, type RuntimeStartup } from './runtime-coordinator/RuntimeStartup';
 import { validateRuntimeOpenProjectRequest, validateRuntimeClientMessage } from './runtime-coordinator/RuntimeHttpValidation';
-import { readRuntimeProject } from './runtime-coordinator/RuntimeProject';
+import { readRuntimeProject, applyRuntimeSettingsMetadata } from './runtime-coordinator/RuntimeProject';
+import { aggregateRuntimeReadiness } from './runtime-config';
+import { RuntimeSettingsMutation } from './runtime-coordinator/RuntimeSettingsMutation';
+import { DurableMutationJournal } from './runtime-coordinator/MutationJournal';
+import { RuntimeClientOwnership } from './runtime-coordinator/RuntimeClientOwnership';
+import type { ReconcileMutationRequestV2 } from '../shared/runtime-mutation-v2';
 
 /** Network AI receives structural Run facts, never local stdout/stderr or future Run fields. */
 export type ReportAIFacts = Pick<FrozenFacts, 'session'|'snapshot'|'chat'|'events'> & {
@@ -159,6 +164,77 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     }
     return project;
   }
+  function assertMutationScope(bound:RuntimeStartup, clientId:string) {
+    if(startup!==bound || transitioning || closing) fail(409,'PROJECT_STATE_CHANGED','Mutation binding changed; retain the exact original request.');
+    currentCore().session.assertClient(clientId,currentCore().session.state.sessionId);
+  }
+  function languageProjection(bound:RuntimeStartup):LanguageView {
+    return {projectId:requireRuntimeWorkspace(bound).workspace.projectId,
+      profileId:bound.configuration.resolved?.profile.id ?? 'unconfigured',configurationGeneration:bound.configuration.configurationGeneration,
+      providerGeneration:'unavailable',state:'OFF',autocomplete:'OFF',docs:'N/A',
+      problem:{code:'LANGUAGE_PROVIDER_UNAVAILABLE',message:'Language provider composition is not available.',
+        recovery:'Keep editing; language runtime integration is required before completion can be enabled.',retryable:true}};
+  }
+  async function saveSettings(original:UpdateSettingsRequestV2):Promise<ProjectV2> {
+    const request=clone(original), bound=startup, owner=binding!, core=currentCore();
+    assertMutationScope(bound,request.clientId);core.session.assertClient(request.clientId,request.sessionId);
+    owner.clients.assertBound(request.clientId,request.sessionId);
+    const epoch=core.session.state.controlEpoch, source=core.readSettings(), configuration=bound.configuration;
+    const runtime=owner.runtime;
+    const assertAdmission=()=>{
+      assertMutationScope(bound,request.clientId);core.session.assertClient(request.clientId,request.sessionId);
+      if(core.session.state.controlEpoch!==epoch || core.session.state.writeOwner!=='STUDENT') fail(409,'WRITE_OWNER_CONFLICT','Student control changed during SAVE.');
+      if(bound.configuration!==configuration || core.workspace.workspaceVersion!==request.expectedWorkspaceVersion ||
+          core.readSettings().sourceSha256!==source.sourceSha256) fail(409,'PROJECT_STATE_CHANGED','SAVE source/version/configuration changed.');
+    };
+    let capabilities:ProjectV2['capabilities']|undefined;
+    const operation=owner.saves.execute({request,humanConfirmed:true,expectedSourceSha256:source.sourceSha256},(lease,files)=>{
+      lease.assertCurrent();assertAdmission();
+      if(!capabilities) throw Error('No prepared original SAVE capabilities');
+      const project:ProjectV2={projectId:core.workspace.projectId,rootPath:core.workspace.rootPath,sessionId:request.sessionId,
+        workspaceVersion:request.expectedWorkspaceVersion+1,files,settings:clone(request.settings),capabilities:clone(capabilities)};
+      if(!validateV2WireShape('Project',project)) throw Error('Invalid original postcommit Project');
+      return project;
+    },()=>{
+      // Called by actual authority AFTER durable commit, under the same root exclusion and BEFORE
+      // publishing the new version. No late-response/stale UI application to a replacement core.
+      applyRuntimeSettingsMetadata(core.workspace,request.settings);
+    },async()=>{
+      assertAdmission();
+      const execution=await aggregateRuntimeReadiness(configuration,request.settings,
+        options.runtimeReadiness ?? runtime?.readinessForSettings(request.settings) ?? {
+          execution:{readiness:async()=>{throw owner.runtimeError ?? Error('Execution unavailable');}},probe:bound.prepared});
+      assertAdmission();
+      const language=languageProjection(bound);
+      if(owner.runtimeError) {
+        const problem={code:'RUNTIME_STATE_UNAVAILABLE',message:'Execution state cannot be safely initialized.',
+          recovery:'Repair canonical private runtime storage. Manual editing remains available.',retryable:true};
+        execution.runtime.state='CONFIG_ERROR';execution.runtime.problem=problem;
+        execution.modes={RUN_MAIN:{canRun:false,problem},RUN_TESTS:{canRun:false,problem}};
+      }
+      capabilities={execution,language};
+    });
+    const outcome=await owner.track(operation);
+    if(outcome.state==='UNKNOWN') fail(503,'MUTATION_OUTCOME_UNKNOWN','Retain the exact original SAVE and reconcile its durable outcome before any new RUN/SAVE.');
+    if(outcome.state==='DEFINITIVELY_ABORTED') fail(409,'MUTATION_DEFINITIVELY_ABORTED','The original SAVE was definitively aborted. Refresh state before a new request.');
+    return clone(outcome.result);
+  }
+  async function reconcileMutation(body:ReconcileMutationRequestV2) {
+    const mutation=clone(body.mutation), bound=startup, owner=binding!, core=currentCore(), request=mutation.request;
+    assertMutationScope(bound,request.clientId);
+    if(mutation.projectId!==core.workspace.projectId) fail(403,'MUTATION_SCOPE_FORBIDDEN','Cannot reconcile a mutation from another project.');
+    owner.clients.assertBound(request.clientId,request.sessionId);
+    const operation=mutation.kind==='SAVE' ? owner.saves.recover(mutation.request) : owner.mutations.reconcile({
+      projectId:mutation.projectId,sessionId:request.sessionId,clientId:request.clientId,requestId:request.requestId,kind:'RUN',payload:request});
+    const outcome=await owner.track(operation);
+    assertMutationScope(bound,request.clientId);
+    // UNKNOWN must NOT supply a current snapshot as if it proved the original effect.
+    const current=outcome.state==='UNKNOWN' ? null : {project:await getProject(),run:null};
+    assertMutationScope(bound,request.clientId);
+    const response={mutation,...outcome,current};
+    if(!validateMutationOutcomeV2(response)) throw Error('Actual reconcile result violates the frozen contract');
+    return response;
+  }
   async function getBundle():Promise<SessionBundleV2> {
     const bound=startup, settingsHash=currentCore().readSettings().sourceSha256, project=await getProject();
     if(startup!==bound) fail(409,'PROJECT_STATE_CHANGED','Project binding changed.');
@@ -182,12 +258,16 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   }
   type Core = ReturnType<typeof currentCore>;
   // Preparation owns its core, listeners and services. Nothing may publish to the old binding.
-  function prepareBinding(core:Core, owner:RuntimeStartup) {
+  async function prepareBinding(core:Core, owner:RuntimeStartup) {
     const {workspace:boundWorkspace,session:boundSession}=core;
     let active=false, disposed=false;
     let boundCoach:CoachService|undefined, boundExecution:ExecutionServices|undefined;
     let boundReports:ExecutionServices['reports']|undefined;
     let boundRuntime: ReturnType<typeof createRuntimeExecution> | undefined, runtimeError:unknown;
+    let mutations:DurableMutationJournal|undefined, clients:RuntimeClientOwnership|undefined;
+    let saves:RuntimeSettingsMutation|undefined;
+    const pending=new Set<Promise<unknown>>();
+    function track<T>(operation:Promise<T>):Promise<T> {pending.add(operation);void operation.finally(()=>pending.delete(operation)).catch(()=>{});return operation;}
     const listeners:{source:WorkspaceService|SessionController;event:string;handler:(...args:any[])=>void}[]=[];
     const publish=(type:string,payload:unknown)=>{if(active)emit(type,payload);};
     const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);},
@@ -195,8 +275,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     const on=(source:WorkspaceService|SessionController,event:string,handler:(...args:any[])=>void)=>{
       source.on(event,handler);listeners.push({source,event,handler});
     };
-    function dispose() {
+    async function dispose() {
       if(disposed)return;disposed=true;active=false;
+      await Promise.allSettled([...pending]);
+      await mutations?.close();
       // Continue cleanup even if a closing report cannot persist INTERRUPTED on a failed disk.
       for(const {source,event,handler} of listeners)source.off(event,handler);
       try {boundCoach?.close();} finally {
@@ -204,6 +286,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }
     }
     try {
+      // One canonical journal per real project, independent of config/daemon readiness.
+      mutations=new DurableMutationJournal(path.join(boundWorkspace.dataDir,'runtime-mutations'));
+      clients=new RuntimeClientOwnership(path.join(boundWorkspace.dataDir,'runtime-clients'),boundWorkspace.projectId);
+      saves=new RuntimeSettingsMutation(core,mutations);
       if(options.enableExecution && owner.configuration.resolved) {
         try {
           const layout = createRuntimeExecutionLayout(path.join(path.dirname(owner.configuration.resolved.configPath), '.paircoach-runtime'),
@@ -230,18 +316,18 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       on(boundWorkspace,'watcherError',(error:unknown)=>publish('ERROR',apiError(error)));
       on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
       on(boundSession,'veto',()=>boundCoach?.abort());
-      return {execution:boundExecution,runtime:boundRuntime,runtimeError,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
-    } catch(error) {dispose();throw error;}
+      return {execution:boundExecution,runtime:boundRuntime,runtimeError,mutations,clients,saves,track,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
+    } catch(error) {await dispose();throw error;}
   }
-  let binding:ReturnType<typeof prepareBinding>|undefined;
+  let binding:Awaited<ReturnType<typeof prepareBinding>>|undefined;
   // Catch immediately to avoid an unhandled rejection if the caller has not called listen yet.
-  const initialized = constructStartup(options.rootPath).then(value => {
+  const initialized = constructStartup(options.rootPath).then(async value => {
     startup=value;
     try {
       if(closing) {value.close();return {error:new TransportError(503,'SESSION_CLOSED','Server closed during recovery.')};}
       if(value.core) {
         ({workspace,session,gate}=value.core);
-        binding=prepareBinding(value.core,value);binding.activate();
+        binding=await prepareBinding(value.core,value);binding.activate();
       }
       return {error:null};
     } catch(error) { value.close();return {error}; }
@@ -403,6 +489,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         } else fail(404,'NOT_FOUND','Nieznany endpoint.');
         respond(res,200,value);return;
       }
+      if(req.method==='POST' && url.pathname==='/api/runtime/mutation/reconcile') {
+        const body:unknown=await readBody(req);
+        if(!validateReconcileMutationRequestV2(body)) fail(400,'VALIDATION_ERROR','Reconcile requires the exact original immutable request.');
+        respond(res,200,await reconcileMutation(body as ReconcileMutationRequestV2));return;
+      }
       const routes:Record<string,[string,number]>={
         'POST /api/project/open':['OpenProjectRequest',201], 'PUT /api/project/settings':['UpdateSettingsRequest',200],
         'POST /api/file':['FileOperationRequest',200], 'POST /api/session/start':['StartSessionRequest',200],
@@ -421,6 +512,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         respond(res,route[1],await op.result);return;
       }
       if(url.pathname!=='/api/project/open') session.assertClient(body.clientId,body.sessionId);
+      if(url.pathname==='/api/project/settings') {
+        // Durable result authority, not an expiring in-memory HTTP receipt.
+        respond(res,200,await saveSettings(body as UpdateSettingsRequestV2));return;
+      }
       const commandLedger=url.pathname==='/api/project/open' ? openLedger : ledger;
       const operation=commandLedger.run(`HTTP:${body.requestId}`,{route:key,body},async()=>{
         if(closing) fail(503,'SESSION_CLOSED','Serwer zamyka sesję.');
@@ -430,17 +525,18 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           if(startup.core?.session.leaseClientId && startup.core.session.leaseClientId!==body.clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
           if(transitioning) fail(409,'SESSION_TRANSITION','Project transition is already in progress.');
           transitioning=true;
-          let next:RuntimeStartup|undefined, prepared:ReturnType<typeof prepareBinding>|undefined, adopted=false;
+          let next:RuntimeStartup|undefined, prepared:Awaited<ReturnType<typeof prepareBinding>>|undefined, adopted=false;
           try {
             // Reserve transition BEFORE awaiting construction/recovery. GET/snapshot refuses mixed bindings.
             if(startup.core && path.resolve(body.rootPath)===startup.core.workspace.rootPath) {
-              session.claimLease(body.clientId); transitioning=false; return await getProject();
+              session.claimLease(body.clientId); binding!.clients.bind(body.clientId,session.state.sessionId); transitioning=false; return await getProject();
             }
             next=await makeCore(body.rootPath);
             const nextCore=requireRuntimeWorkspace(next);
             // Open is NOT a settings SAVE. Its opening form is never authority or persisted.
             nextCore.session.claimLease(body.clientId);
-            prepared=prepareBinding(nextCore,next);
+            prepared=await prepareBinding(nextCore,next);
+            prepared.clients.bind(body.clientId,nextCore.session.state.sessionId);
             await execution?.runner.stopAll();
             await runtimeExecution?.runner.stopAll();
             if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
@@ -450,17 +546,16 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             previousLedger.retire();previousProposals.retire();
             chat=[];proposals=[];report=null;lastRun=null;facts.length=0;
             // ONE global sequence, including project changes; never reuse old sequence numbers.
-            try {if(previous)previous.dispose();else previousStartup.close();} catch { /* adopted authority is not rolled back */ }
+            try {if(previous)await previous.dispose();else previousStartup.close();} catch { /* adopted authority is not rolled back */ }
             binding.activate();
             for(const [ws,p] of peers) {p.authenticated=false;p.handshakeGeneration=null;ws.close(1012,'Project changed; reconnect');}
             transitioning=false;
             return await getProject();
           } finally {
-            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.runner.stopAll();prepared.dispose();}else next.close();}}
+            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.runner.stopAll();await prepared.dispose();}else next.close();}}
             finally {transitioning=false;}
           }
         }
-        if(url.pathname==='/api/project/settings') fail(503,'RUNTIME_MUTATION_NOT_COMPOSED','Durable original SAVE outcome composition is not yet available; no settings were written.');
         if(url.pathname==='/api/file') { await gate.mutateAsync({...body,actor:'STUDENT'});await snapshot();return getProject(); }
         if(url.pathname==='/api/session/start') { const state=session.start(body.limitMs,body.pauseOnHidden);coach?.trigger('START');return clone(state); }
         if(url.pathname==='/api/run') fail(503,'RUNTIME_MUTATION_NOT_COMPOSED','Neutral Run and durable original admission outcome composition is not yet available. No host fallback exists.');
@@ -553,6 +648,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(!sameToken(message.payload.token)) { ws.close(1008,'Unauthorized');return; }
         if(message.sessionId!==session.state.sessionId) fail(409,'SESSION_CONFLICT','Sesja uległa zmianie.');
         if(!session.claimLease(message.clientId)) {ws.close(1008,'Lease conflict');return;}
+        try {binding!.clients.bind(message.clientId,message.sessionId);} catch(error) {session.releaseLease(message.clientId);throw error;}
         const helloGeneration=randomUUID(), helloBinding=startup;
         peer.clientId=message.clientId;peer.handshakeGeneration=helloGeneration;peer.leaseSession=session;
         // Revoke a prior same-client peer BEFORE any new snapshot/control publication.
@@ -678,7 +774,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       try {
         await execution?.runner.stopAll();await runtimeExecution?.runner.stopAll();
       } finally {
-        try {if(binding)binding.dispose();else if(!result.error)startup.close();} finally {
+        try {if(binding)await binding.dispose();else if(!result.error)startup.close();} finally {
           for(const [ws,p] of peers){p.authenticated=false;ws.terminate();}wss.close();
           if(server.listening)await new Promise<void>((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
         }
