@@ -3,39 +3,109 @@
 import { Worker, MessageChannel, receiveMessageOnPort, isMainThread, workerData, parentPort } from 'node:worker_threads';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
 
 const clean = s => String(s).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '');
 export function prepareProgress(event) {
   process.stderr.write(`[prepare ${new Date().toISOString()}] ${clean(event.phase)} ${clean(event.text ?? '')}\n`);
 }
+// Linux group readback uses kernel start times, not a reusable numeric PID/PGID alone.
+// A detached spawn owns its new group/session; record identities BEFORE sending TERM.
+function linuxProcess(pid) {
+  try {
+    const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = stat.slice(stat.lastIndexOf(')') + 2).trim().split(/\s+/);
+    return { pid: Number(pid), state: fields[0], group: Number(fields[2]), session: Number(fields[3]), start: fields[19] };
+  } catch (e) { if (['ENOENT', 'ESRCH'].includes(e.code)) return null; throw e; }
+}
+function linuxGroup(pid) {
+  try {
+    return fs.readdirSync('/proc').filter(name => /^\d+$/.test(name)).map(linuxProcess)
+      .filter(p => p && p.group === pid);
+  } catch { return null; } // Incomplete/unavailable readback never authorizes a signal.
+}
+const liveProcess = p => !['Z', 'X'].includes(p.state);
+const sameProcess = (a, b) => a && b && a.pid === b.pid && a.start === b.start && a.group === b.group && a.session === b.session;
+
 /** Actual asynchronous child transport; bounded output, no shell, hard kill escalation.
- * An aborted Docker CLI is UNKNOWN, not evidence that its daemon operation was undone. */
+ * An aborted Docker CLI is UNKNOWN, not evidence that its daemon operation was undone.
+ * Linux cancellation settles only after bounded owned-group kill/readback, not leader close.
+ * This is group containment, not a sandbox for descendants deliberately escaping the session. */
 export function spawnPrepareCommand(executable, argv, options, { signal, onProgress = () => {} } = {}) {
   return new Promise(resolve => {
     let stdout = '', stderr = '', error = null, timedOut = false, escalation, child;
+    let stopping = false, spawned = false, closed = false, settled = false, leaderIdentity, anchors;
+    let status = null, childSignal = null;
+    const linux = process.platform === 'linux';
+    const finish = processTree => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer); clearTimeout(escalation); signal?.removeEventListener('abort', abort);
+      if (processTree && !closed) processTree = 'UNKNOWN_RETAIN_AND_RECONCILE';
+      if (processTree === 'UNKNOWN_RETAIN_AND_RECONCILE') error = new Error(`${error?.message ?? 'Prepare interrupted'}; CLI process tree stop unconfirmed; retain/reconcile`);
+      // An escaped descendant holding pipes must not turn finite cancellation into a hang.
+      if (!closed) { child?.stdout?.destroy(); child?.stderr?.destroy(); child?.unref(); }
+      resolve({ status, signal: childSignal, error: error ? { message: error.message } : null, timedOut, stdout, stderr, ...(processTree ? { ownedProcessGroup: processTree } : {}) });
+    };
+    const groupState = () => {
+      const members = linuxGroup(child.pid);
+      if (!members) return 'UNKNOWN_RETAIN_AND_RECONCILE';
+      if (!members.some(liveProcess)) return 'STOPPED';
+      // At least one same kernel identity must still anchor this exact spawned session.
+      if (!anchors || !members.some(p => liveProcess(p) && anchors.some(a => sameProcess(a, p)))) return 'UNKNOWN_RETAIN_AND_RECONCILE';
+      return 'OWNED_LIVE';
+    };
     const killTree = hard => {
       if (!child?.pid) return;
+      if (!linux && (child.exitCode !== null || child.signalCode !== null)) return;
       if (process.platform === 'win32') {
-        // Only this spawned CLI PID/tree, never daemon names or unrelated containers.
+        // Unchanged Windows path; native tree termination is NOT verified by Linux tests.
         const killer = spawn(path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'taskkill.exe'), ['/PID', String(child.pid), '/T', '/F'], { shell: false, windowsHide: true, stdio: 'ignore' });
         const limit = setTimeout(() => killer.kill(), 2000);
         killer.on('error', () => {}); killer.on('close', () => clearTimeout(limit));
       } else {
+        if (linux && groupState() !== 'OWNED_LIVE') return;
+        // Without kernel identity readback, never escalate a reused PID after leader close.
+        if (!linux && closed) return;
         try { process.kill(-child.pid, hard ? 'SIGKILL' : 'SIGTERM'); } catch (e) { if (e.code !== 'ESRCH') error ??= e; }
       }
     };
-    const stop = reason => {
-      if (!error) error = reason;
-      if (child && child.exitCode === null && child.signalCode === null) {
-        killTree(false);
-        escalation ??= setTimeout(() => killTree(true), 1000);
+    const beginStop = () => {
+      if (escalation || !spawned) return;
+      if (linux) {
+        const members = linuxGroup(child.pid);
+        if (members?.some(p => sameProcess(p, leaderIdentity))) anchors = members.filter(p => p.session === child.pid);
       }
+      killTree(false);
+      escalation = setTimeout(() => {
+        killTree(true);
+        if (!linux) { if (closed) finish(); return; }
+        const deadline = Date.now() + 250;
+        const readback = () => {
+          const state = groupState();
+          if ((state === 'STOPPED' && closed) || state === 'UNKNOWN_RETAIN_AND_RECONCILE' || Date.now() >= deadline) {
+            finish(state === 'STOPPED' ? state : 'UNKNOWN_RETAIN_AND_RECONCILE');
+          } else escalation = setTimeout(readback, 25);
+        };
+        readback();
+      }, 1000);
+    };
+    const stop = reason => {
+      error ??= reason;
+      if (stopping) return;
+      stopping = true;
+      beginStop();
     };
     if (signal?.aborted) { resolve({ status: null, signal: null, error: { message: String(signal.reason) }, stdout, stderr }); return; }
     const abort = () => stop(new Error(String(signal.reason)));
     try { child = spawn(executable, argv, { env: options.env, shell: false, windowsHide: true, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] }); }
     catch (e) { resolve({ status: null, signal: null, error: { message: e.message }, stdout, stderr }); return; }
     const timer = setTimeout(() => { timedOut = true; stop(new Error('Prepare command timeout; daemon state retained/unknown')); }, options.timeout);
+    child.on('spawn', () => {
+      spawned = true;
+      if (linux) { try { leaderIdentity = linuxProcess(child.pid); } catch { /* unknown: do not signal */ } }
+      if (stopping) beginStop();
+    });
     signal?.addEventListener('abort', abort, { once: true });
     for (const [stream, name] of [[child.stdout, 'stdout'], [child.stderr, 'stderr']]) {
       stream.setEncoding('utf8');
@@ -48,9 +118,12 @@ export function spawnPrepareCommand(executable, argv, options, { signal, onProgr
       });
     }
     child.on('error', e => { error ??= e; });
-    child.on('close', (status, childSignal) => {
-      clearTimeout(timer); clearTimeout(escalation); signal?.removeEventListener('abort', abort);
-      resolve({ status, signal: childSignal, error: error ? { message: error.message } : null, timedOut, stdout, stderr });
+    child.on('close', (code, endedBy) => {
+      closed = true; status = code; childSignal = endedBy;
+      clearTimeout(timer); signal?.removeEventListener('abort', abort);
+      // Keep escalation alive even though the group's original leader has been reaped.
+      if (stopping && linux && spawned) return;
+      finish();
     });
     if (signal?.aborted) abort();
   });
