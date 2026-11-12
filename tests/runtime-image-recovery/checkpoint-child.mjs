@@ -10,9 +10,9 @@ Date.now=()=>realNow()+offset;
 const resultFile=path.join(config.dir,'result.json'), effect=()=>{effects++;put(path.join(config.dir,'effects.json'),{effects});};
 try {
  if(config.integration){
-  const f=await fixture({after:fn=>callbacks.push(fn)}), plan=await f.plan('checkpoint-only-output'),bytes=f.m.planBytes(plan),ph=hash(bytes),gb=Buffer.from(JSON.stringify(guard(plan,ph,f.dir))),model=dockerModel(plan);
+  const f=await fixture({after:fn=>callbacks.push(fn)}), plan=await f.m.buildRecoveryPlan({...f.o,outputRoot:path.join(f.dir,'checkpoint-only-output'),checkpointMode:'REQUIRED_V1'}),bytes=f.m.planBytes(plan),ph=hash(bytes),gb=Buffer.from(JSON.stringify(guard(plan,ph,f.dir))),model=dockerModel(plan);
   model.hook=args=>{if(args[0]==='ps')offset+=61001;if(args[0]==='tag'){effect();throw new Error('UNIT_STOP_AT_FIRST_MODELED_MUTATION');}};
-  try{await f.m.executeRecoveryPlan(bytes,ph,gb,hash(gb),{spawnSync:model.spawn});throw new Error('unexpected full prepare');}
+  try{await f.m.executeRecoveryPlan(bytes,ph,gb,hash(gb),{spawnSync:model.spawn,checkpointMode:'REQUIRED_V1'});throw new Error('unexpected full prepare');}
   catch(e){const receipt=json(path.join(plan.options.outputRoot,'receipt.json'));put(resultFile,{error:e.message,effects,receipt,readonlyCommands:model.calls.filter(a=>!['tag','pull','build','create','start','rm'].includes(a[0])).length,mutatingCommands:model.calls.filter(a=>['tag','pull','build','create','start','rm'].includes(a[0])),initialGuardAgeMs:Date.now()-JSON.parse(gb).observedAtMs,adaptedController:fs.readFileSync(f.file,'utf8')});if(e.message!=='UNIT_STOP_AT_FIRST_MODELED_MUTATION')process.exitCode=1;}
  } else {
   // Minimal UNIT scope, not a plan admission/host source proof. execute() builds full plan.

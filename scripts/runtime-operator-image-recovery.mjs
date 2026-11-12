@@ -100,11 +100,12 @@ function checkInventory(root, expected) {
   check(equal(value.files.map(({path,sha256})=>({path,sha256})),expected), 'literal original tools/project inventory differs');
   return summary(root,value);
 }
-/** Only these four locators are inputs. Historical proposal/cache bytes are anchored, not authority.
+/** Four historical locators plus an optional closed REQUIRED_V1 discriminator are inputs. Historical proposal/cache bytes are anchored, not authority.
  * New output may be relocated before freeze; input project/tool R1/R3 provenance may NOT change. */
 export async function buildRecoveryPlan(options) {
-  check(exact(options,['proposalFile','cacheSnapshotFile','producerRoot','outputRoot']), 'closed recovery options');
-  for (const v of Object.values(options)) check(typeof v==='string' && path.isAbsolute(v) && path.resolve(v)===v, 'canonical options');
+  const required=Object.hasOwn(options,'checkpointMode');
+  check(exact(options,['proposalFile','cacheSnapshotFile','producerRoot','outputRoot',...(required?['checkpointMode']:[])]) && (!required || options.checkpointMode==='REQUIRED_V1'), 'closed recovery options/checkpoint mode');
+  for (const v of [options.proposalFile,options.cacheSnapshotFile,options.producerRoot,options.outputRoot]) check(typeof v==='string' && path.isAbsolute(v) && path.resolve(v)===v, 'canonical options');
   const pb=read(options.proposalFile), cb=read(options.cacheSnapshotFile);
   check(digest(pb)===proposalHash && digest(cb)===cacheSnapshotHash, 'known original proposal/cache snapshot hashes required');
   const p=JSON.parse(pb), caches=JSON.parse(cb), sourceInventory=verifySource(options,p), m=await modules(options.producerRoot);
@@ -158,7 +159,7 @@ export async function buildRecoveryPlan(options) {
     historical:{proposal:fileProof(options.proposalFile),cacheSnapshot:fileProof(options.cacheSnapshotFile),evidence:[...evidence.values()],cacheInventories,protectedInventories},
     engine:p.engine,initialRequiredPins:p.initialRequiredPins,previousContainerIds:[...new Set(previousContainerIds)],jobs,limits:{...LIMITS},
     guardPolicy:{maxAgeMs:60000,minFreeBytes:15*1024**3,requiredMeasurements:['vm','physical','host'],storagePaths:{vm:'/',physical:'D:\\',host:path.dirname(options.outputRoot)},schema:['schemaVersion','operator','observedAtMs','planSha256','controllerSha256','closureSha256','base','engine','measurements','singleHeavyLane'],authority:'EXTERNAL_ROOT_MEASUREMENTS_ONLY_NOT_SELF_ADMISSION'},
-    checkpointPolicy:{protocol:'ROOT_FRESH_GUARD_V1',phase:'READONLY_PREFLIGHT_ALL9_COMPLETE_BEFORE_FIRST_MUTATION',maxWaitMs:120000,maxReplyBytes:65536,channel:'PRIVATE_ROOT_STDIN_PIPE_ONE_LF_FRAME_THEN_EOF'},
+    ...(required?{checkpointPolicy:{protocol:'ROOT_FRESH_GUARD_V1',phase:'READONLY_PREFLIGHT_ALL9_COMPLETE_BEFORE_FIRST_MUTATION',maxWaitMs:120000,maxReplyBytes:65536,channel:'PRIVATE_ROOT_STDIN_PIPE_ONE_LF_FRAME_THEN_EOF'}}:{}),
     readiness:'PREPARE_ONLY; separate K consumer binding and all offline/LSP/GUI/native checks still required'};
 }
 function assertProtected(plan) {
@@ -250,11 +251,14 @@ export function freshGuardBarrier(plan, planHash, deadline, audit, publish) {
   };
 }
 /** Programmatic injection is ONLY a Docker transport for modeled tests, never planner/prepare/guard
- * replacement. CLI has no env/argv module overrides. Real prepare and retention always execute. */
+ * replacement. REQUIRED_V1 explicitly selects the same real inherited-pipe barrier, never a
+ * caller callback. CLI only admits REQUIRED_V1. Legacy inline callers do not read stdin. */
 export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHash,dependencies={}) {
-  check(exact(dependencies,Object.hasOwn(dependencies,'spawnSync')?['spawnSync']:[]) && (!dependencies.spawnSync || typeof dependencies.spawnSync==='function'), 'only injected Docker transport permitted');
+  check(exact(dependencies,[...(Object.hasOwn(dependencies,'spawnSync')?['spawnSync']:[]),...(Object.hasOwn(dependencies,'checkpointMode')?['checkpointMode']:[])]) && (!Object.hasOwn(dependencies,'spawnSync') || typeof dependencies.spawnSync==='function') && (!Object.hasOwn(dependencies,'checkpointMode') || dependencies.checkpointMode==='REQUIRED_V1'), 'only Docker transport and explicit REQUIRED_V1 checkpoint selection permitted');
   check(Buffer.isBuffer(bytes) && /^[a-f0-9]{64}$/.test(expectedHash??'') && digest(bytes)===expectedHash, 'exact reviewed plan bytes hash required');
   const plan=JSON.parse(bytes);
+  const required=Object.hasOwn(plan.options,'checkpointMode');
+  check(required ? plan.options.checkpointMode==='REQUIRED_V1' && dependencies.checkpointMode==='REQUIRED_V1' : !Object.hasOwn(dependencies,'checkpointMode'), 'plan/invocation checkpoint mode mismatch; REQUIRED cannot downgrade');
   check(equal(plan,await buildRecoveryPlan(plan.options)), 'closed frozen recovery plan/source/scope changed');
   validateGuards(plan,expectedHash,guardBytes,guardHash,Date.now()); // initial guard still precedes FS/config writes
   const m=await modules(plan.options.producerRoot), root=plan.options.outputRoot, start=Date.now(), deadline=start+plan.limits.maxElapsedMs;
@@ -265,7 +269,17 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
   const endpoint=process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock';
   const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const knownPins=new Map(plan.initialRequiredPins.map(pin=>[pin.observedImage.Id,pin])), completedBuilds=new Set(), measuredJobs=new Map();
-  const checkpoint=freshGuardBarrier(plan,expectedHash,deadline,receipt.freshGuardCheckpoint={},save);
+  const checkpoint=required?freshGuardBarrier(plan,expectedHash,deadline,receipt.freshGuardCheckpoint={},save):{
+    beforeFirstMutation() {
+      const now=Date.now(), observed=JSON.parse(guardBytes).observedAtMs;
+      check(now>=observed && now-observed<=plan.guardPolicy.maxAgeMs,'guard expired before mutation');
+      validateGuards(plan,expectedHash,guardBytes,guardHash,now);
+    },
+    assertDispatchFreshness() {
+      const now=Date.now(), observed=JSON.parse(guardBytes).observedAtMs;
+      check(now>=observed && now-observed<=plan.guardPolicy.maxAgeMs && now<deadline,'guard expired/future before mutation dispatch');
+    },
+  }; // Legacy retains the genuine initial guard, with no handshake or refresh.
   let engineChecked=false,lastEngine=null;
   const wrappedSpawn=(exe,argv,options)=>{
     check(!stopped,'transport stopped; no later dispatch'); assertCommandBudget(receipt.commands.length,deadline);
@@ -354,7 +368,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
       m.assertImagePin(job.currentTagPin,oneImage(job.request.imageTag));
     }
     assertProtected(plan); // full ALL9 inventories fresh before FIRST mutation
-    await checkpoint.checkpoint(); // second EXTERNAL ROOT measurement, same inherited OS lane
+    if(required) await checkpoint.checkpoint(); // second EXTERNAL ROOT measurement, same inherited OS lane
     const retention=m.createImageRetention({engine:plan.engine,requiredPins:plan.initialRequiredPins,run,receipt,save});retention.retainRequired();
     fs.mkdirSync(path.join(root,'jobs'),{mode:0o700});
     for (const job of plan.jobs) {
@@ -387,11 +401,13 @@ if (process.argv[1] && path.resolve(process.argv[1])===self) {
   try {
     const args=process.argv.slice(2);
     if(args[0]==='execute') {
-      check(args.length===5,'execute PLAN.json SHA256 ROOT-GUARDS.json SHA256; separate K+ROOT admission required');
-      await executeRecoveryPlan(read(path.resolve(args[1])),args[2],read(path.resolve(args[3])),args[4]);
+      check(args.length===6 && args[1]==='--required-checkpoint-v1','execute --required-checkpoint-v1 PLAN.json SHA256 ROOT-GUARDS.json SHA256; separate K+ROOT admission required');
+      await executeRecoveryPlan(read(path.resolve(args[2])),args[3],read(path.resolve(args[4])),args[5],{checkpointMode:'REQUIRED_V1'});
     } else {
-      check(args.length===1 || args.length===2 && args[0]==='plan','[plan] OPTIONS.json (default read-only)');
-      const bytes=planBytes(await buildRecoveryPlan(json(path.resolve(args.at(-1)))));check(bytes.length<=4*1024*1024,'bounded plan stdout');process.stdout.write(bytes);
+      check(args.length===3 && args[0]==='plan' && args[1]==='--required-checkpoint-v1','plan --required-checkpoint-v1 OPTIONS.json (read-only; explicit REQUIRED_V1 options)');
+      const options=json(path.resolve(args[2]));
+      check(options.checkpointMode==='REQUIRED_V1','CLI requires hashbound REQUIRED_V1 options');
+      const bytes=planBytes(await buildRecoveryPlan(options));check(bytes.length<=4*1024*1024,'bounded plan stdout');process.stdout.write(bytes);
     }
   } catch(e) {console.error(e.message);process.exitCode=1;}
 }
