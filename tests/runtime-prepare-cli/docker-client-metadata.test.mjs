@@ -140,7 +140,19 @@ for (const kind of ['directory replacement', 'top symlink', 'nested symlink', 'h
 async function installedHelper(t) {
   const root = fixture(t), install = path.join(root, 'install');
   for (const dir of ['scripts', 'docker', 'runtimes']) fs.mkdirSync(path.join(install, dir), { recursive: true, mode: 0o700 });
-  for (const name of ['runtime-prepare','runtime-files','runtime-spec','runtime-dependencies','runtime-task','runtime-pom','runtime-cache','runtime-tools','runtime-artifacts']) fs.copyFileSync(path.join(repo, 'scripts', name + '.mjs'), path.join(install, 'scripts', name + '.mjs'));
+  // Keep actual helper/dispatcher bytes and their literal local import closure together.
+  // A missing production dependency must not turn an ownership assertion into an import error.
+  const copied = new Set();
+  function copyScript(name) {
+    if (copied.has(name)) return;
+    copied.add(name);
+    const source = path.join(repo, 'scripts', name), target = path.join(install, 'scripts', name);
+    fs.copyFileSync(source, target);
+    for (const [, relative] of fs.readFileSync(source, 'utf8').matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)['"](\.[^'"]+)['"]/g)) {
+      copyScript(path.posix.join(path.posix.dirname(name), relative));
+    }
+  }
+  for (const name of ['runtime-prepare','runtime-files','runtime-spec','runtime-dependencies','runtime-task','runtime-pom','runtime-cache','runtime-tools','runtime-artifacts']) copyScript(name + '.mjs');
   fs.copyFileSync(path.join(repo, 'docker/runtime.Dockerfile'), path.join(install, 'docker/runtime.Dockerfile'));
   const tools = path.join(root, 'tools'); fs.mkdirSync(path.join(tools, 'node_modules/unit'), { recursive: true, mode: 0o700 }); put(path.join(tools, 'node_modules/unit/x'), 'unit');
   const project = path.join(root, 'project'); fs.mkdirSync(project, { mode: 0o700 }); put(path.join(project, 'main.js'), 'unit');
@@ -161,7 +173,11 @@ test('actual nested helper shares owned client env through build and later comma
     metadataChild(argv[3], options, 'nested-' + calls.length, argv[4] === 'build'); calls.push(argv);
     const cmd = argv.slice(4);
     if (cmd[0] === 'build') built = true;
-    if (cmd[0] === 'image') return { status: null, error: new Error('UNIT unknown after build'), stdout: '', stderr: '' };
+    // Retention now checks the mutable tag before build; model its known absence.
+    // Preserve the adversarial UNKNOWN specifically after BUILD, as this case requires.
+    if (cmd[0] === 'image') return built
+      ? { status: null, error: new Error('UNIT unknown after build'), stdout: '', stderr: '' }
+      : { status: 1, stdout: '[]\n', stderr: 'Error response from daemon: No such image: ' + cmd[2] + '\n' };
     return { status: 0, stdout: cmd[0] === 'info' ? JSON.stringify(engine) : '', stderr: '' };
   };
   assert.throws(() => mod.prepare(request, true, Date.now() + 10000, engine, { endpoint: 'unix:///var/run/docker.sock', configDirectory: state.configDirectory, clientState: state, spawnSync: invoke }), /failed/);
