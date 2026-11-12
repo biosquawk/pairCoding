@@ -706,10 +706,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             const nextCore=requireRuntimeWorkspace(next);
             // Open is NOT a settings SAVE. Its opening form is never authority or persisted.
             nextCore.session.claimLease(body.clientId);
-            prepared=await prepareBinding(nextCore,next);
-            prepared.clients.bind(body.clientId,nextCore.session.state.sessionId);
+            // Reject an unsafe/unaccounted old owner before the next binding can
+            // create runtime state (its config parent may be the old workspace).
             await execution?.runner.stopAll();
             await stopRuntimeForTransition();
+            prepared=await prepareBinding(nextCore,next);
+            prepared.clients.bind(body.clientId,nextCore.session.state.sessionId);
             if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
             const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
             startup=next;({workspace,session,gate}=nextCore);binding=prepared;controlPreparing=false;
