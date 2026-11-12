@@ -196,7 +196,7 @@ export class LanguageShadowStore {
       dependencyInventorySha256: sha256(json(deps ? { files: deps.files, directories: deps.directories } : null)),
       files: files.sort(byPath), directories: [...directories].sort(), overlays: overlays.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) } };
   }
-  private atomicFile(path: string, bytes: Buffer): void {
+  private atomicFile(path: string, bytes: Buffer, deferDirectoryFlush = false): void {
     assertRealDirectory(dirname(path)); const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
     const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
     let written: import('node:fs').BigIntStats | undefined;
@@ -206,17 +206,36 @@ export class LanguageShadowStore {
         written = fstatSync(fd, { bigint: true });
         if (!written.isFile() || written.nlink !== 1n || written.size !== BigInt(bytes.length)) throw new Error('Invalid copy output');
       } finally { closeSync(fd); }
-      assertRealDirectory(dirname(path)); renameSync(temporary, path); this.durability.directory(dirname(path));
+      assertRealDirectory(dirname(path)); renameSync(temporary, path); if (!deferDirectoryFlush) this.durability.directory(dirname(path));
       const final = lstatSync(path, { bigint: true });
       if (!final.isFile() || final.isSymbolicLink() || final.dev !== written!.dev || final.ino !== written!.ino ||
         !readRegular(path, bytes.length).equals(bytes)) throw new Error('Language copy identity/readback mismatch');
     } catch (error) { try { chmodSync(temporary, 0o600); rmSync(temporary); } catch {} throw error; }
   }
-  private writeTree(workspace: string, manifest: ShadowManifest, contents: Map<string, Buffer>): void {
+  private writeTree(workspace: string, manifest: ShadowManifest, contents: Map<string, Buffer>, newUnlaunchedTree = false): void {
+    // Only a fresh, unmounted subtree can batch directory-entry durability. The caller publishes
+    // its manifest/handle AFTER this entire bottom-up flush, source revalidation and full readback.
+    // Active completion refresh deliberately retains the original per-file flush contract.
+    const directoryIdentities = new Map<string, import('node:fs').BigIntStats>();
+    const remember = (path: string): void => {
+      assertRealDirectory(path); directoryIdentities.set(path, lstatSync(path, { bigint: true }));
+    };
+    if (newUnlaunchedTree) remember(workspace);
     for (const dir of [...manifest.directories].sort((a,b) => a.split('/').length - b.split('/').length)) {
       const path = join(workspace, ...dir.split('/')); mkdirSync(path, { mode: 0o755, recursive: false }); assertRealDirectory(path);
+      if (newUnlaunchedTree) remember(path);
     }
-    for (const file of manifest.files) this.atomicFile(join(workspace, ...file.path.split('/')), contents.get(file.path)!);
+    for (const file of manifest.files) this.atomicFile(join(workspace, ...file.path.split('/')), contents.get(file.path)!, newUnlaunchedTree);
+    if (newUnlaunchedTree) {
+      const assertIdentity = (path: string, before: import('node:fs').BigIntStats): void => {
+        assertRealDirectory(path); const now = lstatSync(path, { bigint: true });
+        if (!now.isDirectory() || now.isSymbolicLink() || now.dev !== before.dev || now.ino !== before.ino)
+          throw new Error('Unlaunched language directory replaced before durability');
+      };
+      for (const [path, before] of [...directoryIdentities].sort(([a], [b]) => b.split(sep).length - a.split(sep).length)) {
+        assertIdentity(path, before); this.durability.directory(path); assertIdentity(path, before);
+      }
+    }
   }
   private revalidate(authority: LanguageSnapshotAuthority, captured: ReturnType<LanguageShadowStore['capture']>): void {
     const { lease, snapshot, source, deps } = captured;
@@ -250,7 +269,10 @@ export class LanguageShadowStore {
       mkdirSync(workspaceDirectory, { mode: 0o755 });
       // These are fresh disposable non-root LSP output directories; never a shared index or private journal.
       for (const path of [bootDirectory, stateDirectory]) { mkdirSync(path, { mode: 0o777 }); chmodSync(path, 0o777); }
-      this.writeTree(workspaceDirectory, manifest, contents); this.revalidate(authority, captured);
+      this.writeTree(workspaceDirectory, manifest, contents, true);
+      // Persist every fresh sibling and its parent entries before publishing the manifest or handle.
+      for (const path of [bootDirectory, stateDirectory, root, this.ownedRoot]) this.durability.directory(path);
+      this.revalidate(authority, captured);
       const wholeProjectManifestPath = join(root, 'manifest.json'), bytes = Buffer.from(json(manifest)); this.atomicFile(wholeProjectManifestPath, bytes);
       const shadow = freeze({ launchId, phase, workspaceDirectory, bootDirectory, stateDirectory, wholeProjectManifestPath,
         inputManifestSha256: sha256(bytes), manifest: freeze(manifest) });
