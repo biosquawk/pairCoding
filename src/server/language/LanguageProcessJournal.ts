@@ -170,8 +170,9 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
     const directories: { path: string; stamp: string; names: string[] }[] = [];
     const sources: { path: string; stamp: string }[] = [];
     let total = 0, entries = 0, policyUsed = false;
+    let internalFiles = 0;
     const store = (destination: string, bytes: Buffer): void => {
-      if (bytes.length > BOOT_FILE_LIMIT || total + bytes.length > BOOT_TOTAL_LIMIT || files.length >= 258)
+      if (bytes.length > BOOT_FILE_LIMIT || total + bytes.length > BOOT_TOTAL_LIMIT || files.length + internalFiles >= 258)
         throw new Error('Boot artifact selected budget limit');
       total += bytes.length;
       this.put(intent.launchId, artifactName(destination), bytes);
@@ -225,8 +226,9 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
       const required = Buffer.from(JSON.stringify({ version: BOOT_POLICY_VERSION, intentSha256: intentHash(intent) }));
       // Internal durable discriminator, not a caller/schema flag. Loss of policy plus a removed
       // receipt reference must not turn a new collection into an apparently historical legacy one.
-      if (total + required.length > BOOT_TOTAL_LIMIT) throw new Error('Boot artifact selected budget limit');
-      total += required.length;
+      // Reserve BOTH the internal marker and the receipt-visible policy within the original258.
+      if (total + required.length > BOOT_TOTAL_LIMIT || files.length + 2 > 258) throw new Error('Boot artifact selected budget limit');
+      total += required.length; internalFiles = 1;
       this.put(intent.launchId, BOOT_POLICY_REQUIRED, required);
       const policy = { requiredRecord: { name: BOOT_POLICY_REQUIRED, bytes: required.length, sha256: sha256(required) }, version: BOOT_POLICY_VERSION, intentSha256: intentHash(intent), launchId: intent.launchId,
         provider: intent.provider, imageId: intent.imageId,
@@ -276,6 +278,10 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
         throw new Error('Collection policy required record mismatch');
       if (policyRefs.length !== 1) throw new Error('Collection policy missing from receipt');
       if (policyBytes.length !== policyRefs[0].bytes || sha256(policyBytes) !== policyRefs[0].sha256) throw new Error('Collection policy changed during readback');
+      // Apply combined budgets only to new-policy receipts; historical schema1 guards stay exact.
+      if (receipt.collection.files.length + 1 > 258 ||
+        receipt.collection.files.reduce((sum, file) => sum + file.bytes, required.length) > BOOT_TOTAL_LIMIT)
+        throw new Error('Collection policy combined artifact budget limit');
       const policy = JSON.parse(policyBytes.toString('utf8'));
       if (policy.requiredRecord?.name !== BOOT_POLICY_REQUIRED || policy.requiredRecord.bytes !== required.length ||
         policy.requiredRecord.sha256 !== sha256(required) || policy.version !== BOOT_POLICY_VERSION || policy.intentSha256 !== receipt.intentSha256 || policy.launchId !== id ||

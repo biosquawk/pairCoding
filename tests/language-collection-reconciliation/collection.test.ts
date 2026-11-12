@@ -139,10 +139,10 @@ test('durable selected/policy corruption, missing policy and removed policy refe
   }
 });
 
-test('receipt file ceiling258 admits255 opaque boot leaves+streams+policy but rejects256, not a silent metadata exception', t => {
-  for (const count of [255, 256]) {
+test('combined artifact ceiling258 admits254 opaque leaves+streams+policy+marker but rejects255', t => {
+  for (const count of [254, 255]) {
     const f = fixture(t, false); for (let i = 0; i < count; i++) f.write(`${i}.opaque`, '');
-    if (count === 255) { const c = f.journal.collect(f.intent, logs); assert.equal(c.files.length, 258); f.journal.putReceipt(f.launchId, f.receipt(c)); assert.ok(f.journal.readReceipt(f.launchId)); }
+    if (count === 254) { const c = f.journal.collect(f.intent, logs); assert.equal(c.files.length + 1, 258); f.journal.putReceipt(f.launchId, f.receipt(c)); assert.ok(f.journal.readReceipt(f.launchId)); }
     else assert.throws(() => f.journal.collect(f.intent, logs), /budget/);
   }
 });
