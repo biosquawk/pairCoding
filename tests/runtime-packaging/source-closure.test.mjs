@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { requiredFiles as oldRequired, allowedSource, verifyAndCopy, verifyCopiedInputs } from '../../scripts/verify-source-revision.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const scripts = ['prepare-cli','prepare','language-prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates'].map(n => `scripts/runtime-${n}.mjs`);
+const scripts = ['prepare-cli','prepare','language-prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates','image-retention'].map(n => `scripts/runtime-${n}.mjs`);
 const assets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json', 'runtimes/pin-status.json',
   'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
