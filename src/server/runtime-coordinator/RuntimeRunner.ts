@@ -226,7 +226,10 @@ export class RuntimeRunner {
   }
   private uncertain(job: Job, code: string, message: string): void {
     if(this.active!==job)return;
-    job.run.status='PROCESS_STOP_UNCONFIRMED';job.run.processProblem=problem(code,message);this.emitState(job);
+    job.run.status='PROCESS_STOP_UNCONFIRMED';
+    // Frozen V2 couples this status to its canonical code. Keep the specific failed
+    // lifecycle operation in safe fixed text, never lie about finality or relax the validator.
+    job.run.processProblem=problem('PROCESS_STOP_UNCONFIRMED',code==='PROCESS_STOP_UNCONFIRMED'?message:`${code}: ${message}`);this.emitState(job);
   }
   private release(job: Job): void {
     clearTimeout(job.timer);clearInterval(job.poll);job.waitAbort.abort();

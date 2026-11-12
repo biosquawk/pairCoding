@@ -3,13 +3,14 @@ import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, open
   readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
 import path from 'node:path';
 import type { ChatEntry, Report, Run, Session, Snapshot } from '../shared/protocol';
+import type { RunV2 } from '../shared/runtime-v2';
 import { AppError } from './errors';
 import { validateRequest } from './transport';
 
 export const REPORT_SYSTEM_PROMPT = 'Podsumuj utrwaloną próbę według DATA-007. Oddziel fakty od oceny. Uwzględnij pomoc AI i granice dostępnych dowodów. Nie dopisuj nieprzeprowadzonych testów, diagnoz psychologicznych ani wyniku samodzielności bez danych. Maksymalnie 800 słów, jedna rekomendacja dalszej nauki.';
 
 export type FrozenFacts = {
-  session: Session; snapshot: Snapshot; runs: Run[]; chat: ChatEntry[]; events: unknown[];
+  session: Session; snapshot: Snapshot; runs: (Run | RunV2)[]; chat: ChatEntry[]; events: unknown[];
   [key: string]: unknown;
 };
 export type ReportSummary = Pick<Report, 'reportId'|'sessionId'|'status'|'reason'|'sourceWorkspaceVersion'|'snapshotId'|'generatedAt'>;
@@ -48,7 +49,7 @@ export class ReportService {
         !facts?.session || !facts.snapshot || !Array.isArray(facts.runs) || !Array.isArray(facts.chat) || !Array.isArray(facts.events) ||
         facts.session.lifecycle !== 'FINISHED' || facts.session.projectId !== facts.snapshot.projectId ||
         facts.session.workspaceVersion !== facts.snapshot.workspaceVersion ||
-        facts.runs.some(r => r.status === 'RUNNING' || r.status === 'QUEUED')) {
+        facts.runs.some(r => ['RUNNING','QUEUED','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.status))) {
       throw new AppError(409, 'REPORT_FACTS_NOT_FINAL', 'Najpierw zatrzymaj Run i utrwal końcowy snapshot zamkniętej sesji.');
     }
     this.assertProject(facts);

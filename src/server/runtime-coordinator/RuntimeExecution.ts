@@ -108,6 +108,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   const dependencies: RuntimeReadinessDependencies = { execution: port, probe: prepared };
   async function start(original: RunRequestV2, admitOriginal?: OriginalRunAdmission) {
     const request = structuredClone(original); check();
+    if(core.session.state.lifecycle==='FINISHED') throw new AppError(409,'SESSION_FINISHED','This session is finished; its Run/report facts are immutable.');
     core.session.assertClient(request.clientId, request.sessionId);
     const runtime = configuration.resolved, source = core.readSettings();
     if (!runtime || request.configurationGeneration !== configuration.configurationGeneration)
