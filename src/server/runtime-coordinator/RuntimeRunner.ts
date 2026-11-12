@@ -5,7 +5,7 @@ import type { AdapterOutcome, AcknowledgedRunInput, CollectedArtifacts, DurableT
   ExecutionExit, ExecutionHandle, ExecutionPlan, ExecutionPort, PlanContext, TaskRuntimeAdapter } from '../execution/ports';
 import { validateRunV2 } from '../../shared/validation-v2';
 import { AppError, validId } from '../errors';
-import { canonicalJson, sha256 } from '../execution/files';
+import { canonicalJson, sha256 } from '../runtimeIdentity';
 
 export interface RuntimeRunAdmission {
   projectId: string;

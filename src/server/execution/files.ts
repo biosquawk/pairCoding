@@ -4,9 +4,9 @@ import {
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import {
-  createHash, randomUUID
+  randomUUID
 } from 'node:crypto';
-export const sha256 = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
+export { canonicalJson, sha256 } from '../runtimeIdentity';
 export function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
@@ -94,21 +94,4 @@ export async function durableWrite(file: string, bytes: string) {
     throw e;
   }
   requireThat((await readRegular(file,Math.max(4*1024*1024,Buffer.byteLength(bytes)))).equals(Buffer.from(bytes)), 'Durable readback mismatch');
-}
-/** Stable identities are independent of object insertion order; only bounded plain JSON data is admitted. */
-export function canonicalJson(value:unknown):string {
-  let nodes=0;
-  function normalize(v:unknown,depth:number):unknown {
-    requireThat(++nodes<=100000&&depth<=64,'JSON structure limit');
-    if(v===null||typeof v==='string'||typeof v==='boolean')return v;
-    if(typeof v==='number'){
-      requireThat(Number.isFinite(v),'Nonfinite JSON number');
-      return v;
-    }
-    requireThat(typeof v==='object'&&v!==null,'Non-JSON value');
-    if(Array.isArray(v))return v.map(x=>normalize(x,depth+1));
-    requireThat(Object.getPrototypeOf(v)===Object.prototype||Object.getPrototypeOf(v)===null,'Nonplain JSON data');
-    return Object.fromEntries(Object.keys(v).sort().map(k=>[k,normalize((v as Record<string,unknown>)[k],depth+1)]));
-  }
-  return JSON.stringify(normalize(value,0));
 }
