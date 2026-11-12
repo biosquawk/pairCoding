@@ -151,12 +151,17 @@ export class LiveBackend {
       const p=this.project,s=this.session,e=p&&'execution' in p.capabilities?p.capabilities.execution:null,r=this.wiring.runtime.snapshot();
       if(!p||!s||!e)return null;
       const active=r.run&&['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.run.status);
+      const reason=!this.synced||this.stopped||this.ws?.readyState!==1||p.projectId!==s.projectId||p.sessionId!==s.sessionId?'Połącz i zsynchronizuj bieżący projekt przed przygotowaniem.':
+        s.lifecycle==='FINISHED'?'Sesja zakończona; przygotowanie niedostępne.':
+        s.writeOwner!=='STUDENT'||this.preparing||this.vetoPending?'Poczekaj na rozliczenie sterowania i Veto.':
+        this.finishAttempt||this.finishStarting||this.proposalDecision||this.pendingSteps.size?'Najpierw rozstrzygnij bieżącą operację sesji.':
+        this.saves.size||this.state.fileConflict||this.sourceRequests?'Poczekaj na potwierdzenie zapisu i rozstrzygnij konflikt pliku.':
+        r.pending||r.reconciliationRequired?'Najpierw rozstrzygnij bieżący Run lub zapis ustawień.':
+        active?'Zatrzymaj i rozlicz bieżące wykonanie przed przygotowaniem.':undefined;
       return {projectId:p.projectId,clientId:this.clientId,sessionId:s.sessionId,workspaceVersion:this.state.workspaceVersion,
         configurationGeneration:e.runtime.configurationGeneration,controlEpoch:s.controlEpoch,
         stamp:JSON.stringify([this.connectionGeneration,this.generation,this.lastSeq,this.maintenanceSourceRevision,p.files]),
-        allowed:this.synced&&!this.stopped&&this.ws?.readyState===1&&p.projectId===s.projectId&&p.sessionId===s.sessionId&&
-          s.lifecycle!=='FINISHED'&&s.writeOwner==='STUDENT'&&!this.preparing&&!this.vetoPending&&!this.finishAttempt&&!this.finishStarting&&
-          !this.proposalDecision&&!this.pendingSteps.size&&!this.saves.size&&!this.state.fileConflict&&!this.sourceRequests&&!r.pending&&!r.reconciliationRequired&&!active};
+        allowed:reason===undefined,reason};
     },requestId:id,publish:()=>this.publish(),
     post:body=>this.http('/api/runtime/service-network/prepare','POST',body),
     isAbsence:error=>error instanceof HttpRejectedError&&error.status===409&&!error.bodyUnreadable&&

@@ -13,7 +13,7 @@ export interface ServicePreparationState {
 interface Authority {
   projectId:string;clientId:string;sessionId:string;workspaceVersion:number;configurationGeneration:string;controlEpoch:number;
   /** Whole current binding/source/permissions vector. Never persisted or sent as authority. */
-  stamp:string;allowed:boolean;
+  stamp:string;allowed:boolean;reason?:string;
 }
 interface Entry {projectId:string;request:ServicePrepareRequest;receipt:PreparedReceipt|null;phase:'UNKNOWN'|'ABSENT'}
 interface Store {version:1;clientId:string;entries:Entry[]}
@@ -69,10 +69,12 @@ export class ServicePreparationV2 {
   private entry(a:Authority|null) {return a&&a.clientId===this.store.clientId?this.store.entries.find(e=>e.projectId===a.projectId):undefined;}
   snapshot():ServicePreparationState {
     const a=this.deps.current(),e=this.entry(a),uncertain=e?.phase==='UNKNOWN';
+    const notice=this.notice?.scope===a?.projectId?this.notice?.message:null;
+    const continuation=uncertain?'Wynik przygotowania nieznany. „Dokończ przygotowanie” wyśle dokładnie oryginalne żądanie. Jeśli serwer go nie otrzymał, może wykonać pierwsze przygotowanie; wcześniej przyjęte żądanie zostanie uzgodnione bez ponownego tworzenia.':null;
     return {pending:this.busy,blocked:this.busy||!!this.fault&&!!this.storage||uncertain,uncertain,
       canPrepare:!!a?.allowed&&!this.busy&&!this.fault&&!uncertain,
       canReconcile:!!a?.allowed&&!this.busy&&!this.fault&&uncertain,
-      message:this.fault??(this.notice&&this.notice.scope===a?.projectId?this.notice.message:null)??(uncertain?'Wynik przygotowania nieznany. „Dokończ przygotowanie” wyśle dokładnie oryginalne żądanie. Jeśli serwer go nie otrzymał, może wykonać pierwsze przygotowanie; wcześniej przyjęte żądanie zostanie uzgodnione bez ponownego tworzenia.':e?.phase==='ABSENT'?'Potwierdzono brak wykonania lub środowiska. Nowe przygotowanie wymaga osobnego kliknięcia.':null)};
+      message:this.fault??([notice,continuation,!a?.allowed?a?.reason:null,e?.phase==='ABSENT'&&!notice?'Potwierdzono brak wykonania lub środowiska. Nowe przygotowanie wymaga osobnego kliknięcia.':null].filter(Boolean).join(' ')||null)};
   }
   private persist(next:Store) {
     if(!this.storage||this.fault)throw Error(this.fault??'Brak trwałego magazynu.');
