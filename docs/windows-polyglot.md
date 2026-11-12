@@ -1,6 +1,15 @@
 # PairCoach — profile i przykłady kontenerowe (Windows / WSL)
 
-**ETAP9: implementacja częściowa, PENDING_FINAL_QA — nie wydanie.**
+**ETAP9: IMPLEMENTED_PENDING_COHERENT_INTEGRATION_AND_FINAL_QA — nie wydanie.**
+**LIVE_NOT_RUN / ZIP_NOT_RUN; finalny spójny SHA: odłożony do integracji.**
+Zamrożony checkpoint przewodnika korzysta z publicznego kontraktu konsumenta
+`4903cffa80ef0b1faa9d3b23c382d9d8fc0d3021` (zależności:
+`7c54f6a6fac11e94f4afe0bbda112c09c8615708`,
+`3a5037822e0252d70cb9d740852fac9402480b04`,
+`d30af1df3352ed7312e7aa4d03903762bf25dbe2`). To **dependency-only**, nie odbiór
+całego backendu, języków ani gotowej paczki; nie trzeba czekać na ich freeze,
+żeby przygotować tę instrukcję. Poniższe komendy są instrukcją po integracji,
+nie zgodą na replay historycznych prepare ani dowodem ich wykonania.
 Ten dokument uzupełnia [start](windows-start.md) i [pakowanie](windows-package.md).
 Sprawdź rewizję wskazaną przez K oraz zaufany, przekazany niezależnie SHA256 manifestu.
 Sam ZIP, plan prepare, lokalny tag ani pusty `runtimes/images.lock.json` nie oznacza gotowości.
@@ -18,12 +27,21 @@ ich `node_modules` ani ścieżek bind mount. Zalogowany Codex trener/raport i lo
 ChatGPT są opisane w windows-start; prepare nie wymaga ani nie przekazuje kluczy AI.
 Nie instaluj hostowego JDK, Mavena ani Pythona i nie zmieniaj JAVA_HOME/PATH.
 
-Otwórz `paircoach.runtime.json` **w głównym katalogu aplikacji**. Domyślnie wskazuje
-`java-maven-21` i `./examples/java-pattern`. Ustaw `activeProfile` oraz `workspaceRoot`
-według tabeli poniżej. Wszystkie względne ścieżki konfiguracji (`workspaceRoot`,
+Otwórz rzeczywiście wybrany runtime config: jawny `--runtime-config <absolutny-plik>`
+albo domyślny `paircoach.runtime.json` **w katalogu aplikacji/modułu**, nigdy plik
+wyszukany w bieżącym cwd terminala. Repozytoryjny szablon wskazuje `java-maven-21`
+i `./examples/java-pattern`, ale jego obecność w paczce nie gwarantuje poprawności
+ani gotowości. Ustaw `activeProfile` oraz `workspaceRoot` według tabeli poniżej. Wszystkie względne ścieżki konfiguracji (`workspaceRoot`,
 `runtimeCatalog`, `imageLock`) liczone są od **pliku konfiguracji**, nie terminala.
 Katalog i lock to odpowiednio `./runtimes/catalog.json` i `./runtimes/images.lock.json`.
-Nie wpisuj domyślnego/fikcyjnego imageId ani digestu. `backend: docker`, `pullPolicy: never`.
+Nie wpisuj domyślnego/fikcyjnego imageId ani digestu. Dokładny RuntimeConfigV1 ma
+`schemaVersion: 1`, tekstowe `activeProfile`, `workspaceRoot`, `runtimeCatalog`, `imageLock`,
+`languageFeatures: { completion: boolean, diagnostics: boolean }` oraz
+`execution: { backend: "docker", pullPolicy: "never" }`; bez dodatkowych pól.
+Brak/niepoprawny config oznacza `CONFIG_ERROR`, nie automatyczny prepare lub host fallback.
+Jeśli brak również rzeczywistej ścieżki projektu, odpowiedź `PROJECT_OPEN_REQUIRED`
+wymaga jawnego otwarcia istniejącego projektu przez obecne GUI / `POST /api/project/open`;
+nie twórz zastępczej sesji/workspace. Ręczna edycja i recovery pozostają oddzielne od Run.
 
 Priorytet profilu: `PAIRCOACH_RUNTIME_PROFILE` > `activeProfile`.
 Priorytet workspace: jawne otwarcie projektu w GUI > `PAIRCOACH_WORKSPACE_DIR` > `workspaceRoot`.
@@ -199,6 +217,30 @@ npm.cmd start -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoo
 ```
 
 Dla samego serwera: `npm.cmd run server -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot`.
+Oba skrypty uruchamiają `tsx src/server/index.ts`; rzeczywisty serwer oczekuje na listen
+przed wypisaniem `http://127.0.0.1:<port>`. Użyj tego adresu, nie zgadywanego portu;
+token nie jest wypisywany. Zmiany Coach/collector nie zmieniają tego publicznego CLI.
+Flagi i wartości podawaj osobno (nie `--flaga=wartosc`). Config i receipt najwyżej raz,
+prepared roots 0–16: absolutne, kanoniczne, różne, rozłączne, bez przecinka.
+Nieznane flagi, powtórzony config/receipt lub root, brak wartości, ścieżki względne
+lub znaki sterujące są odrzucane; powtarzanie `--prepared-runtime` jest dozwolone
+dla różnych rozłącznych roots w podanym limicie. Nie ma flag CLI installationId, engine ani network.
+
+Dla włączonego zdalnego JDT/pylsp potrzebny jest dodatkowo **autentyczny receipt LANGUAGE**
+z jawnie dopuszczonego producenta, nie receipt Run, image lock ani plik napisany ręcznie:
+
+```powershell
+# Tylko gdy taki prawdziwy LANGUAGE receipt zostal juz przygotowany i dopuszczony.
+$languageReceipt = (Resolve-Path (Read-Host 'Pelna sciezka autentycznego LANGUAGE receipt')).Path
+npm.cmd run server -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot --language-receipt $languageReceipt
+```
+
+To wariant startu zamiast poprzedniej komendy, nie drugi równoległy serwer.
+W WSL opcjonalne `--language-receipt <ABS-WSL-LANGUAGE-receipt>` ma tę samą semantykę.
+Sam selektor/istnienie receipt nie daje language READY: konsument weryfikuje rzeczywisty
+engine, obraz, narzędzia, Config i zależności. Gdy `completion` i `diagnostics` są oba
+`false`, język jest OFF, bez zdalnego zasobu; ręczny zapis działa dalej. Włączone tylko
+jedno pole nie upoważnia do uruchomienia drugiej funkcji. Nie wymuszaj flag ani READY.
 W WSL użyj `npm start -- --runtime-config <ABS-WSL-runtime-config.json>
 --prepared-runtime <ABS-WSL-jobs/profile>`; oba selektory muszą pochodzić z tego samego
 środowiska przygotowania, nie mieszanego Windows/WSL. Jawny `--runtime-config` wybiera
@@ -231,8 +273,14 @@ Stan ma trafić do `<config-dir>/.paircoach-runtime/projects/<sha256(UTF8 canoni
 z `installation.json`, `runs`, `journal`: prywatny, kanoniczny, bez linków i rozłączny
 w obie strony z oryginalnym workspace oraz zatwierdzonymi read-only prepared/cache roots.
 To nie nowe pole JSON ani flaga. Nie wybieraj writable state przez `--prepared-runtime`.
-Stabilny installationId i dziennik mają przetrwać restart; konflikt/częściowy stan wymaga
-recovery, nie resetu tożsamości. UNBOUND nie tworzy katalogu ani fikcyjnego projektu.
+Pierwszy rzeczywisty binding serwera wywołuje `retainRuntimeExecutionLayout` z dataDir
+tego projektu i `<dirname(runtimeConfigPath)>/.paircoach-runtime`. Tworzy i utrwala UUID
+raz dla dokładnych canonicalWorkspaceRoot/projectId w powyższym `installation.json`.
+Oryginalny `<project-dataDir>/runtime-execution-layout.json` kotwiczy kolejne uruchomienia:
+nie nadpisuj go i nie przenoś stanu przy zmianie config. To **TA SAMA installationId**
+dla Run, service prepare, readiness i language owner — nie wartość wybierana przez operatora,
+klienta lub CLI. Stabilny installationId i dziennik mają przetrwać restart;
+konflikt/częściowy stan wymaga recovery, nie resetu tożsamości. UNBOUND nie tworzy katalogu ani fikcyjnego projektu.
 Gdy położenie config powoduje overlap lub brak zapisu, Run ma pokazać `CONFIG_ERROR`;
 HTTP, ręczny edytor i recovery działają dalej. Użyj rzeczywistego runtime config poza
 konfliktującym projektem/read-only root, nie ukrytego fallbacku. Settings/dataDir/tmp
@@ -252,20 +300,103 @@ Run/Test mają `network=none` i read-only zatwierdzony cache. Spring RUN_MAIN wy
 musi potwierdzić dokładną tożsamość, `Internal===true` i `Driver==='bridge'`.
 Wbudowana zewnętrzna sieć Docker `bridge` **nie spełnia** tego warunku. Nie twórz sieci
 z zadania, nie wybieraj host/arbitrary network. Brak tej sieci daje czytelny not-ready
-wyłącznie trybu service, nie trwałe wyłączenie Spring. Osobne jawne przygotowanie sieci
-i jego dowód pozostają **pending integration** — obecne CLI/prepare 5a0f nie
-przygotowuje tej sieci. Potrzebna jest jawna publiczna ścieżka prepare powiązana
-z TĄ SAMĄ stabilną tożsamością instalacji backendu, bez drugiego installationId.
-Brak tu zamrożonej publicznej komendy; nie zastępuj jej ręcznym `docker network create`.
+wyłącznie trybu service, nie trwałe wyłączenie Spring. Jawny publiczny kontrakt przygotowania tej sieci
+jest już zamrożony poniżej; **źródło nie jest dowodem rzeczywistego service PASS**.
 Port wyłącznie 127.0.0.1, health, twardy Stop i orphan recovery pozostają obowiązkowe.
-To zatwierdzone defaults v2, nie potwierdzenie aktualnego HTTP/index/Runner ani service PASS.
+
+## 2b. Spring: jawne przygotowanie sieci TEJ SAMEJ instalacji
+
+Po przygotowaniu runtime i starcie **rzeczywistego** serwera otwórz ten sam projekt
+i zwiąż klienta/sesję zwykłym uwierzytelnionym HELLO. Nie ma tu nowego przycisku GUI,
+komendy npm ani endpointu readiness. Jest istniejąca jawna operacja maintenance:
+**`POST /api/runtime/service-network/prepare`**, do rzeczywistego adresu loopback serwera,
+`Content-Type: application/json`, z istniejącym lokalnym `Authorization: Bearer …`
+i zasadami Host/Origin. Używaj autoryzowanego transportu tej aplikacji; nie pozyskuj tokenu
+z logu, nie wysyłaj go na zewnątrz i nie twórz nowej sesji tylko dla tej operacji.
+
+Przed wysłaniem odczytaj aktualne powiązanie klienta, sessionId/controlEpoch oraz
+workspaceVersion/configurationGeneration z rzeczywistego projektu i WS HELLO/STATE_SYNC.
+Identyfikator requestId pochodzi z tej jawnej operacji związanego klienta. Zachowaj trwale
+**całe oryginalne ciało z requestId** przed wysłaniem. Poniżej typy pól, **nie gotowy JSON
+z przykładowymi UUID** — nie zgaduj ID, nie używaj timestamp ani identyfikatorów z innej sesji:
+
+```typescript
+// POST body: DOKLADNIE te szesc pol; stringi musza przejsc istniejace validId.
+type RuntimeNetworkPrepareRequest = {
+  requestId: string;
+  clientId: string;
+  sessionId: string;
+  expectedWorkspaceVersion: number; // safe integer >= 0
+  configurationGeneration: string;
+  controlEpoch: number; // safe integer >= 0
+}
+```
+
+Nie dodawaj installationId, network/name, engineId, ścieżek ani flag Docker.
+Przy aktywnym/nieuzgodnionym Run, pending mutations, nieaktualnej wersji/config/epoce,
+kontroli innej niż STUDENT lub zakończonym/zastąpionym bindingu operacja odmawia.
+Najpierw rozlicz tę konkretną operację/właściciela i zsynchronizuj bieżący stan;
+nie zmieniaj guardów. Maintenance nie uruchamia się samo ze startup, Run, settings
+ani odczytu gotowości. Serwer dobiera oryginalny layout i dokładny engine przed efektem.
+
+Sukces HTTP200 ma **dokładnie siedem pól** (`PreparedServiceNetwork`):
+
+```typescript
+type PreparedServiceNetwork = {
+  schemaVersion: 1;
+  status: 'PREPARED';
+  installationId: string;
+  projectId: string;
+  engineId: string;
+  name: string;
+  networkId: string;
+}
+```
+
+Odpowiedź pokazuje prawdziwą **TĘ SAMĄ installationId** serwera i sieć
+`paircoach-${installationId}-service`, z utrwalonym dowodem lokalnego internal bridge.
+Obca sieć, sama zgodna nazwa bez receipt albo zmieniona tożsamość/engine nie wystarcza.
+Nie generuj drugiej installationId, nie kasuj installation/journal i nie wykonuj
+ręcznego `docker network create`. `PREPARED` **nie oznacza READY** aplikacji ani Spring.
+
+Utrata odpowiedzi/restart/`SERVICE_NETWORK_OUTCOME_UNKNOWN`: zachowaj stan i oryginalne
+ciało. Uzgodnienie następuje tą samą trasą z **identycznym oryginalnym requestem**,
+przez read-first ledger i bieżący readback; to nie zgoda na ponowne create/nowy requestId.
+`IDEMPOTENCY_CONFLICT` wymaga oryginalnego ciała, nie poprawiania go pod starym ID.
+Dopiero `SERVICE_NETWORK_NOT_DISPATCHED` / `SERVICE_NETWORK_ABSENCE_CONFIRMED`
+potwierdza brak bridge dla oryginału; osobno jawna NOWA operacja wymaga świeżego
+powiązanego stanu. Nie traktuj timeout/503 jako dowodu braku zasobu i nie rób blind retry.
+
+## 2c. Odczytaj gotowość, nie twórz jej odczytem
+
+Odśwież rzeczywiste autoryzowane **`GET /api/project`** albo odbierz świeży WS
+HELLO/STATE_SYNC (`SessionBundleV2`). W projekcie odczytaj:
+
+- `capabilities.execution.runtime`: `profileId`, `label`, `configurationGeneration`,
+  `state`, `problem`, `taskFields`;
+- `capabilities.execution.modes.RUN_MAIN` i `RUN_TESTS`: osobne `canRun` i `problem`;
+- `capabilities.language`: oddzielny stan języka, nie wynik Run ani sieci.
+
+Stany runtime to `READY`, `CONFIG_ERROR`, `DAEMON_OFF`, `IMAGE_MISSING`,
+`PREPARE_REQUIRED`. Czytaj konkretny `problem.code/message/recovery/retryable`
+na poziomie runtime **i danego trybu**. Samo runtime READY nie zastępuje
+`modes.RUN_MAIN.canRun` lub `modes.RUN_TESTS.canRun`. Agregacja ponownie sprawdza
+bieżący daemon/profil/obraz oraz przygotowane zależności i task, każdy tryb osobno.
+Service bez zweryfikowanego SAME bridge ma Main niegotowy; dopiero jawne prepare
+plus świeża projekcja może to zmienić. Tests nie są z tej przyczyny globalnie wyłączane.
+Nie ma `/readiness` ani `/api/runtime/readiness`; nie dodawaj trasy i nie ustawiaj READY
+ręcznie. Config, receipt, nazwa sieci lub exit0 nie zastępują tych kontroli.
+Language READY/semantyka oraz realny Spring health wymagają osobnych dowodów;
+`INDEXING` nie jest ON. W razie błędu zachowaj edycję/recovery, bez host fallbacku.
 
 ## 3. Jeden scenariusz po integracji prepare i backendu
 
 1. Wybierz zgodny profil i przykład, przygotuj go, uruchom aplikację według windows-start,
    otwórz ten sam katalog przykładu w GUI. Pełne ustawienia V2 muszą być zapisane
    **przed prepare** (sekcja1a), nie dopiero po starcie. Oczekuj
-   właściwego profilu i osobnej gotowości Main/Tests; `INDEXING` nie jest `ON` LSP.
+   właściwego profilu i osobnej gotowości Main/Tests według sekcji2c; dla Spring
+   przed Main jawnie przygotuj SAME sieć według sekcji2b i odśwież projekcję.
+   `INDEXING` nie jest `ON` LSP.
 2. Run Tests: przykłady celowo odejmują zamiast dodawać, oczekiwany **FAILED**.
    Zmień samą logikę odejmowania na dodawanie w `main.js`, `main.ts`, `calculator.py`,
    `StrategyDemo.java` lub `CounterApplication.java`, nie test. Zaczekaj na prawdziwy
