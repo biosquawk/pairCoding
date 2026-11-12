@@ -34,7 +34,7 @@ const configPath = { ...string(4096), pattern: '^[^\\u0000-\\u001f\\u007f]+$' };
 export const RuntimeConfigV1Schema = object({
   schemaVersion: { const: 1 }, activeProfile: id, workspaceRoot: configPath, runtimeCatalog: configPath, imageLock: configPath,
   languageFeatures: object({ completion: bool, diagnostics: bool }),
-  execution: object({ backend: { const: 'docker' }, pullPolicy: { const: 'never' } }),
+  execution: { ...object({ backend: { const: 'docker' }, pullPolicy: { const: 'never' }, readinessTimeoutMs: integer(1000,120000) }), required: ['backend','pullPolicy'] },
 });
 export const TaskFieldSchema = object({
   key: enumeration(...TASK_FIELD_KEYS), label: string(160), help: string(1024,0), required: bool,

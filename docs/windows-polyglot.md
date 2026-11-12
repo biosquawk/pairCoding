@@ -179,7 +179,7 @@ wynik `PLAN_ONLY` nie stanowi zgody ROOT ani receipt do ręcznego wypełnienia.
 
 **Timeout przygotowania:** opcjonalny `--prepare-timeout-ms` przyjmuje jedną
 liczbę całkowitą1000..86400000ms; domyślnie2700000ms (45min). Powyżej jawnie
-wybrano3600000ms (1h) dla prepare. To nie zmienia limitu120000ms programu ucznia,
+wybrano3600000ms (1h) dla prepare. To nie zmienia wybranego `runProfiles[].timeoutMs` programu ucznia,
 autosave ani weta. Limit pojedynczej komendy Docker pozostaje480000ms (8min);
 wybrana godzina jest budżetem całego prepare, nie pojedynczej komendy.
 Bez `--execute` pozostaje `PLAN_ONLY`: bez procesów potomnych,
@@ -229,6 +229,45 @@ nowe prepare; zwykła edycja kodu nie wymaga ponownego pobierania zależności.
 Run/Test używa lokalnego przypiętego obrazu (`pull=never`) i cache, bez hostowego
 fallbacku, pobierania w Run ani montowania home, prywatnego `.m2` czy docker.sock.
 Prepare nie przygotowuje JDT/pylsp, obrazów LSP ani receipt LANGUAGE.
+
+### Budżety gotowości, kompilacji/testów i startu Spring
+
+To trzy różne działania, nie jeden limit120s:
+
+- **Gotowość runtime:** w pliku przekazywanym do `--runtime-config` (po prepare:
+  `$executeOut/runtime-config.json`) opcjonalne `execution.readinessTimeoutMs`
+  określa budżet pomiaru execution i każdego z dwóch pomiarów zależności trybu.
+  Bez pola:30000ms; dopuszczalne całkowite1000..120000ms. Etapy są sekwencyjne,
+  więc cały pomiar obu trybów może trwać do trzech takich budżetów. To nie limit
+  działania programu. Zachowaj pozostałe pola; przed restartem własnego serwera
+  można ustawić np. taki fragment istniejącego config:
+
+  ```json
+  "execution": { "backend": "docker", "pullPolicy": "never", "readinessTimeoutMs": 45000 }
+  ```
+
+  Nie edytuj receiptów/cache/pinów i nie ponawiaj prepare dla samej zmiany tego
+  budżetu. Podczas pomiaru edytor, zapis/ACK i weto pozostają niezależne; brak
+  wyniku nie uprawnia do Run. `RUNTIME_READINESS_TIMEOUT` oznacza przekroczony
+  budżet, `RUNTIME_READINESS_UNAVAILABLE` błąd pomiaru, a
+  `RUNTIME_READINESS_INVALID` nieaktualny/błędny dowód — żaden z nich nie dowodzi
+  wyłączenia demona. `DAEMON_UNAVAILABLE` pochodzi z jawnego nieudanego sprawdzenia
+  engine, nie z timeoutu całego łańcucha. Napraw przyczynę lub skoryguj budżet,
+  a potem zmierz bieżącą gotowość; nigdy nie wymuszaj Run z błędem.
+- **Kompilacja/testy/program:** `timeoutMs` w osobnym profilu RUN_MAIN/RUN_TESTS
+  ustawień GUI jest już konfigurowalne1000..300000ms.120000 w przykładach to
+  wybór dla przykładu, nie sztywny limit produktu. Dla wolniejszej kompilacji
+  ustaw np.180000 lub300000, jawnie zapisz ustawienia i zaczekaj na ich
+  potwierdzenie przed Run. Ten sam budżet przechodzi przez adapter i plan do
+  wykonawcy; po wyczerpaniu zlecany jest prawdziwy Stop, nie pozorny sukces.
+- **Spring Main:** oczekiwanie na HTTP ma teraz budżet tego samego jawnie
+  wybranego `RUN_MAIN.timeoutMs`, bez wcześniejszego sztywnego30s. Nie wydłuża
+  globalnego czasu Run. Gotowy endpoint nie kończy Main; serwer pozostaje
+  RUNNING do Stop/wyjścia. Ręczny Stop i niepotwierdzony Stop zachowują znaczenie.
+
+Prepare ma nadal swój osobny `--prepare-timeout-ms`. Limity pojedynczych operacji
+Docker, zasobów i sond HTTP nie stają się budżetem kompilacji; nie zmieniaj weta,
+autosave, prawa zapisu ani ACK, aby przedłużyć wykonanie.
 
 ## 4. Start i zmiana profilu
 

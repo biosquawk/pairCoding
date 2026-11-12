@@ -69,7 +69,7 @@ export abstract class BaseAdapter implements TaskRuntimeAdapter {
       command: { executable: '/opt/paircoach/node/bin/node', args: ['/opt/paircoach/runtime-task.mjs', encoded], workingDirectory: '/workspace', environment: { CI: 'true', LANG: 'C.UTF-8', LC_ALL: 'C.UTF-8', TZ: 'UTC', PYTHONDONTWRITEBYTECODE: '1' } },
       caches, resources: { memoryBytes: 2*1024**3, cpus: 2, pids: 256, logBytes: 10485760, logFiles: 1 },
       isolation: { nonRootUser: '10001:10001', capDropAll: true, noNewPrivileges: true, readOnlyRoot: true, network: run.task.entry.kind === 'SPRING_BOOT' && run.kind === 'RUN_MAIN' ? 'loopback' : 'none' },
-      service: run.task.entry.kind === 'SPRING_BOOT' && run.kind === 'RUN_MAIN' ? { containerPort: run.task.entry.containerPort, healthPath: run.task.entry.healthPath, bindHost: '127.0.0.1', readinessTimeoutMs: 30000 } : null,
+      service: run.task.entry.kind === 'SPRING_BOOT' && run.kind === 'RUN_MAIN' ? { containerPort: run.task.entry.containerPort, healthPath: run.task.entry.healthPath, bindHost: '127.0.0.1', readinessTimeoutMs: run.timeoutMs } : null,
       artifacts: run.kind === 'RUN_TESTS' ? ['JUNIT_XML','COMPILER_DIAGNOSTICS'] : ['COMPILER_DIAGNOSTICS'] };
   }
   interpret: TaskRuntimeAdapter['interpret'] = (plan, exit, artifacts) => interpretOutcome(plan, exit, artifacts, this.dependencies.readArtifact ?? readArtifact);

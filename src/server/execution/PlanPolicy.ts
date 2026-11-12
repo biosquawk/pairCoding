@@ -93,7 +93,7 @@ export async function validatePlan(policy:ExecutorPolicy,plan:ExecutionPlan) {
   requireThat(plan.artifacts.length<=2&&new Set(plan.artifacts).size===plan.artifacts.length&&plan.artifacts.every(k=>['JUNIT_XML','COMPILER_DIAGNOSTICS'].includes(k)),'Unapproved artifact type');
   if(plan.service){
     const s=plan.service;
-    requireThat(plan.mode==='RUN_MAIN'&&s.bindHost==='127.0.0.1'&&Number.isInteger(s.containerPort)&&s.containerPort>=1024&&s.containerPort<=65535&&/^\/[a-zA-Z0-9/_-]*$/.test(s.healthPath)&&s.healthPath.length<=256&&Number.isInteger(s.readinessTimeoutMs)&&s.readinessTimeoutMs>=100&&s.readinessTimeoutMs<=30000&&policy.serviceNetwork&&/^[a-zA-Z0-9_-]{1,80}$/.test(policy.serviceNetwork),'Service policy');
+    requireThat(plan.mode==='RUN_MAIN'&&s.bindHost==='127.0.0.1'&&Number.isInteger(s.containerPort)&&s.containerPort>=1024&&s.containerPort<=65535&&/^\/[a-zA-Z0-9/_-]*$/.test(s.healthPath)&&s.healthPath.length<=256&&Number.isInteger(s.readinessTimeoutMs)&&s.readinessTimeoutMs>=100&&s.readinessTimeoutMs<=300000&&s.readinessTimeoutMs<=plan.timeoutMs&&policy.serviceNetwork&&/^[a-zA-Z0-9_-]{1,80}$/.test(policy.serviceNetwork),'Service policy');
   }
 }
 export function dockerCreateArgs(policy:ExecutorPolicy,p:ExecutionPlan):string[] {

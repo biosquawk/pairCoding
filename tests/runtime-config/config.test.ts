@@ -88,9 +88,9 @@ test('no configured modes and task incompatibility do not probe tasks or infer h
 });
 test('daemon errors, stale generation, malformed port and bounded timeout all fail closed', async t => {
   const c = fixture(t).load();
-  for (const readiness of [async () => { throw Error('private-details'); }, async () => ({ configurationGeneration: 'stale', modes: { RUN_MAIN: okay, RUN_TESTS: okay } }), async () => ({ configurationGeneration: c.configurationGeneration, modes: { RUN_MAIN: { canRun: true, problem: {} }, RUN_TESTS: okay } }), () => new Promise<never>(() => {})]) {
+  for (const [index, readiness] of [async () => { throw Error('private-details'); }, async () => ({ configurationGeneration: 'stale', modes: { RUN_MAIN: okay, RUN_TESTS: okay } }), async () => ({ configurationGeneration: c.configurationGeneration, modes: { RUN_MAIN: { canRun: true, problem: {} }, RUN_TESTS: okay } }), () => new Promise<never>(() => {})].entries()) {
     const view = await aggregateRuntimeReadiness(c, settings(), { execution: { readiness: readiness as any }, probe: { probe: async () => okay }, timeoutMs: 5 });
-    assert.equal(view.runtime.state, 'DAEMON_OFF'); assert.equal(view.modes.RUN_MAIN.problem?.code, 'DAEMON_UNAVAILABLE'); assert.ok(validateExecutionView(view)); assert.ok(!JSON.stringify(view).includes('private-details'));
+    assert.equal(view.runtime.state, ['PREPARE_REQUIRED', 'CONFIG_ERROR', 'CONFIG_ERROR', 'PREPARE_REQUIRED'][index]); assert.equal(view.modes.RUN_MAIN.problem?.code, ['RUNTIME_READINESS_UNAVAILABLE', 'RUNTIME_READINESS_INVALID', 'RUNTIME_READINESS_INVALID', 'RUNTIME_READINESS_TIMEOUT'][index]); assert.equal(view.modes.RUN_MAIN.canRun, false); assert.equal(view.modes.RUN_TESTS.canRun, false); assert.ok(validateExecutionView(view)); assert.ok(!JSON.stringify(view).includes('private-details'));
   }
 });
 test('dependency readiness is recomputed every time; one mode probe failure is isolated', async t => {
@@ -98,4 +98,73 @@ test('dependency readiness is recomputed every time; one mode probe failure is i
   d.probe.probe = async (_r?: any, mode?: any) => { calls++; if (mode === 'RUN_MAIN') throw Error(); return ready ? okay : bad('PREPARE_REQUIRED'); };
   let view = await aggregateRuntimeReadiness(c, settings(), d); assert.equal(view.runtime.state, 'PREPARE_REQUIRED');
   ready = true; view = await aggregateRuntimeReadiness(c, settings(), d); assert.equal(view.modes.RUN_TESTS.canRun, true); assert.equal(view.modes.RUN_MAIN.canRun, false); assert.equal(calls, 4); assert.ok(validateExecutionView(view));
+});
+
+test('delayed execution/cache measurement expires truthfully, denies both modes and never grants late READY', async t => {
+  const c = fixture(t).load(); let release!: () => void, probes = 0, calls = 0;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const d = { timeoutMs: 10, execution: { readiness: async () => { calls++; await held; return { configurationGeneration: c.configurationGeneration, modes: { RUN_MAIN: okay, RUN_TESTS: okay } }; } },
+    probe: { probe: async () => { probes++; return okay; } } };
+  const view = await aggregateRuntimeReadiness(c, settings(), d);
+  assert.equal(view.runtime.state, 'PREPARE_REQUIRED'); assert.equal(view.runtime.problem?.code, 'RUNTIME_READINESS_TIMEOUT');
+  assert.equal(view.modes.RUN_MAIN.canRun, false); assert.equal(view.modes.RUN_TESTS.canRun, false); assert.equal(probes, 0);
+  assert.ok(validateExecutionView(view)); const deniedSnapshot = structuredClone(view);
+  release(); await new Promise(resolve => setImmediate(resolve)); assert.deepEqual(view, deniedSnapshot);
+  const fresh = await aggregateRuntimeReadiness(c, settings(), d);
+  assert.equal(fresh.runtime.state, 'READY'); assert.equal(fresh.modes.RUN_MAIN.canRun, true); assert.equal(fresh.modes.RUN_TESTS.canRun, true);
+  assert.equal(calls, 2); assert.equal(probes, 2);
+});
+
+test('explicit engine failure remains DAEMON_OFF, unlike unknown port failure, stale or malformed evidence', async t => {
+  const c = fixture(t).load(), daemon = deps(c, bad('DAEMON_UNAVAILABLE'), bad('DAEMON_UNAVAILABLE'));
+  let probes = 0; daemon.probe.probe = async () => { probes++; return okay; };
+  const off = await aggregateRuntimeReadiness(c, settings(), daemon);
+  assert.equal(off.runtime.state, 'DAEMON_OFF'); assert.equal(off.runtime.problem?.code, 'DAEMON_UNAVAILABLE');
+  assert.equal(off.modes.RUN_MAIN.canRun, false); assert.equal(off.modes.RUN_TESTS.canRun, false); assert.equal(probes, 0); assert.ok(validateExecutionView(off));
+  const cases = [
+    { readiness: async () => { throw Error('private-details'); }, state: 'PREPARE_REQUIRED', code: 'RUNTIME_READINESS_UNAVAILABLE' },
+    { readiness: async () => ({ configurationGeneration: 'stale', modes: { RUN_MAIN: okay, RUN_TESTS: okay } }), state: 'CONFIG_ERROR', code: 'RUNTIME_READINESS_INVALID' },
+    { readiness: async () => ({ configurationGeneration: c.configurationGeneration, modes: { RUN_MAIN: { canRun: true, problem: {} }, RUN_TESTS: okay } }), state: 'CONFIG_ERROR', code: 'RUNTIME_READINESS_INVALID' },
+  ];
+  for (const item of cases) {
+    const view = await aggregateRuntimeReadiness(c, settings(), { execution: { readiness: item.readiness as any }, probe: daemon.probe });
+    assert.equal(view.runtime.state, item.state); assert.equal(view.runtime.problem?.code, item.code);
+    assert.equal(view.modes.RUN_MAIN.canRun, false); assert.equal(view.modes.RUN_TESTS.canRun, false);
+    assert.ok(validateExecutionView(view)); assert.ok(!JSON.stringify(view).includes('private-details'));
+  }
+  assert.equal(probes, 0);
+});
+
+test('optional public readinessTimeoutMs is strict, bounded and backward-compatible', t => {
+  const f=fixture(t);
+  assert.ok(f.load().resolved); // historical config without the new optional field
+  for (const value of [1000,30000,120000]) {
+    f.write('paircoach.runtime.json',{...f.config,execution:{...f.config.execution,readinessTimeoutMs:value}});
+    assert.equal(f.load().resolved?.config.execution.readinessTimeoutMs,value);
+  }
+  for (const value of [0,999,120001,-1,1.5,'30000',null,true]) {
+    f.write('paircoach.runtime.json',{...f.config,execution:{...f.config.execution,readinessTimeoutMs:value}});
+    assert.equal(f.load().problem?.code,'RUNTIME_CONFIG_INVALID');
+  }
+  f.write('paircoach.runtime.json',{...f.config,execution:{...f.config.execution,unexpectedTimeout:30000}});
+  assert.equal(f.load().resolved,null);
+});
+
+test('default budget waits beyond historical 3s; explicit configured deadline is enforced (mock clock, no engine claim)', async t => {
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=fixture(t); let release!:()=>void;
+  const held=new Promise<void>(resolve=>{release=resolve;}); const c=f.load(),d=deps(c);
+  d.execution.readiness=async()=>{await held;return {configurationGeneration:c.configurationGeneration,modes:{RUN_MAIN:okay,RUN_TESTS:okay}};};
+  const pending=aggregateRuntimeReadiness(c,settings(),d);
+  await new Promise(resolve=>setImmediate(resolve));
+  t.mock.timers.tick(3001); await new Promise(resolve=>setImmediate(resolve));
+  release(); const ready=await pending;
+  assert.equal(ready.modes.RUN_MAIN.canRun,true); assert.equal(ready.modes.RUN_TESTS.canRun,true);
+  f.write('paircoach.runtime.json',{...f.config,execution:{...f.config.execution,readinessTimeoutMs:45000}});
+  const configured=f.load(),later=deps(configured); later.execution.readiness=()=>new Promise<never>(()=>{});
+  const wait=aggregateRuntimeReadiness(configured,settings(),later); let settled=false; void wait.then(()=>{settled=true;});
+  await new Promise(resolve=>setImmediate(resolve)); t.mock.timers.tick(44999); await new Promise(resolve=>setImmediate(resolve)); assert.equal(settled,false);
+  t.mock.timers.tick(1); const expired=await wait;
+  assert.equal(expired.runtime.problem?.code,'RUNTIME_READINESS_TIMEOUT'); assert.equal(expired.modes.RUN_MAIN.canRun,false); assert.equal(expired.modes.RUN_TESTS.canRun,false);
+  assert.ok(validateExecutionView(expired));
 });

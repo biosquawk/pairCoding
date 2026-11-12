@@ -25,7 +25,7 @@ export interface RuntimeConfigV1 {
   runtimeCatalog: string;
   imageLock: string;
   languageFeatures: { completion: boolean; diagnostics: boolean };
-  execution: { backend: 'docker'; pullPolicy: 'never' };
+  execution: { backend: 'docker'; pullPolicy: 'never'; readinessTimeoutMs?: number };
 }
 export type AdapterFamily = 'node' | 'typescript' | 'python' | 'java-maven';
 export interface ToolVersion { name: string; version: string }

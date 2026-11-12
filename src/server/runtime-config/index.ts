@@ -83,9 +83,10 @@ export interface RuntimeModeProbe {
 export interface RuntimeReadinessDependencies { execution: Pick<ExecutionPort, 'readiness'>; probe: RuntimeModeProbe; timeoutMs?: number }
 const wellFormed = (m: ModeReadiness): boolean => !!m && typeof m.canRun === 'boolean' &&
   (m.canRun ? m.problem === null : !!m.problem && (['code','message','recovery'] as const).every(k => typeof m.problem![k] === 'string' && m.problem![k].length > 0) && typeof m.problem.retryable === 'boolean');
+class ReadinessDeadlineError extends Error {}
 async function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  try { return await Promise.race([Promise.resolve().then(operation), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Error('readiness timeout')), timeoutMs); })]); }
+  try { return await Promise.race([Promise.resolve().then(operation), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new ReadinessDeadlineError('readiness timeout')), timeoutMs); })]); }
   finally { clearTimeout(timer); }
 }
 /** No execution/mutation. A false mode never disables the editor. Every invocation re-probes dependency readiness. */
@@ -98,13 +99,20 @@ export async function aggregateRuntimeReadiness(configuration: RuntimeConfigurat
   if (configuration.problem !== null) return failBoth(configuration.problem, 'CONFIG_ERROR');
   if (!validateSettingsV2(settings)) return failBoth(runtimeProblem('LEGACY_RUN_PROFILE_REQUIRES_MIGRATION', 'Execution requires explicitly saved V2 settings; original settings are preserved.', 'Review task selectors and explicitly save V2 settings. No commands are inferred. You can keep editing.'), 'CONFIG_ERROR');
   const resolved = configuration.resolved;
-  const timeoutMs = dependencies.timeoutMs ?? 3000;
-  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw Error('Invalid readiness timeout');
+  const timeoutMs = dependencies.timeoutMs ?? resolved.config.execution.readinessTimeoutMs ?? 30000;
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) throw Error('Invalid readiness timeout');
   let readiness: Awaited<ReturnType<ExecutionPort['readiness']>>;
   try {
     readiness = await bounded(() => dependencies.execution.readiness(resolved.profile, configuration.configurationGeneration), timeoutMs);
-    if (readiness.configurationGeneration !== configuration.configurationGeneration || !wellFormed(readiness.modes.RUN_MAIN) || !wellFormed(readiness.modes.RUN_TESTS)) throw Error('Stale or malformed readiness');
-  } catch { return failBoth(runtimeProblem('DAEMON_UNAVAILABLE', 'Execution readiness could not be confirmed.', 'Check the Docker daemon and retry. No host fallback is used.', true), 'DAEMON_OFF'); }
+  } catch (error) {
+    // The deadline covers cache/source/ownership AND engine/image observers. Its expiry
+    // (or an opaque port rejection) is not evidence that the Docker daemon is off.
+    return failBoth(error instanceof ReadinessDeadlineError
+      ? runtimeProblem('RUNTIME_READINESS_TIMEOUT', 'Execution readiness measurement exceeded its deadline.', 'Retry current readiness. Cache, engine and image checks must complete before Run; editing remains available.', true)
+      : runtimeProblem('RUNTIME_READINESS_UNAVAILABLE', 'Execution readiness could not be measured.', 'Retry current readiness and check the runtime configuration. No host fallback is used; editing remains available.', true), 'PREPARE_REQUIRED');
+  }
+  if (readiness?.configurationGeneration !== configuration.configurationGeneration || !wellFormed(readiness?.modes?.RUN_MAIN) || !wellFormed(readiness?.modes?.RUN_TESTS))
+    return failBoth(runtimeProblem('RUNTIME_READINESS_INVALID', 'Execution readiness evidence is stale or invalid.', 'Reload the current configuration and measure readiness again. No execution is permitted from invalid evidence.', true), 'CONFIG_ERROR');
   const modes = {} as ExecutionView['modes'];
   for (const mode of ['RUN_MAIN','RUN_TESTS'] as const) {
     const run = settings.runProfiles.find(p => p.kind === mode);

@@ -374,3 +374,39 @@ function setServiceFixture(f:Awaited<ReturnType<typeof fixture>>){
     }
   });
 }
+
+test('UNIT delayed Spring health after 30s uses approved 180s budget, stays RUNNING and preserves real Stop confirmation',async()=>{
+  const f=await fixture(); let server:http.Server|undefined, elapsed=0;
+  try {
+    const initial=Date.now();
+    server=http.createServer((_req,res)=>{res.statusCode=elapsed>=31000?200:503;res.end('health');});
+    await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve)); f.fake.port=(server.address() as any).port;
+    f.plan.mode='RUN_MAIN';f.plan.timeoutMs=180000;
+    f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:180000};f.plan.isolation.network='loopback';
+    setServiceFixture(f);
+    f.executor=new DockerExecutor({policy:f.policy,transport:f.fake,journal:f.journal,now:()=>initial+elapsed,sleep:async()=>{elapsed+=10000;}});
+    const handle=await f.executor.start(f.plan);
+    const ready=await f.executor.serviceReadiness(handle);
+    assert.equal(ready?.ready,true);assert.ok(elapsed>30000&&elapsed<180000);
+    const record=await f.journal.read(handle.runId);assert.equal(record.phase,'RUNNING');assert.equal(record.plan.timeoutMs,180000);
+    assert.equal(record.plan.service?.readinessTimeoutMs,180000);
+    assert.equal((await f.executor.stop(handle,'USER')).confirmed,false); // live endpoint is not stopped
+    await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;
+    assert.equal((await f.executor.stop(handle,'USER')).confirmed,true);
+    assert.equal(f.fake.calls.filter(args=>args[0]==='create').length,1);
+  } finally {if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));await f.cleanup();}
+});
+
+
+test('UNIT service readiness may not exceed the approved global Run budget or 300s ceiling',async()=>{
+  for(const [runBudget,serviceBudget] of [[1000,1001],[180000,180001],[300000,300001],[1000,0],[1000,99]]) {
+    const f=await fixture();
+    try {
+      f.plan.timeoutMs=runBudget;f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+      f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:serviceBudget};
+      setServiceFixture(f); // otherwise the dispatcher would reject an unrelated non-Spring fixture first
+      await assert.rejects(f.executor.start(f.plan),/Service policy/);
+      assert.equal(f.fake.calls.some(args=>args[0]==='create'),false);
+    } finally {await f.cleanup();}
+  }
+});
