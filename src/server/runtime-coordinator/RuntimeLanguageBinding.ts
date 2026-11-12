@@ -47,6 +47,8 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
   prepareSaveAcknowledgement(lease: SelectedLanguageLease): Promise<void>;
   publishSaveAck(pending: PendingLanguageSave | null, receiptId: string, publish: () => void): boolean;
   fileOperation(operation: LanguageFileOperation): Promise<void>;
+  invalidateSource(): void;
+  refreshSource(): Promise<void>;
   retire(): Promise<{ confirmed: boolean; status: LanguageView }>;
 } {
   for (const callback of [options.assertCurrent, options.assertPeer, options.emit, options.sourceAuthority?.capture,
@@ -57,6 +59,7 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
   const save = { readCurrent: options.saveAuthority.readCurrent.bind(options.saveAuthority), readCommittedSave: options.saveAuthority.readCommittedSave.bind(options.saveAuthority) };
   let retired = false, clearing = false, started: Promise<LanguageView> | null = null, retirement: Promise<{ confirmed: boolean; status: LanguageView }> | null = null;
   let unsubscribe: (() => void) | null = null, latest: LanguageView | null = null;
+  let sourceRevocation = 0;
   let prepared: { snapshot: RegistrySnapshot; lease: SelectedLanguageLease } | null = null, preparation = 0;
   const documents = new Map<string, { peer: string; message: Readonly<LanguageClientMessage>; stamp: Readonly<DocumentStamp> }>();
   const peers = new Set<string>();
@@ -97,6 +100,7 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
     // disposeProject synchronously clears real published diagnostics BEFORE its first await. Only that
     // exact invalidation may pass after revocation; late callbacks cannot reopen retired decorations.
     if (!clearing) { try { guard(); } catch { return; } }
+    if (clearing && event.type !== 'DIAGNOSTICS') return;
     const captured = copy(event);
     if (captured.type === 'STATUS') {
       if (!validateLanguageView(captured.status) || captured.status.projectId !== scope.projectId || captured.status.profileId !== scope.profile.id ||
@@ -108,6 +112,17 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
   };
   const requireStarted = () => { guard(); if (!started || !registry.getProjectScope()) throw new Error('Language binding not started'); };
   const revokePreparation = () => { preparation++; prepared = null; };
+  const revokeSource = () => {
+    sourceRevocation++; revokePreparation();
+    for (const peer of peers) ledger.retirePeer(peer);
+    peers.clear(); documents.clear(); selected.authority.invalidate();
+    // Pre-start and retired bindings have no new scope to manufacture. A just-revoked
+    // current-owner guard must NOT suppress the real synchronous marker invalidation.
+    if (!retired && registry.getProjectScope()) {
+      const wasClearing = clearing; clearing = true;
+      try { registry.invalidateSource(scope); } finally { clearing = wasClearing; }
+    }
+  };
   const preparedCurrent = (value: NonNullable<typeof prepared>): boolean => {
     try { guard(); sync(value.lease.assertCurrent()); sync(value.lease.assertRetainedCurrent());
       if (!current(value.snapshot) || value.lease.source.leaseId !== value.snapshot.revision) return false;
@@ -130,6 +145,7 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
       provider: scope.profile.language.provider === 'builtin' ? 'builtin' : scope.profile.language.provider === 'off' ? 'off' : 'remote' }); },
     async handle(peer, message) {
       const captured = copy(message); requireStarted();
+      const revocation = sourceRevocation;
       if (!id(peer) || !validateLanguageClientMessage(captured) || !inScope(captured.payload.stamp) || captured.sessionId !== scope.sessionId)
         throw new Error('Invalid language message/scope');
       sync(assertPeer(peer, captured)); guard();
@@ -142,6 +158,7 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
         revokePreparation();
         await (captured.type === 'LANGUAGE_OPEN' ? registry.open(document) : registry.change(document));
         guard(); sync(assertPeer(peer, captured));
+        if (revocation !== sourceRevocation) throw new Error('Language source admission revoked');
         if (!current(before)) throw new Error('Language admission superseded');
         ledger.observeDocument(peer, captured.messageId, document);
         for (const [k, old] of documents) if (old.peer === peer && old.stamp.path === document.stamp.path) documents.delete(k);
@@ -154,12 +171,12 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
       } else if (captured.type === 'LANGUAGE_COMPLETE') {
         const result = copy(await registry.complete(captured.payload));
         guard(); sync(assertPeer(peer, captured));
-        if (!current(before) || !validateCompleteResult(result) || !same(result.stamp, captured.payload.stamp) || result.requestId !== captured.payload.requestId)
+        if (revocation !== sourceRevocation || !current(before) || !validateCompleteResult(result) || !same(result.stamp, captured.payload.stamp) || result.requestId !== captured.payload.requestId)
           throw new Error('Stale/unbound language completion');
         return result;
       } else registry.cancel(captured.payload);
       guard(); sync(assertPeer(peer, captured));
-      if (!current(before)) throw new Error('Language operation superseded');
+      if (revocation !== sourceRevocation || !current(before)) throw new Error('Language operation superseded');
       return null;
     },
     beginSave(input) {
@@ -191,6 +208,14 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
       if (!proof || !held || held !== prepared || !preparedCurrent(held) || !ledger.isVerified(proof)) return false;
       registry.acknowledge(proof); return true; // Valid same-issuer join attempt, NOT a new analysis claim.
     },
+    invalidateSource: revokeSource,
+    async refreshSource() {
+      requireStarted(); revokeSource();
+      const revocation = sourceRevocation, before = snapshot();
+      await registry.refreshSource(scope);
+      guard();
+      if (revocation !== sourceRevocation || !current(before)) throw new Error('Language source refresh superseded');
+    },
     async fileOperation(operation) {
       const captured = copy(operation); requireStarted();
       if (!validateLanguageFileOperation(captured)) throw new Error('Invalid successful file operation feed');
@@ -200,16 +225,17 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
     },
     retire() {
       if (retirement) return retirement;
-      retired = true; revokePreparation();
-      for (const peer of peers) ledger.retirePeer(peer); peers.clear(); documents.clear(); selected.authority.invalidate();
+      retired = true; revokeSource();
       if (!registry.getProjectScope()) {
         // Establish the actual registry scope solely for disposal; no scheduled provider can run before
         // dispose's synchronous invalidation below. Do not fabricate a successful empty status.
         void registry.startProject(scope);
       }
-      clearing = true;
-      const disposing = registry.disposeProject(scope); // synchronous invalidate/clear before first await
-      clearing = false; unsubscribe?.(); unsubscribe = null;
+      const wasClearing = clearing; clearing = true;
+      let disposing: ReturnType<LanguageFeatureRegistry['disposeProject']>;
+      try { disposing = registry.disposeProject(scope); } // synchronous invalidate/clear before first await
+      finally { clearing = wasClearing; }
+      unsubscribe?.(); unsubscribe = null;
       retirement = disposing.then(result => { latest = publicStatus(result.status); return copy({ confirmed: result.confirmed, status: latest }); }).finally(() => { retirement = null; });
       return retirement; // On false retain SAME registry/selected/admission; only explicit retire retries.
     },
