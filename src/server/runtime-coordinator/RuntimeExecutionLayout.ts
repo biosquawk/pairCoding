@@ -43,3 +43,34 @@ export function createRuntimeExecutionLayout(applicationStateDirectory: string, 
   const journalDirectory = path.join(stateDirectory, 'journal'); privateDirectory(journalDirectory);
   return Object.freeze({ stateDirectory, runRoot, journalDirectory, installationId: record.installationId, projectId, workspaceRoot });
 }
+
+/** Stable per-project anchor is independent of today's runnable settings/configuration.
+ * On the first upgraded startup, original admissions locate the original private layout;
+ * no scanning/discovery or later prepared-cache lookup is permitted. */
+export function retainRuntimeExecutionLayout(dataDirectory:string, applicationStateDirectory:string,
+  workspaceRoot:string, projectId:string, plans:readonly import('../execution/ports').ExecutionPlan[],
+  readOnlyRoots:readonly string[]=[]):RuntimeExecutionLayout {
+  const file=path.join(dataDirectory,'runtime-execution-layout.json'), bytes=readRecord(file,8192,true);
+  let retained:RuntimeExecutionLayout|undefined;
+  if(bytes) {
+    const value=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(bytes));
+    if(value.version!==1 || value.sha256!==sha256(canonical(value.layout)))throw Error('Corrupt retained execution layout');
+    retained=value.layout;
+    if(!retained || retained.projectId!==projectId || retained.workspaceRoot!==workspaceRoot)throw Error('Foreign retained layout');
+    applicationStateDirectory=path.dirname(path.dirname(retained.stateDirectory));
+  } else if(plans.length) {
+    // immutableDirectory = <state>/runs/<exactRunId>/input. All original admissions
+    // must independently select the SAME layout; ambiguity is a fence, never new ownership.
+    const roots=plans.map(p=>path.dirname(path.dirname(path.dirname(path.dirname(path.dirname(p.input.immutableDirectory))))));
+    if(new Set(roots).size!==1)throw Error('Original Run admissions disagree on private execution layout');
+    applicationStateDirectory=roots[0];
+  }
+  const layout=createRuntimeExecutionLayout(applicationStateDirectory,workspaceRoot,projectId,readOnlyRoots);
+  if(retained && canonical(retained)!==canonical(layout))throw Error('Retained execution layout changed');
+  for(const plan of plans)if(plan.ownership.installationId!==layout.installationId ||
+    plan.input.projectId!==projectId || plan.input.immutableDirectory!==path.join(layout.runRoot,plan.ownership.runId,'input') ||
+    plan.input.buildDirectory!==path.join(layout.runRoot,plan.ownership.runId,'build') ||
+    plan.input.artifactsDirectory!==path.join(layout.runRoot,plan.ownership.runId,'artifacts'))throw Error('Original Run does not belong to retained layout');
+  if(!bytes)createRecord(file,Buffer.from(canonical({version:1,layout,sha256:sha256(canonical(layout))})));
+  return layout;
+}

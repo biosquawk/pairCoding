@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { RunProfileV2, RunRequestV2, RunV2, RuntimeProblem, RuntimeProfile } from '../../shared/runtime-v2';
 import type { AdapterOutcome, AcknowledgedRunInput, CollectedArtifacts, DurableTerminalReceipt,
   ExecutionExit, ExecutionHandle, ExecutionPlan, ExecutionPort, PlanContext, TaskRuntimeAdapter } from '../execution/ports';
+import { validateRunV2 } from '../../shared/validation-v2';
 import { AppError, validId } from '../errors';
 
 export interface RuntimeRunAdmission {
@@ -25,11 +26,13 @@ export interface RuntimeRunnerOptions {
   emit(type: 'RUN_STATE' | 'RUN_OUTPUT', payload: unknown): void;
   /** Exact frozen DockerExecutor helper. Receipts are never minted/cast in this coordinator. */
   persistTerminal(handle: ExecutionHandle, outcome: AdapterOutcome): Promise<DurableTerminalReceipt>;
+  /** Durable private original Stop intent/final public state, never a terminal receipt. */
+  retainState?(plan: ExecutionPlan, run: RunV2, requested: 'USER'|'TIMEOUT'|null): void;
   now?: () => number;
   newRunId?: () => string;
 }
 type Job = {
-  run: RunV2; plan: ExecutionPlan | null; adapter: TaskRuntimeAdapter;
+  sessionId: string; run: RunV2; plan: ExecutionPlan | null; adapter: TaskRuntimeAdapter;
   handle: ExecutionHandle | null; exit: ExecutionExit | null; collection: CollectedArtifacts | null;
   outcome: AdapterOutcome | null; receipt: DurableTerminalReceipt | null;
   attemptedStart: boolean; starting: boolean; requested: 'USER' | 'TIMEOUT' | null; outputSeq: number;
@@ -55,13 +58,13 @@ const freeze = <T>(value: T): T => {
 
 export class RuntimeRunner {
   private jobs = new Map<string,Job>();
-  private active: Job | null = null;
+  private readonly unsettled = new Set<Job>();
   private readonly now: () => number;
   constructor(private readonly options: RuntimeRunnerOptions) { this.now = options.now ?? Date.now; }
 
   /** Reservation/singleflight happens before the first await, not after expensive capture. */
   async start(admission: RuntimeRunAdmission): Promise<RunV2> {
-    if (this.active) throw new AppError(409,'RUN_IN_PROGRESS','Inne uruchomienie jest nadal aktywne.');
+    if (this.unsettled.size) throw new AppError(409,'RUN_IN_PROGRESS','Inne uruchomienie jest nadal aktywne.');
     const projectId = admission.projectId;
     const request = freeze(snapshot(admission.request)), profile = freeze(snapshot(admission.profile));
     const runProfile = freeze(snapshot(admission.runProfile));
@@ -71,13 +74,13 @@ export class RuntimeRunner {
     'Run admission does not match approved mode/configuration.');
     const runId = (this.options.newRunId ?? randomUUID)();
     requireThat(validId(runId) && !this.jobs.has(runId),'Run identity collision.');
-    const job: Job = { run:{runId,mode:request.mode,status:'QUEUED',exitCode:null,
+    const job: Job = { sessionId:request.sessionId, run:{runId,mode:request.mode,status:'QUEUED',exitCode:null,
       workspaceVersionAtStart:request.expectedWorkspaceVersion,workspaceChangedDuringRun:false,
       testOutcome:request.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE',testCount:null,outputTail:'',outputTruncated:false,
       startedAt:null,finishedAt:null,profileId:profile.id,configurationGeneration:request.configurationGeneration,
       processProblem:null,serviceReadiness:null}, plan:null,adapter:admission.adapter,handle:null,exit:null,
       collection:null,outcome:null,receipt:null,attemptedStart:false,starting:false,requested:null,outputSeq:0,waitAbort:new AbortController() };
-    this.active=job; this.jobs.set(runId,job); this.emitState(job);
+    this.unsettled.add(job); this.jobs.set(runId,job); this.emitState(job);
     try {
       const validation=await admission.adapter.validate(snapshot(profile),snapshot(runProfile));
       admission.assertCurrent();
@@ -120,6 +123,49 @@ export class RuntimeRunner {
       throw error;
     }
   }
+  /** Trusted startup join only. Does not call start/subscribe/wait/Stop/collect/cleanup.
+   * Unconfirmed owners remain separately retained until explicit same-owner Stop. */
+  restore(input: { sessionId:string; original:RunV2; plan:ExecutionPlan; adapter:TaskRuntimeAdapter;
+    handle:ExecutionHandle|null; exit:ExecutionExit|null; collection:CollectedArtifacts|null;
+    outcome:AdapterOutcome|null; removed:boolean; noProcess:boolean;
+    retained:{run:RunV2;requested:'USER'|'TIMEOUT'|null}|null }):void {
+    const r={...snapshot({...input,adapter:undefined}),adapter:input.adapter}, run=r.retained?.run ?? r.original;
+    requireThat(!this.jobs.has(run.runId) && validateRunV2(run) && run.runId===r.plan.ownership.runId &&
+      r.plan.input.sessionId===r.sessionId && r.adapter.family===r.plan.profile.adapterFamily,'Invalid restored Run owner');
+    const job:Job={sessionId:r.sessionId,run,plan:freeze(r.plan),adapter:input.adapter,handle:r.handle,exit:r.exit,
+      collection:r.collection,outcome:r.outcome,receipt:null,attemptedStart:!r.noProcess,starting:false,
+      requested:r.retained?.requested??null,outputSeq:0,waitAbort:new AbortController()};
+    if(r.noProcess) {
+      // The composition proves exclusion + ORIGINAL_RUN_ADMISSION + complete executor
+      // journal absence BEFORE any create. No exit code/receipt is invented.
+      job.run.status='CANCELLED';job.run.finishedAt ??=new Date(this.now()).toISOString();
+      job.run.processProblem=problem('RUN_NOT_DISPATCHED','Original accepted Run has no executor intent; no process effect was dispatched.');
+      this.options.retainState?.(snapshot(job.plan!),snapshot(job.run),job.requested);
+    } else if(r.removed) {
+      requireThat(r.handle && r.exit && r.collection && r.outcome,'Removed Run lacks durable terminal facts');
+      const terminal=r.retained?.run;
+      if(terminal?.finishedAt) {
+        requireThat(terminal.exitCode===r.exit.exitCode && terminal.status===(job.requested==='USER'?'CANCELLED':job.requested==='TIMEOUT'?'TIMED_OUT':r.outcome.status) &&
+          terminal.testOutcome===(job.requested?(run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE'):r.outcome.testOutcome) &&
+          terminal.testCount===(job.requested?null:r.outcome.testCount) && same(terminal.processProblem,r.outcome.problem),
+          'Retained terminal Run differs from executor journal');
+      } else {
+        job.run.status=job.requested==='USER'?'CANCELLED':job.requested==='TIMEOUT'?'TIMED_OUT':r.outcome.status;
+        job.run.exitCode=r.exit.exitCode;job.run.finishedAt=r.exit.exitedAt;
+        job.run.testOutcome=job.requested?(run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE'):r.outcome.testOutcome;
+        job.run.testCount=job.requested?null:r.outcome.testCount;job.run.processProblem=r.outcome.problem;
+      }
+      job.run.serviceReadiness=null;
+      this.options.retainState?.(snapshot(job.plan!),snapshot(job.run),job.requested);
+    } else {
+      requireThat(!run.finishedAt,'Public terminal state cannot precede executor removal');
+      job.run.status='PROCESS_STOP_UNCONFIRMED';job.run.finishedAt=null;job.run.serviceReadiness=null;
+      job.run.processProblem=problem('PROCESS_STOP_UNCONFIRMED','Recovered original Run ownership; explicitly Stop/reconcile this same Run, never replay create/start.');
+      this.unsettled.add(job);
+    }
+    requireThat(validateRunV2(job.run),'Recovered Run violates V2');
+    this.jobs.set(run.runId,job);
+  }
   private checkContext(context: PlanContext, request: RunRequestV2, profile: RuntimeProfile, runId: string, projectId: string): void {
     const input: AcknowledgedRunInput=context.input;
     requireThat(context.ownership.runId===runId && context.ownership.profileId===profile.id &&
@@ -130,25 +176,26 @@ export class RuntimeRunner {
   }
   private observe(job: Job): void {
     job.run.status='RUNNING'; job.run.processProblem=null; job.run.startedAt ??= new Date(this.now()).toISOString();
+    this.options.retainState?.(snapshot(job.plan!),snapshot(job.run),job.requested);
     job.unsubscribe=this.options.execution.subscribe(job.handle!,output=>this.output(job,output.stream,output.text));
     job.poll=setInterval(()=>this.checkVersion(job),20);job.poll.unref();
     job.timer=setTimeout(()=>{ void this.stopReason(job,'TIMEOUT').catch(()=>{}); },job.plan!.timeoutMs);job.timer.unref();
     this.emitState(job);
     void this.options.execution.serviceReadiness(job.handle!).then(value=>{
-      if (this.active!==job || job.exit || !value) return;
+      if (!this.unsettled.has(job) || job.exit || !value) return;
       requireThat(sameHandle(value.handle,job.handle!),'Service readiness belongs to another Run.');
       job.run.serviceReadiness={ready:value.ready,url:value.url};
       if (value.problem) job.run.processProblem=snapshot(value.problem);
       this.emitState(job);
     }).catch(()=>{
-      if (this.active===job && !job.exit) { job.run.processProblem=problem('SERVICE_READINESS_UNAVAILABLE','Service readiness is unavailable, not process completion.');this.emitState(job); }
+      if (this.unsettled.has(job) && !job.exit) { job.run.processProblem=problem('SERVICE_READINESS_UNAVAILABLE','Service readiness is unavailable, not process completion.');this.emitState(job); }
     });
     void this.options.execution.wait(job.handle!,job.waitAbort.signal).then(async exit=>{
-      if (this.active!==job) return;
+      if (!this.unsettled.has(job)) return;
       this.acceptExit(job,exit);
       if (job.stopAttempt) await job.stopAttempt.catch(()=>{});
       await this.settle(job);
-    }).catch(()=>{ if(this.active===job) this.uncertain(job,'RUN_EXIT_UNCONFIRMED','Process exit or terminal settlement is not confirmed.'); });
+    }).catch(()=>{ if(this.unsettled.has(job)) this.uncertain(job,'RUN_EXIT_UNCONFIRMED','Process exit or terminal settlement is not confirmed.'); });
   }
   private acceptExit(job: Job, exit: ExecutionExit): void {
     requireThat(job.handle && sameHandle(exit.handle,job.handle) && Number.isSafeInteger(exit.exitCode) &&
@@ -158,12 +205,17 @@ export class RuntimeRunner {
     clearTimeout(job.timer);
   }
   get(runId: string): RunV2 { const job=this.job(runId);this.checkVersion(job);return snapshot(job.run); }
-  list(): RunV2[] { return [...this.jobs.keys()].map(id=>this.get(id)); }
+  list(sessionId?: string): RunV2[] { return [...this.jobs.values()].filter(j=>sessionId===undefined || j.sessionId===sessionId).map(j=>this.get(j.run.runId)); }
+  belongsToSession(runId:string, sessionId:string):boolean { return this.jobs.get(runId)?.sessionId===sessionId; }
   async stop(runId: string): Promise<RunV2> { return this.stopReason(this.job(runId),'USER'); }
-  async stopAll(): Promise<void> { if(this.active) await this.stop(this.active.run.runId); }
+  async stopAll(): Promise<void> { for(const job of [...this.unsettled]) await this.stop(job.run.runId); }
   private async stopReason(job: Job, reason: 'USER'|'TIMEOUT'): Promise<RunV2> {
-    if (this.active!==job) return this.get(job.run.runId);
-    if (!job.exit) job.requested ??=reason;
+    if (!this.unsettled.has(job)) return this.get(job.run.runId);
+    if (!job.exit && !job.requested) {
+      // Persist intent BEFORE the first Stop effect. Restart must not turn a user Stop into success.
+      if(job.plan)this.options.retainState?.(snapshot(job.plan),snapshot(job.run),reason);
+      job.requested=reason;
+    }
     clearTimeout(job.timer);
     // Start is awaiting capture/port: do not report a terminal result or start another Run.
     if (!job.attemptedStart || job.starting || !job.plan) throw new AppError(409,'RUN_ADMISSION_PENDING','Run admission has not settled; retain this Run.');
@@ -194,7 +246,7 @@ export class RuntimeRunner {
     return this.get(job.run.runId);
   }
   private async settle(job: Job): Promise<void> {
-    if (this.active!==job) return;
+    if (!this.unsettled.has(job)) return;
     if (job.settlement) return job.settlement;
     const pending=(async()=>{
       try {
@@ -214,7 +266,9 @@ export class RuntimeRunner {
         job.run.status=job.requested==='USER'?'CANCELLED':job.requested==='TIMEOUT'?'TIMED_OUT':job.outcome.status;
         job.run.exitCode=job.exit.exitCode;job.run.testOutcome=job.requested ? (job.run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE') : job.outcome.testOutcome;
         job.run.testCount=job.requested?null:job.outcome.testCount;job.run.processProblem=job.outcome.problem;
-        job.run.finishedAt=new Date(this.now()).toISOString();this.release(job);this.emitState(job);
+        job.run.serviceReadiness=null;job.run.finishedAt=job.exit.exitedAt;
+        this.options.retainState?.(snapshot(job.plan),snapshot(job.run),job.requested);
+        this.release(job);this.emitState(job);
       } catch(error) { this.uncertain(job,'RUN_SETTLEMENT_UNCONFIRMED','Exit/collection/terminal persistence/cleanup is not fully confirmed.');throw error; }
     })();
     job.settlement=pending;
@@ -222,11 +276,12 @@ export class RuntimeRunner {
   }
   private job(id: string): Job { const job=this.jobs.get(id);if(!job)throw new AppError(404,'RUN_NOT_FOUND','Run not found.');return job; }
   private checkVersion(job: Job): void {
-    if (this.active===job && this.options.getWorkspaceVersion()!==job.run.workspaceVersionAtStart) job.run.workspaceChangedDuringRun=true;
+    if (this.unsettled.has(job) && this.options.getWorkspaceVersion()!==job.run.workspaceVersionAtStart) job.run.workspaceChangedDuringRun=true;
   }
   private uncertain(job: Job, code: string, message: string): void {
-    if(this.active!==job)return;
-    job.run.status='PROCESS_STOP_UNCONFIRMED';
+    if(!this.unsettled.has(job))return;
+    job.run.status='PROCESS_STOP_UNCONFIRMED';job.run.finishedAt=null;job.run.exitCode=null;job.run.serviceReadiness=null;
+    job.run.testOutcome=job.run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE';job.run.testCount=null;
     // Frozen V2 couples this status to its canonical code. Keep the specific failed
     // lifecycle operation in safe fixed text, never lie about finality or relax the validator.
     job.run.processProblem=problem('PROCESS_STOP_UNCONFIRMED',code==='PROCESS_STOP_UNCONFIRMED'?message:`${code}: ${message}`);this.emitState(job);
@@ -234,14 +289,14 @@ export class RuntimeRunner {
   private release(job: Job): void {
     clearTimeout(job.timer);clearInterval(job.poll);job.waitAbort.abort();
     try {job.unsubscribe?.();} catch { /* Terminal ownership was already settled; observer disposal is not a process operation. */ }
-    if(this.active===job)this.active=null;
+    this.unsettled.delete(job);
   }
   private emitState(job: Job): void { this.emit('RUN_STATE',snapshot(job.run)); }
   private emit(type: 'RUN_STATE'|'RUN_OUTPUT',payload: unknown): void {
     try { this.options.emit(type,payload); } catch { /* A transport observer cannot release or corrupt process ownership. */ }
   }
   private output(job: Job, stream: 'STDOUT'|'STDERR', text: string): void {
-    if(this.active!==job || !['STDOUT','STDERR'].includes(stream) || typeof text!=='string')return;
+    if(!this.unsettled.has(job) || !['STDOUT','STDERR'].includes(stream) || typeof text!=='string')return;
     this.checkVersion(job);
     const bytes=Buffer.from(text,'utf8');
     for(let start=0;start<bytes.length;) {

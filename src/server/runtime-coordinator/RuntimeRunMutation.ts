@@ -20,9 +20,9 @@ export class RuntimeRunMutation {
     return { projectId: this.core.workspace.projectId, sessionId: request.sessionId, clientId: request.clientId,
       requestId: request.requestId, kind: 'RUN', payload: structuredClone(request) };
   }
-  private validate(request: RunRequestV2, stage: RunAdmissionStage): void {
+  validate(request: RunRequestV2, stage: RunAdmissionStage): void {
     const { result: run, plan } = stage;
-    if (!validateRunV2(run) || run.status !== 'QUEUED' || run.mode !== request.mode ||
+    if (!validateV2Request('RunRequest',request) || !validateRunV2(run) || run.status !== 'QUEUED' || run.mode !== request.mode ||
         run.configurationGeneration !== request.configurationGeneration || run.workspaceVersionAtStart !== request.expectedWorkspaceVersion ||
         run.startedAt !== null || run.finishedAt !== null || run.exitCode !== null || run.outputTail !== '' || run.outputTruncated ||
         run.workspaceChangedDuringRun || run.processProblem !== null || run.serviceReadiness !== null ||

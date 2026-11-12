@@ -17,6 +17,8 @@ import { canonical, readRecord, SerialQueue, sha256 } from './storage';
 import { inspectRuntimeServiceNetwork, prepareRuntimeServiceNetwork } from './RuntimeServiceNetwork';
 import { NetworkMaintenanceAbsence, type RuntimeNetworkPrepareRequest, type NetworkMaintenanceContext } from './RuntimeNetworkMaintenance';
 import type { RuntimeWorkspace } from './RuntimeWorkspace';
+import { RuntimeRunState } from './RuntimeRunState';
+import type { MutationIdentity, RunAdmissionStage } from './MutationJournal';
 import type { RuntimeExecutionLayout } from './RuntimeExecutionLayout';
 import type { PreparedRuntimeResolver, VerifiedPreparedCache, PreparedRuntimeSelection } from './PreparedRuntimeResolver';
 
@@ -46,6 +48,9 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   const adapters = createTaskRuntimeAdapterRegistry();
   const journal = new DurableRunJournal(layout.journalDirectory, layout.installationId);
   const byRun = new Map<string, DockerExecutor>();
+  const states = new RuntimeRunState(path.join(layout.stateDirectory,'run-state'));
+  const knownPlans = new Map<string,ExecutionPlan>();
+  let recoveryError:unknown=null, recovered=false;
   const maintenanceQueue = new SerialQueue();
   const check = () => { options.assertCurrent(); if (core.workspace.rootPath !== layout.workspaceRoot || core.workspace.projectId !== layout.projectId)
     throw new AppError(409, 'PROJECT_STATE_CHANGED', 'Execution project changed.'); };
@@ -59,13 +64,18 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
           command.args[0] === '/opt/paircoach/runtime-task.mjs' }],
     },
   });
+  const executorFromOriginal = (plan:ExecutionPlan, policy:RetainedRunPolicy) => new DockerExecutor({
+    transport:options.transport,journal,policy:{installationId:layout.installationId,engineId:plan.ownership.engineId,
+      runRoot:layout.runRoot,nonRootUser:'10001:10001',managedCacheRoot:policy.managedCacheRoot,serviceNetwork:policy.serviceNetwork,
+      runtimes:[{profile:plan.profile,image:plan.lockedImage,caches:plan.caches,
+        commandAllowed:command=>command.executable==='/opt/paircoach/node/bin/node' && command.args.length===2 && command.args[0]==='/opt/paircoach/runtime-task.mjs'}]}});
   const retained = (handle: ExecutionHandle) => {
     const executor = byRun.get(handle.runId);
     if (!executor) throw new AppError(409, 'RUN_HANDLE_UNAVAILABLE', 'No exact retained executor for this Run. Preserve the original request and reconcile.');
     return executor;
   };
   const readinessFor = (proposed?: SettingsV2): ExecutionPort['readiness'] => async (profile, generation) => {
-    check();
+    check();await assertAccounted();check();
     if (!configuration.resolved || generation !== configuration.configurationGeneration || !same(profile, configuration.resolved.profile))
       throw new AppError(409, 'CONFIGURATION_STALE', 'Runtime configuration changed.');
     const source = core.readSettings(), modes = {} as ExecutionReadiness['modes'];
@@ -103,15 +113,16 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     inspectOwnedOrphans: async installationId => {
       if (installationId !== layout.installationId) throw Error('Foreign installation');
       const result = [];
+      await assertAccounted();
       for (const executor of new Set(byRun.values())) result.push(...await executor.inspectOwnedOrphans(installationId));
       return result.filter((orphan, index, all) => all.findIndex(other => same(other.handle, orphan.handle)) === index);
     },
   };
   const runner = new Runner({ execution: port, getWorkspaceVersion: () => core.workspace.workspaceVersion,
-    emit: options.emit, persistTerminal: (handle, outcome) => retained(handle).persistTerminal(handle, outcome) });
+    emit: options.emit, retainState:(plan,run,requested)=>states.retain(plan,run,requested), persistTerminal: (handle, outcome) => retained(handle).persistTerminal(handle, outcome) });
   const dependencies: RuntimeReadinessDependencies = { execution: port, probe: prepared };
   async function start(original: RunRequestV2, admitOriginal?: OriginalRunAdmission) {
-    const request = structuredClone(original); check();
+    const request = structuredClone(original); check(); await assertAccounted(); check();
     if(core.session.state.lifecycle==='FINISHED') throw new AppError(409,'SESSION_FINISHED','This session is finished; its Run/report facts are immutable.');
     core.session.assertClient(request.clientId, request.sessionId);
     const runtime = configuration.resolved, source = core.readSettings();
@@ -135,6 +146,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         assertCurrent();
         if (!retainedPolicy) throw Error('No original captured execution policy');
         admitOriginal?.(result, plan, structuredClone(retainedPolicy));
+        knownPlans.set(result.runId,structuredClone(plan));
       },
       capture: async runId => {
         let selected: VerifiedPreparedCache | undefined;
@@ -167,6 +179,61 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       },
     });
   }
+  async function assertAccounted(requireTerminal=false):Promise<void> {
+    if(recoveryError)throw new AppError(409,'RUN_RECOVERY_REQUIRED','Unaccounted/corrupt durable Run owner; preserve original admissions and executor journal for exact recovery.');
+    await journal.initialize();
+    const records=await journal.list();
+    for(const record of records) {
+      const plan=knownPlans.get(record.handle.runId);
+      if(!plan || !same(plan,record.plan) || !byRun.has(record.handle.runId))
+        throw new AppError(409,'RUN_RECOVERY_REQUIRED','Durable Run has no unique original executor owner; finish/project replacement is fenced.');
+      if(requireTerminal && record.phase!=='REMOVED')
+        throw new AppError(409,'PROCESS_STOP_UNCONFIRMED','Durable Run ownership is not fully settled.');
+    }
+  }
+  /** Awaited startup only, under real project kernel + mutation journal exclusion. No
+   * current settings/profile/cache resolution, Docker invocation, create/start or cleanup. */
+  async function recover(admissions:readonly {identity:MutationIdentity;stage:RunAdmissionStage}[],validate?:(identity:MutationIdentity,stage:RunAdmissionStage)=>void):Promise<void> {
+    if(recovered)throw Error('Run ownership may be restored only once');recovered=true;
+    try {
+      for(const a of admissions)validate?.(a.identity,a.stage);
+      await journal.initialize();
+      const records=await journal.list(), byId=new Map(records.map(r=>[r.handle.runId,r]));
+      if(byId.size!==records.length)throw Error('Duplicate executor owner');
+      const ids=new Set<string>();
+      states.assertInventory(admissions.map(a=>a.stage.plan));
+      for(const {identity,stage} of admissions) {
+        const {result:original,plan,policy}=structuredClone(stage), id=original.runId;
+        if(ids.has(id) || identity.projectId!==layout.projectId || identity.sessionId!==plan.input.sessionId ||
+          identity.kind!=='RUN' || (identity.payload as RunRequestV2).clientId!==identity.clientId ||
+          (identity.payload as RunRequestV2).sessionId!==identity.sessionId || (identity.payload as RunRequestV2).requestId!==identity.requestId || plan.ownership.installationId!==layout.installationId ||
+          plan.input.immutableDirectory!==path.join(layout.runRoot,id,'input') ||
+          plan.input.buildDirectory!==path.join(layout.runRoot,id,'build') || plan.input.artifactsDirectory!==path.join(layout.runRoot,id,'artifacts'))
+          throw Error('Ambiguous/foreign original Run admission');
+        ids.add(id);knownPlans.set(id,plan);
+        const executor=executorFromOriginal(plan,policy);byRun.set(id,executor);
+        const record=byId.get(id)??null;
+        if(record && (!same(record.plan,plan) || !same(record.ownership,plan.ownership)))throw Error('Executor intent does not match original plan');
+        // Existing collection verification is read-only and independent of daemon/config.
+        // Use accepted executor verifier, never mint/cast a terminal receipt here.
+        if(record?.collection) {
+          if(!record.exit || !same(await executor.collect(record.handle,record.exit),record.collection))throw Error('Retained collection changed');
+        }
+        const retained=states.read(plan);
+        if(!record && retained && (retained.run.startedAt!==null || retained.run.exitCode!==null ||
+            retained.run.finishedAt!==null && retained.run.processProblem?.code!=='RUN_NOT_DISPATCHED'))
+          throw Error('Missing executor intent contradicts retained process/terminal evidence');
+        runner.restore({sessionId:identity.sessionId,original,plan,adapter:adapters.get(plan.profile),
+          handle:record?.handle??null,exit:record?.exit??null,collection:record?.collection??null,outcome:record?.outcome??null,
+          removed:record?.phase==='REMOVED',noProcess:record===null,retained});
+      }
+      if(records.some(r=>!ids.has(r.handle.runId)))throw Error('Executor orphan has no unique original admission');
+      await assertAccounted();
+    } catch(error) { recoveryError=error; }
+  }
+  async function stopAll():Promise<void> {
+    await assertAccounted();await runner.stopAll();await assertAccounted(true);
+  }
   async function prepareServiceNetwork(original:RuntimeNetworkPrepareRequest,recovery:boolean,originalContext:NetworkMaintenanceContext|null,stage:(context:NetworkMaintenanceContext)=>void,assertAdmission:()=>void) {
     const request=structuredClone(original);
     return maintenanceQueue.run(()=>core.workspace._withQueuedMutation(async()=>{
@@ -178,7 +245,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         if(runner.list().some(r=>['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.status)))
           throw new AppError(409,'RUN_IN_PROGRESS','Active/unsettled Run excludes network maintenance.');
       };
-      guard();
+      guard();await assertAccounted();
       if((await journal.list()).some(r=>r.phase!=='REMOVED'))throw new AppError(409,'RUN_IN_PROGRESS','Durable orphan Run excludes network maintenance; reconcile that exact owner first.');
       guard();
       let engineId:string;
@@ -228,6 +295,6 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       }
     }));
   }
-  return { runner, start:(original:RunRequestV2,admit?:OriginalRunAdmission)=>{const request=structuredClone(original);return maintenanceQueue.run(()=>start(request,admit));}, prepareServiceNetwork, readiness: dependencies,
+  return { runner, recover, assertAccounted, stopAll, start:(original:RunRequestV2,admit?:OriginalRunAdmission)=>{const request=structuredClone(original);return maintenanceQueue.run(()=>start(request,admit));}, prepareServiceNetwork, readiness: dependencies,
     readinessForSettings: (settings: SettingsV2): RuntimeReadinessDependencies => ({ execution: { readiness: readinessFor(structuredClone(settings)) }, probe: prepared }), journal };
 }

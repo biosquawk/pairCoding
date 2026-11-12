@@ -18,7 +18,7 @@ import { validateReconcileMutationRequestV2, validateMutationOutcomeV2, validate
 import type { ProjectV2, RunRequestV2, SessionBundleV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import type { LanguageView } from '../shared/language-v2';
 import { createRuntimeExecution } from './runtime-coordinator/RuntimeExecution';
-import { createRuntimeExecutionLayout } from './runtime-coordinator/RuntimeExecutionLayout';
+import { retainRuntimeExecutionLayout } from './runtime-coordinator/RuntimeExecutionLayout';
 import { createRuntimeDockerTransport } from './runtime-coordinator/RuntimeDockerTransport';
 import type { DockerTransport } from './execution/DockerTransport';
 import type { RuntimeEnvironment, RuntimeReadinessDependencies } from './runtime-config';
@@ -254,7 +254,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   function currentRuntimeRun() {
     // Read the genuine active neutral owner, including output/version changes not RUN_STATE events.
     // Do not invent V2 profile identity for a legacy injected executionFactory.
-    return execution ? null : runtimeExecution?.runner.list().at(-1) ?? null;
+    return execution ? null : runtimeExecution?.runner.list(session.state.sessionId).at(-1) ?? null;
   }
   async function reconcileMutation(body:ReconcileMutationRequestV2) {
     const mutation=clone(body.mutation), bound=startup, owner=binding!, core=currentCore(), request=mutation.request;
@@ -329,19 +329,31 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       clients=new RuntimeClientOwnership(path.join(boundWorkspace.dataDir,'runtime-clients'),boundWorkspace.projectId);
       saves=new RuntimeSettingsMutation(core,mutations);
       network=new RuntimeNetworkMaintenance(path.join(boundWorkspace.dataDir,'runtime-network-maintenance'),boundWorkspace.projectId);
-      if(options.enableExecution && owner.configuration.resolved) {
+      if(options.enableExecution) {
         try {
-          const layout = createRuntimeExecutionLayout(path.join(path.dirname(owner.configuration.resolved.configPath), '.paircoach-runtime'),
-            boundWorkspace.rootPath, boundWorkspace.projectId, owner.arguments.preparedRuntimeRoots);
+          const admissions=mutations.runAdmissions();
+          const layout = retainRuntimeExecutionLayout(boundWorkspace.dataDir,path.join(path.dirname(owner.arguments.runtimeConfigPath), '.paircoach-runtime'),
+            boundWorkspace.rootPath, boundWorkspace.projectId, admissions.map(a=>a.stage.plan),owner.arguments.preparedRuntimeRoots);
           const client = startupTransports.get(owner)!;
           if(!options.runtimeTransport) client.install(createRuntimeDockerTransport({ stateDirectory:layout.stateDirectory, executable:options.dockerExecutable }));
           boundRuntime = createRuntimeExecution({core, configuration:owner.configuration, prepared:owner.prepared, layout,
-            transport:client.transport, serviceNetwork:`paircoach-${layout.installationId}-service`, emit:publish,
+            transport:client.transport, serviceNetwork:`paircoach-${layout.installationId}-service`, emit:(type,payload)=>{
+              // Old-session owners remain queryable/stoppable but NEVER become the new
+              // session's lastRun/coach facts/report or authenticated Run stream.
+              if(boundRuntime?.runner.belongsToSession((payload as {runId:string}).runId,boundSession.state.sessionId))publish(type,payload);
+            },
             assertCurrent:()=>{if(disposed || startup!==owner || transitioning || closing) fail(409,'PROJECT_STATE_CHANGED','Runtime binding changed during admission.');}});
         } catch(error) {runtimeError=error;} // ONLY execution is unavailable; real editor/recovery stay live.
       }
       // Original admission recovery is independent of today's configuration/daemon availability.
       runs=new RuntimeRunMutation(core,mutations,boundRuntime ?? {start:async()=>fail(503,'RUNTIME_UNAVAILABLE','Neutral runtime is unavailable; no host fallback exists.')});
+      if(boundRuntime) {
+        try {
+          await boundRuntime.recover(mutations.runAdmissions(),(identity,stage)=>runs!.validate(identity.payload as RunRequestV2,stage));
+          // Publish only original acceptance recovery, never a new start/current result.
+          for(const a of mutations.runAdmissions())await runs.recover(a.identity.payload as RunRequestV2);
+        } catch(error) {runtimeError=error;}
+      }
       if(options.executionFactory) { boundExecution=options.executionFactory(boundContext); boundReports=boundExecution.reports; }
       else if(options.enableExecution) {
         // Reports are independent from Run availability; NEVER instantiate the legacy host Runner.
@@ -469,6 +481,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       coach?.abort(); return clone(result);
     });
   }
+  async function stopRuntimeForTransition(requireNoPendingAdmission=true) {
+    if(options.enableExecution && !options.executionFactory && (!runtimeExecution || binding?.runtimeError))
+      fail(409,'RUN_RECOVERY_REQUIRED','Runtime ownership could not be recovered; finish/project replacement cannot forget retained Runs. Editing remains available.');
+    await runtimeExecution?.stopAll();
+    if(requireNoPendingAdmission && options.enableExecution && !options.executionFactory)binding?.mutations.assertNoPendingRuns();
+  }
   async function finish(reason:Report['reason']) {
     if(transitioning) fail(409,'SESSION_TRANSITION','Poczekaj na utrwalenie bieżącej operacji; lokalny draft pozostaje niezapisany.');
     if (!reports) fail(503,'REPORTS_NOT_ENABLED','Reports are not enabled.');
@@ -477,7 +495,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     try {
       coach?.abort(); session.releaseCoach();
       await execution?.runner.stopAll();
-      await runtimeExecution?.runner.stopAll();
+      await stopRuntimeForTransition();
       const finalSnapshot=await workspace.createSnapshotAsync('Stan końcowy próby');
       const finalMaterial=workspace.readSnapshot(finalSnapshot.snapshotId);
       const finalSession=session.getSession();
@@ -486,7 +504,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       finalSession.interventionId=null;finalSession.coachMode='UNAVAILABLE';finalSession.timer.status='STOPPED';
       const frozen:FrozenFacts={session:finalSession,snapshot:clone(finalSnapshot),finalMaterial:clone(finalMaterial),
         settings:clone(workspace.settings),aiConsent:workspace.settings.aiConsent,
-        runs:clone(execution?.runner.list() ?? runtimeExecution?.runner.list() ?? []),chat:clone(chat),events:clone(facts)};
+        runs:clone(execution?.runner.list() ?? runtimeExecution?.runner.list(session.state.sessionId) ?? []),chat:clone(chat),events:clone(facts)};
       persistingFinish=true;
       try { report=reports.finish(reason,frozen); } finally {persistingFinish=false;}
       session.finish();emit('SESSION_REPORT',report);return clone(report);
@@ -589,7 +607,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             prepared=await prepareBinding(nextCore,next);
             prepared.clients.bind(body.clientId,nextCore.session.state.sessionId);
             await execution?.runner.stopAll();
-            await runtimeExecution?.runner.stopAll();
+            await stopRuntimeForTransition();
             if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
             const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
             startup=next;({workspace,session,gate}=nextCore);binding=prepared;
@@ -603,7 +621,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             transitioning=false;
             return await getProject();
           } finally {
-            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.runner.stopAll();await prepared.dispose();}else next.close();}}
+            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.stopAll();await prepared.dispose();}else next.close();}}
             finally {transitioning=false;}
           }
         }
@@ -822,7 +840,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       await socketAttempt?.catch(()=>{});
       ledger.close();proposalOutcomes.close();openLedger.close();
       try {
-        await execution?.runner.stopAll();await runtimeExecution?.runner.stopAll();
+        await execution?.runner.stopAll();await stopRuntimeForTransition(false);
       } finally {
         try {if(binding)await binding.dispose();else if(!result.error)startup.close();} finally {
           for(const [ws,p] of peers){p.authenticated=false;ws.terminate();}wss.close();
