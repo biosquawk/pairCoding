@@ -1,0 +1,29 @@
+{
+  "start_ms": 1794405135000,
+  "stage9_first_task_ms": 1794421494608,
+  "stop_acknowledged_ms": 1794467501157,
+  "timezone": "Europe/Warsaw",
+  "elapsed_campaign_hours": 17.3239325,
+  "elapsed_stage9_hours": 12.779596944444444,
+  "calls_database_rows": [
+    {
+      "status": "SETTLED",
+      "rows": 10381,
+      "paid_flag_rows": 10381,
+      "input_tokens": 792737169,
+      "cache_tokens": 217446528,
+      "output_tokens": 6784145,
+      "reasoning_tokens": 1593104
+    },
+    {
+      "status": "UNKNOWN",
+      "rows": 3,
+      "paid_flag_rows": 3,
+      "input_tokens": null,
+      "cache_tokens": null,
+      "output_tokens": null,
+      "reasoning_tokens": null
+    }
+  ],
+  "caveat": "Rows are Thalamus call accounting, not independently verified physical model invocations or invoices; do not add cache/reasoning to token totals without provider semantics. Wall clock is not CPU time and overlapping stages must not be summed."
+}

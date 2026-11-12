@@ -1,0 +1,22 @@
+{
+  "at_ms": 1794464164698,
+  "status": "PASS_EXACT_RECEIVED_CHANGE_INTEGRATED_NOT_DEPLOYED",
+  "base": "93e8b87aa7071d3bbbf64ea40eb3cda3b75c3513",
+  "sourceCandidate": "524dbd9564754a446e6db14a6d93b40e936301f1",
+  "commit": "b235eea413a1df84e4be4cea813a25ac8a5de984",
+  "tree": "f16014bb9c93cbc8d3c3e2b3655b50e4be21a4fd",
+  "branch": "rebirth/stage1",
+  "paths": [
+    "next-runtime/runtime/src/main/java/io/thalamus/rebirth/runtime/WatchdogAndVenetianJudge.java",
+    "next-runtime/runtime/src/test/java/io/thalamus/rebirth/runtime/NativeScopedCommandsTest.java"
+  ],
+  "exactByteEqualityToTestedCandidate": true,
+  "patchSHA256": "92e866fb17b16c2ac5f6765b59299c178ed8639d1f87286c7876dad18649dd72",
+  "nativeProof": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/native-watchdog-focused-check/receipt.json",
+  "ROOT_addedProductLogic": false,
+  "originalOtherSourcePreserved": true,
+  "trackedGitClean": true,
+  "deployed": false,
+  "daemonRestarted": false,
+  "newCodeOrigin": "Actual Thalamus P1 candidate524db; ROOT exact integration only"
+}

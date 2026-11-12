@@ -1,0 +1,66 @@
+{
+  "at_ms": 1794427286389,
+  "decision": "PASS",
+  "scope": "Operator admission from required A-B feasibility/design into C-E implementation ONLY; not acceptance of the complete experimental LSP suite, product release or final matrix",
+  "product_baseline_sha": "2d7e556638bc1d2438c6b9d9bc2f6318e7a88d79",
+  "full_owner_contract_sha256": "f587ec4b4e78f76d814b5183aa9bbf62c1688a229e621ec364ec2789baefbe69",
+  "central_design_sha256": "248876f801cdd5e2cd4a336245ac5cd2f586a2f1ebe4cda32814c247dac9a8ce",
+  "input_shas": {
+    "runtime": "32984e7cc7ca0516ceb6cd84d4582780ea8c1376",
+    "lsp": "5a10b46fe74b8d956591a6ebb484f07d2509c27f",
+    "editor_contract": "640e0705703fb769bf448c97a02d20ed7da9bf4a"
+  },
+  "checklist": {
+    "1": {
+      "status": "PASS",
+      "proof": "Accepted baseline9A fix; old assertions and thresholds preserved, Kmain and ROOTmirror clean2d7e556"
+    },
+    "2": {
+      "status": "PASS",
+      "proof": "217 hashed local reference files/four sanitized sources; actual separate native Windows Node25.6.1 and WSL Node22.22.2 access same existing Docker Desktop Linux Engine"
+    },
+    "3": {
+      "status": "PASS",
+      "proof": "Actual JDK21/27 compile/run/effective release controls + Python3.13, both WSL and native Windows invocation, confirmed exact Stop and unaffected control; 10 collected removed containers"
+    },
+    "4": {
+      "status": "PASS",
+      "proof": "Actual Java27 custom dot/explicit completion+rename+semantic error/clear and actual Python3.13 equivalent; JDT1.63 actual JVM27 and distinct target21 readback, capabilities/versions measured; source-correlated immutable diagnostics selected",
+      "open_finding": "Extra Java21 ScopedValue raw severity1 oracle FAIL despite actual release21/previewdisabled. Full experimental suite stays FAIL; this is not treated as passed. Carry exact discrepancy as independent mandatory D/E investigation/production diagnostic acceptance item, no blind repeat or severity rewrite."
+    },
+    "5": {
+      "status": "PASS",
+      "proof": "Reviewed shared contracts/migration/config precedence, DESIGN only"
+    },
+    "6": {
+      "status": "PASS",
+      "proof": "Separate immutable ACK Run, mutable completion, immutable project diagnostics lifecycles; DESIGN only"
+    },
+    "7": {
+      "status": "PASS",
+      "proof": "Central URI/UTF16 correlation + synchronous safe plain-edit acceptance and CONTROL_PREPARE fencing; DESIGN only"
+    },
+    "8": {
+      "status": "PASS",
+      "proof": "Bounded controlled containers/preparation/cache separation; DESIGN only"
+    }
+  },
+  "experimental_test_outcomes": {
+    "runtime_small_wsl_native": "PASS",
+    "lsp_full_5a": "FAIL",
+    "lsp_full_java27_5a": "PASS",
+    "lsp_full_java21_5a": "FAIL",
+    "lsp_python_isolated_5a": "PASS"
+  },
+  "mandatory_open_findings": [
+    {
+      "id": "JDT21_PREVIEW_API_DIAGNOSTIC_DISCREPANCY",
+      "status": "FAIL",
+      "requirement": "Preserve raw failure and original oracle; diagnose pinned compiler/server semantics with new evidence, prove final product respects active release/API policy. No blind preview-toggle loop or inventing severity1. Do not mark final goal complete while unresolved requirement remains."
+    }
+  ],
+  "next_authorized": "K freezes common shared DTO/port definitions with one owner; then disjoint BE/FE C-E streams up to4 each. Retain dedicated investigation owner for Java21 finding. Fast relevant developer checks only. P3-P6/full F/native/realAI/freshpackage after implemented9, JUDGE priorfalse restored then.",
+  "not_authorized_by_this_gate": "Final acceptance, weakening frozen assertions/goldens/METRIC, public deployment/push/alarm before full final acceptance, host toolchain installs/global platform reconfiguration",
+  "evidence_readback": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-host-operator/ab-final-independent-readback.json",
+  "proof_limit": "Standalone LSP and small runtime are not GUI LIVE/native application proof. Full TEST101-107/AC101-112 and all prior-stage QA remain unchanged."
+}

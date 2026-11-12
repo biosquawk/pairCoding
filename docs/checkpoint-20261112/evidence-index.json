@@ -1,0 +1,30 @@
+[
+  {
+    "path": "docs/checkpoint-20261112/evidence/STAGE09-AB-ROOT-DECISION.json",
+    "sha256": "f1a3477fb004a0b49702b24ff6417f5e2889e162b3b92c0c994e74ef458905d2"
+  },
+  {
+    "path": "docs/checkpoint-20261112/evidence/bounded-stage-a8b4b167-root-readback/receipt.json",
+    "sha256": "72ec17eaab6a85d8e0fb890cd6342a101c5ce4362dd333f5f42c65583658e59d"
+  },
+  {
+    "path": "docs/checkpoint-20261112/evidence/ordinary-refresh-29990e2f-root-readback/receipt.json",
+    "sha256": "01e5079582551a134877cd00637d3779e74b5818e0dc988c9948dba19288438c"
+  },
+  {
+    "path": "docs/checkpoint-20261112/evidence/stage09-preflight/LOCAL-REFERENCE-REVIEW.md",
+    "sha256": "31d457d0260ca69cd2d96447ff1d200bf7f0108396b871c47ebf7b85a8931c00"
+  },
+  {
+    "path": "docs/checkpoint-20261112/evidence/native-watchdog-focused-check/exact-runtime-integration.patch",
+    "sha256": "92e866fb17b16c2ac5f6765b59299c178ed8639d1f87286c7876dad18649dd72"
+  },
+  {
+    "path": "docs/checkpoint-20261112/evidence/native-watchdog-focused-check/integration.json",
+    "sha256": "b451f9f7e80860de139f804b65190df7f11c6a8f02221e53d53650eda4d67c35"
+  },
+  {
+    "path": "docs/checkpoint-20261112/evidence/native-watchdog-focused-check/post-deployment-identity.json",
+    "sha256": "ae60af27b4667042722b02cc52cc17d8a8c1bb22f91c32dc11a86f900c6bdb54"
+  }
+]

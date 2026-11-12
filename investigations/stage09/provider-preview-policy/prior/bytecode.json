@@ -1,0 +1,1554 @@
+{
+  "artifact": "plugins/org.eclipse.jdt.core.compiler.batch_3.46.200.v20261008-1115.jar",
+  "sha256": "f667bb3666d9875a2309fa2447a19e6cdd960281473bd7125a22c5a435246d21",
+  "methods": [
+    {
+      "classFile": "org/eclipse/jdt/internal/compiler/problem/ProblemReporter.class",
+      "classSha256": "034a2e65e3aa20cde5fd1ebe891c7d27fda6b2d56da2725357df68334f0c0be9",
+      "major": 61,
+      "minor": 0,
+      "name": "previewAPIUsed",
+      "descriptor": "(Lorg/eclipse/jdt/internal/compiler/lookup/Scope;IILorg/eclipse/jdt/internal/compiler/env/IBinaryAnnotation;)V",
+      "codeSha256": "329cca9c13a2f00a52befb3c9b27061464cecff53257815a87539fea1154e594",
+      "instructions": [
+        {
+          "offset": 0,
+          "op": "0x01",
+          "bytes": "01"
+        },
+        {
+          "offset": 1,
+          "op": "0x3a",
+          "bytes": "3a05"
+        },
+        {
+          "offset": 3,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 4,
+          "op": "0x36",
+          "bytes": "3606"
+        },
+        {
+          "offset": 6,
+          "op": "0x2b",
+          "bytes": "2b"
+        },
+        {
+          "offset": 7,
+          "op": "invokevirtual",
+          "bytes": "b60e4a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/Scope",
+            [
+              "problemReporter",
+              "()Lorg/eclipse/jdt/internal/compiler/problem/ProblemReporter;"
+            ]
+          ]
+        },
+        {
+          "offset": 10,
+          "op": "invokestatic",
+          "bytes": "b80e4e",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/DefaultErrorHandlingPolicies",
+            [
+              "ignoreAllProblems",
+              "()Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;"
+            ]
+          ]
+        },
+        {
+          "offset": 13,
+          "op": "invokevirtual",
+          "bytes": "b60e54",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "switchErrorHandlingPolicy",
+              "(Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;)Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;"
+            ]
+          ]
+        },
+        {
+          "offset": 16,
+          "op": "0x3a",
+          "bytes": "3a07"
+        },
+        {
+          "offset": 18,
+          "op": "0x19",
+          "bytes": "1904"
+        },
+        {
+          "offset": 20,
+          "op": "0xb9",
+          "bytes": "b90e580100",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/env/IBinaryAnnotation",
+            [
+              "getElementValuePairs",
+              "()[Lorg/eclipse/jdt/internal/compiler/env/IBinaryElementValuePair;"
+            ]
+          ]
+        },
+        {
+          "offset": 25,
+          "op": "0x59",
+          "bytes": "59"
+        },
+        {
+          "offset": 26,
+          "op": "0x3a",
+          "bytes": "3a0b"
+        },
+        {
+          "offset": 28,
+          "op": "0xbe",
+          "bytes": "be"
+        },
+        {
+          "offset": 29,
+          "op": "0x36",
+          "bytes": "360a"
+        },
+        {
+          "offset": 31,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 32,
+          "op": "0x36",
+          "bytes": "3609"
+        },
+        {
+          "offset": 34,
+          "op": "goto",
+          "bytes": "a70124",
+          "target": 326
+        },
+        {
+          "offset": 37,
+          "op": "0x19",
+          "bytes": "190b"
+        },
+        {
+          "offset": 39,
+          "op": "0x15",
+          "bytes": "1509"
+        },
+        {
+          "offset": 41,
+          "op": "0x32",
+          "bytes": "32"
+        },
+        {
+          "offset": 42,
+          "op": "0x3a",
+          "bytes": "3a08"
+        },
+        {
+          "offset": 44,
+          "op": "0x19",
+          "bytes": "1908"
+        },
+        {
+          "offset": 46,
+          "op": "0xb9",
+          "bytes": "b90e5d0100",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/env/IBinaryElementValuePair",
+            [
+              "getValue",
+              "()Ljava/lang/Object;"
+            ]
+          ]
+        },
+        {
+          "offset": 51,
+          "op": "0x59",
+          "bytes": "59"
+        },
+        {
+          "offset": 52,
+          "op": "0x3a",
+          "bytes": "3a0d"
+        },
+        {
+          "offset": 54,
+          "op": "0xc1",
+          "bytes": "c10e62",
+          "constant": "org/eclipse/jdt/internal/compiler/env/EnumConstantSignature"
+        },
+        {
+          "offset": 57,
+          "op": "ifeq",
+          "bytes": "9900dc",
+          "target": 277
+        },
+        {
+          "offset": 60,
+          "op": "0x19",
+          "bytes": "190d"
+        },
+        {
+          "offset": 62,
+          "op": "0xc0",
+          "bytes": "c00e62",
+          "constant": "org/eclipse/jdt/internal/compiler/env/EnumConstantSignature"
+        },
+        {
+          "offset": 65,
+          "op": "0x3a",
+          "bytes": "3a0c"
+        },
+        {
+          "offset": 67,
+          "op": "0x19",
+          "bytes": "190c"
+        },
+        {
+          "offset": 69,
+          "op": "invokevirtual",
+          "bytes": "b60e64",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/env/EnumConstantSignature",
+            [
+              "getTypeName",
+              "()[C"
+            ]
+          ]
+        },
+        {
+          "offset": 72,
+          "op": "0x3a",
+          "bytes": "3a0e"
+        },
+        {
+          "offset": 74,
+          "op": "0x2b",
+          "bytes": "2b"
+        },
+        {
+          "offset": 75,
+          "op": "invokevirtual",
+          "bytes": "b60e66",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/Scope",
+            [
+              "environment",
+              "()Lorg/eclipse/jdt/internal/compiler/lookup/LookupEnvironment;"
+            ]
+          ]
+        },
+        {
+          "offset": 78,
+          "op": "0x19",
+          "bytes": "190e"
+        },
+        {
+          "offset": 80,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 81,
+          "op": "0x19",
+          "bytes": "190e"
+        },
+        {
+          "offset": 83,
+          "op": "0xbe",
+          "bytes": "be"
+        },
+        {
+          "offset": 84,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 85,
+          "op": "0x64",
+          "bytes": "64"
+        },
+        {
+          "offset": 86,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 87,
+          "op": "0x01",
+          "bytes": "01"
+        },
+        {
+          "offset": 88,
+          "op": "invokevirtual",
+          "bytes": "b60e69",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/LookupEnvironment",
+            [
+              "getTypeFromConstantPoolName",
+              "([CIIZ[[[C)Lorg/eclipse/jdt/internal/compiler/lookup/ReferenceBinding;"
+            ]
+          ]
+        },
+        {
+          "offset": 91,
+          "op": "0x3a",
+          "bytes": "3a0f"
+        },
+        {
+          "offset": 93,
+          "op": "0x19",
+          "bytes": "190f"
+        },
+        {
+          "offset": 95,
+          "op": "invokevirtual",
+          "bytes": "b60e6d",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/ReferenceBinding",
+            [
+              "isUnresolvedType",
+              "()Z"
+            ]
+          ]
+        },
+        {
+          "offset": 98,
+          "op": "ifeq",
+          "bytes": "990012",
+          "target": 116
+        },
+        {
+          "offset": 101,
+          "op": "0x19",
+          "bytes": "190f"
+        },
+        {
+          "offset": 103,
+          "op": "0x2b",
+          "bytes": "2b"
+        },
+        {
+          "offset": 104,
+          "op": "invokevirtual",
+          "bytes": "b60e66",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/Scope",
+            [
+              "environment",
+              "()Lorg/eclipse/jdt/internal/compiler/lookup/LookupEnvironment;"
+            ]
+          ]
+        },
+        {
+          "offset": 107,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 108,
+          "op": "invokestatic",
+          "bytes": "b80e70",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/BinaryTypeBinding",
+            [
+              "resolveType",
+              "(Lorg/eclipse/jdt/internal/compiler/lookup/TypeBinding;Lorg/eclipse/jdt/internal/compiler/lookup/LookupEnvironment;Z)Lorg/eclipse/jdt/internal/compiler/lookup/TypeBinding;"
+            ]
+          ]
+        },
+        {
+          "offset": 111,
+          "op": "0xc0",
+          "bytes": "c000ff",
+          "constant": "org/eclipse/jdt/internal/compiler/lookup/ReferenceBinding"
+        },
+        {
+          "offset": 114,
+          "op": "0x3a",
+          "bytes": "3a0f"
+        },
+        {
+          "offset": 116,
+          "op": "0x19",
+          "bytes": "190f"
+        },
+        {
+          "offset": 118,
+          "op": "0x19",
+          "bytes": "190c"
+        },
+        {
+          "offset": 120,
+          "op": "invokevirtual",
+          "bytes": "b60e76",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/env/EnumConstantSignature",
+            [
+              "getEnumConstantName",
+              "()[C"
+            ]
+          ]
+        },
+        {
+          "offset": 123,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 124,
+          "op": "invokevirtual",
+          "bytes": "b60e79",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/ReferenceBinding",
+            [
+              "getField",
+              "([CZ)Lorg/eclipse/jdt/internal/compiler/lookup/FieldBinding;"
+            ]
+          ]
+        },
+        {
+          "offset": 127,
+          "op": "0x3a",
+          "bytes": "3a10"
+        },
+        {
+          "offset": 129,
+          "op": "0x19",
+          "bytes": "1910"
+        },
+        {
+          "offset": 131,
+          "op": "0xc7",
+          "bytes": "c70006",
+          "target": 137
+        },
+        {
+          "offset": 134,
+          "op": "goto",
+          "bytes": "a700bd",
+          "target": 323
+        },
+        {
+          "offset": 137,
+          "op": "0x19",
+          "bytes": "1910"
+        },
+        {
+          "offset": 139,
+          "op": "invokevirtual",
+          "bytes": "b60a7b",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/FieldBinding",
+            [
+              "getAnnotations",
+              "()[Lorg/eclipse/jdt/internal/compiler/lookup/AnnotationBinding;"
+            ]
+          ]
+        },
+        {
+          "offset": 142,
+          "op": "0x59",
+          "bytes": "59"
+        },
+        {
+          "offset": 143,
+          "op": "0x3a",
+          "bytes": "3a14"
+        },
+        {
+          "offset": 145,
+          "op": "0xbe",
+          "bytes": "be"
+        },
+        {
+          "offset": 146,
+          "op": "0x36",
+          "bytes": "3613"
+        },
+        {
+          "offset": 148,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 149,
+          "op": "0x36",
+          "bytes": "3612"
+        },
+        {
+          "offset": 151,
+          "op": "goto",
+          "bytes": "a70074",
+          "target": 267
+        },
+        {
+          "offset": 154,
+          "op": "0x19",
+          "bytes": "1914"
+        },
+        {
+          "offset": 156,
+          "op": "0x15",
+          "bytes": "1512"
+        },
+        {
+          "offset": 158,
+          "op": "0x32",
+          "bytes": "32"
+        },
+        {
+          "offset": 159,
+          "op": "0x3a",
+          "bytes": "3a11"
+        },
+        {
+          "offset": 161,
+          "op": "0x19",
+          "bytes": "1911"
+        },
+        {
+          "offset": 163,
+          "op": "invokevirtual",
+          "bytes": "b6041f",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/AnnotationBinding",
+            [
+              "getAnnotationType",
+              "()Lorg/eclipse/jdt/internal/compiler/lookup/ReferenceBinding;"
+            ]
+          ]
+        },
+        {
+          "offset": 166,
+          "op": "invokevirtual",
+          "bytes": "b60e7d",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/ReferenceBinding",
+            [
+              "constantPoolName",
+              "()[C"
+            ]
+          ]
+        },
+        {
+          "offset": 169,
+          "op": "getstatic",
+          "bytes": "b20e80",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/codegen/ConstantPool",
+            [
+              "PREVIEW_FEATURE_JEP",
+              "[C"
+            ]
+          ]
+        },
+        {
+          "offset": 172,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 173,
+          "op": "getstatic",
+          "bytes": "b20e80",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/codegen/ConstantPool",
+            [
+              "PREVIEW_FEATURE_JEP",
+              "[C"
+            ]
+          ]
+        },
+        {
+          "offset": 176,
+          "op": "0xbe",
+          "bytes": "be"
+        },
+        {
+          "offset": 177,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 178,
+          "op": "0x64",
+          "bytes": "64"
+        },
+        {
+          "offset": 179,
+          "op": "invokestatic",
+          "bytes": "b80e85",
+          "constant": [
+            "org/eclipse/jdt/core/compiler/CharOperation",
+            [
+              "equals",
+              "([C[CII)Z"
+            ]
+          ]
+        },
+        {
+          "offset": 182,
+          "op": "ifeq",
+          "bytes": "990052",
+          "target": 264
+        },
+        {
+          "offset": 185,
+          "op": "0x19",
+          "bytes": "1911"
+        },
+        {
+          "offset": 187,
+          "op": "invokevirtual",
+          "bytes": "b6042a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/AnnotationBinding",
+            [
+              "getElementValuePairs",
+              "()[Lorg/eclipse/jdt/internal/compiler/lookup/ElementValuePair;"
+            ]
+          ]
+        },
+        {
+          "offset": 190,
+          "op": "0x59",
+          "bytes": "59"
+        },
+        {
+          "offset": 191,
+          "op": "0x3a",
+          "bytes": "3a18"
+        },
+        {
+          "offset": 193,
+          "op": "0xbe",
+          "bytes": "be"
+        },
+        {
+          "offset": 194,
+          "op": "0x36",
+          "bytes": "3617"
+        },
+        {
+          "offset": 196,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 197,
+          "op": "0x36",
+          "bytes": "3616"
+        },
+        {
+          "offset": 199,
+          "op": "goto",
+          "bytes": "a7003a",
+          "target": 257
+        },
+        {
+          "offset": 202,
+          "op": "0x19",
+          "bytes": "1918"
+        },
+        {
+          "offset": 204,
+          "op": "0x15",
+          "bytes": "1516"
+        },
+        {
+          "offset": 206,
+          "op": "0x32",
+          "bytes": "32"
+        },
+        {
+          "offset": 207,
+          "op": "0x3a",
+          "bytes": "3a15"
+        },
+        {
+          "offset": 209,
+          "op": "getstatic",
+          "bytes": "b20e88",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/codegen/ConstantPool",
+            [
+              "TITLE",
+              "[C"
+            ]
+          ]
+        },
+        {
+          "offset": 212,
+          "op": "0x19",
+          "bytes": "1915"
+        },
+        {
+          "offset": 214,
+          "op": "invokevirtual",
+          "bytes": "b6042e",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/ElementValuePair",
+            [
+              "getName",
+              "()[C"
+            ]
+          ]
+        },
+        {
+          "offset": 217,
+          "op": "invokestatic",
+          "bytes": "b80437",
+          "constant": [
+            "org/eclipse/jdt/core/compiler/CharOperation",
+            [
+              "equals",
+              "([C[C)Z"
+            ]
+          ]
+        },
+        {
+          "offset": 220,
+          "op": "ifeq",
+          "bytes": "990022",
+          "target": 254
+        },
+        {
+          "offset": 223,
+          "op": "0x19",
+          "bytes": "1915"
+        },
+        {
+          "offset": 225,
+          "op": "getfield",
+          "bytes": "b4043a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/ElementValuePair",
+            [
+              "value",
+              "Ljava/lang/Object;"
+            ]
+          ]
+        },
+        {
+          "offset": 228,
+          "op": "0xc1",
+          "bytes": "c1043d",
+          "constant": "org/eclipse/jdt/internal/compiler/impl/StringConstant"
+        },
+        {
+          "offset": 231,
+          "op": "ifeq",
+          "bytes": "990017",
+          "target": 254
+        },
+        {
+          "offset": 234,
+          "op": "0x19",
+          "bytes": "1915"
+        },
+        {
+          "offset": 236,
+          "op": "getfield",
+          "bytes": "b4043a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/ElementValuePair",
+            [
+              "value",
+              "Ljava/lang/Object;"
+            ]
+          ]
+        },
+        {
+          "offset": 239,
+          "op": "0xc0",
+          "bytes": "c0043d",
+          "constant": "org/eclipse/jdt/internal/compiler/impl/StringConstant"
+        },
+        {
+          "offset": 242,
+          "op": "0x3a",
+          "bytes": "3a19"
+        },
+        {
+          "offset": 244,
+          "op": "0x19",
+          "bytes": "1919"
+        },
+        {
+          "offset": 246,
+          "op": "invokevirtual",
+          "bytes": "b6043f",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/StringConstant",
+            [
+              "stringValue",
+              "()Ljava/lang/String;"
+            ]
+          ]
+        },
+        {
+          "offset": 249,
+          "op": "0x3a",
+          "bytes": "3a05"
+        },
+        {
+          "offset": 251,
+          "op": "goto",
+          "bytes": "a7000d",
+          "target": 264
+        },
+        {
+          "offset": 254,
+          "op": "0x84",
+          "bytes": "841601"
+        },
+        {
+          "offset": 257,
+          "op": "0x15",
+          "bytes": "1516"
+        },
+        {
+          "offset": 259,
+          "op": "0x15",
+          "bytes": "1517"
+        },
+        {
+          "offset": 261,
+          "op": "0xa1",
+          "bytes": "a1ffc5",
+          "target": 202
+        },
+        {
+          "offset": 264,
+          "op": "0x84",
+          "bytes": "841201"
+        },
+        {
+          "offset": 267,
+          "op": "0x15",
+          "bytes": "1512"
+        },
+        {
+          "offset": 269,
+          "op": "0x15",
+          "bytes": "1513"
+        },
+        {
+          "offset": 271,
+          "op": "0xa1",
+          "bytes": "a1ff8b",
+          "target": 154
+        },
+        {
+          "offset": 274,
+          "op": "goto",
+          "bytes": "a70031",
+          "target": 323
+        },
+        {
+          "offset": 277,
+          "op": "0x19",
+          "bytes": "1908"
+        },
+        {
+          "offset": 279,
+          "op": "0xb9",
+          "bytes": "b90e8b0100",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/env/IBinaryElementValuePair",
+            [
+              "getName",
+              "()[C"
+            ]
+          ]
+        },
+        {
+          "offset": 284,
+          "op": "getstatic",
+          "bytes": "b20e8c",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/codegen/ConstantPool",
+            [
+              "REFLECTIVE",
+              "[C"
+            ]
+          ]
+        },
+        {
+          "offset": 287,
+          "op": "invokestatic",
+          "bytes": "b80437",
+          "constant": [
+            "org/eclipse/jdt/core/compiler/CharOperation",
+            [
+              "equals",
+              "([C[C)Z"
+            ]
+          ]
+        },
+        {
+          "offset": 290,
+          "op": "ifeq",
+          "bytes": "990021",
+          "target": 323
+        },
+        {
+          "offset": 293,
+          "op": "0x19",
+          "bytes": "1908"
+        },
+        {
+          "offset": 295,
+          "op": "0xb9",
+          "bytes": "b90e5d0100",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/env/IBinaryElementValuePair",
+            [
+              "getValue",
+              "()Ljava/lang/Object;"
+            ]
+          ]
+        },
+        {
+          "offset": 300,
+          "op": "0x59",
+          "bytes": "59"
+        },
+        {
+          "offset": 301,
+          "op": "0x3a",
+          "bytes": "3a0f"
+        },
+        {
+          "offset": 303,
+          "op": "0xc1",
+          "bytes": "c10e8f",
+          "constant": "org/eclipse/jdt/internal/compiler/impl/BooleanConstant"
+        },
+        {
+          "offset": 306,
+          "op": "ifeq",
+          "bytes": "990011",
+          "target": 323
+        },
+        {
+          "offset": 309,
+          "op": "0x19",
+          "bytes": "190f"
+        },
+        {
+          "offset": 311,
+          "op": "0xc0",
+          "bytes": "c00e8f",
+          "constant": "org/eclipse/jdt/internal/compiler/impl/BooleanConstant"
+        },
+        {
+          "offset": 314,
+          "op": "0x3a",
+          "bytes": "3a0e"
+        },
+        {
+          "offset": 316,
+          "op": "0x19",
+          "bytes": "190e"
+        },
+        {
+          "offset": 318,
+          "op": "invokevirtual",
+          "bytes": "b60e91",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/BooleanConstant",
+            [
+              "booleanValue",
+              "()Z"
+            ]
+          ]
+        },
+        {
+          "offset": 321,
+          "op": "0x36",
+          "bytes": "3606"
+        },
+        {
+          "offset": 323,
+          "op": "0x84",
+          "bytes": "840901"
+        },
+        {
+          "offset": 326,
+          "op": "0x15",
+          "bytes": "1509"
+        },
+        {
+          "offset": 328,
+          "op": "0x15",
+          "bytes": "150a"
+        },
+        {
+          "offset": 330,
+          "op": "0xa1",
+          "bytes": "a1fedb",
+          "target": 37
+        },
+        {
+          "offset": 333,
+          "op": "goto",
+          "bytes": "a70012",
+          "target": 351
+        },
+        {
+          "offset": 336,
+          "op": "0x3a",
+          "bytes": "3a1a"
+        },
+        {
+          "offset": 338,
+          "op": "0x2b",
+          "bytes": "2b"
+        },
+        {
+          "offset": 339,
+          "op": "invokevirtual",
+          "bytes": "b60e4a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/Scope",
+            [
+              "problemReporter",
+              "()Lorg/eclipse/jdt/internal/compiler/problem/ProblemReporter;"
+            ]
+          ]
+        },
+        {
+          "offset": 342,
+          "op": "0x19",
+          "bytes": "1907"
+        },
+        {
+          "offset": 344,
+          "op": "invokevirtual",
+          "bytes": "b60e54",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "switchErrorHandlingPolicy",
+              "(Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;)Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;"
+            ]
+          ]
+        },
+        {
+          "offset": 347,
+          "op": "0x57",
+          "bytes": "57"
+        },
+        {
+          "offset": 348,
+          "op": "0x19",
+          "bytes": "191a"
+        },
+        {
+          "offset": 350,
+          "op": "0xbf",
+          "bytes": "bf"
+        },
+        {
+          "offset": 351,
+          "op": "0x2b",
+          "bytes": "2b"
+        },
+        {
+          "offset": 352,
+          "op": "invokevirtual",
+          "bytes": "b60e4a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/lookup/Scope",
+            [
+              "problemReporter",
+              "()Lorg/eclipse/jdt/internal/compiler/problem/ProblemReporter;"
+            ]
+          ]
+        },
+        {
+          "offset": 355,
+          "op": "0x19",
+          "bytes": "1907"
+        },
+        {
+          "offset": 357,
+          "op": "invokevirtual",
+          "bytes": "b60e54",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "switchErrorHandlingPolicy",
+              "(Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;)Lorg/eclipse/jdt/internal/compiler/IErrorHandlingPolicy;"
+            ]
+          ]
+        },
+        {
+          "offset": 360,
+          "op": "0x57",
+          "bytes": "57"
+        },
+        {
+          "offset": 361,
+          "op": "iconst_m1",
+          "bytes": "02"
+        },
+        {
+          "offset": 362,
+          "op": "0x36",
+          "bytes": "3608"
+        },
+        {
+          "offset": 364,
+          "op": "iconst_m1",
+          "bytes": "02"
+        },
+        {
+          "offset": 365,
+          "op": "0x36",
+          "bytes": "3609"
+        },
+        {
+          "offset": 367,
+          "op": "0x2a",
+          "bytes": "2a"
+        },
+        {
+          "offset": 368,
+          "op": "getfield",
+          "bytes": "b40202",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "options",
+              "Lorg/eclipse/jdt/internal/compiler/impl/CompilerOptions;"
+            ]
+          ]
+        },
+        {
+          "offset": 371,
+          "op": "getfield",
+          "bytes": "b40c43",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/CompilerOptions",
+            [
+              "enablePreviewFeatures",
+              "Z"
+            ]
+          ]
+        },
+        {
+          "offset": 374,
+          "op": "ifne",
+          "bytes": "9a002d",
+          "target": 419
+        },
+        {
+          "offset": 377,
+          "op": "0x2a",
+          "bytes": "2a"
+        },
+        {
+          "offset": 378,
+          "op": "getfield",
+          "bytes": "b40202",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "options",
+              "Lorg/eclipse/jdt/internal/compiler/impl/CompilerOptions;"
+            ]
+          ]
+        },
+        {
+          "offset": 381,
+          "op": "getfield",
+          "bytes": "b4040f",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/CompilerOptions",
+            [
+              "complianceLevel",
+              "J"
+            ]
+          ]
+        },
+        {
+          "offset": 384,
+          "op": "invokestatic",
+          "bytes": "b80e94",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/classfmt/ClassFileConstants",
+            [
+              "getLatestJDKLevel",
+              "()J"
+            ]
+          ]
+        },
+        {
+          "offset": 387,
+          "op": "lcmp",
+          "bytes": "94"
+        },
+        {
+          "offset": 388,
+          "op": "ifge",
+          "bytes": "9c000b",
+          "target": 399
+        },
+        {
+          "offset": 391,
+          "op": "ldc_w",
+          "bytes": "130e98",
+          "constant": 4195412
+        },
+        {
+          "offset": 394,
+          "op": "0x36",
+          "bytes": "3608"
+        },
+        {
+          "offset": 396,
+          "op": "goto",
+          "bytes": "a70036",
+          "target": 450
+        },
+        {
+          "offset": 399,
+          "op": "ldc_w",
+          "bytes": "130e99",
+          "constant": 4195415
+        },
+        {
+          "offset": 402,
+          "op": "0x36",
+          "bytes": "3608"
+        },
+        {
+          "offset": 404,
+          "op": "0x15",
+          "bytes": "1506"
+        },
+        {
+          "offset": 406,
+          "op": "ifeq",
+          "bytes": "990007",
+          "target": 413
+        },
+        {
+          "offset": 409,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 410,
+          "op": "goto",
+          "bytes": "a70004",
+          "target": 414
+        },
+        {
+          "offset": 413,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 414,
+          "op": "0x36",
+          "bytes": "3609"
+        },
+        {
+          "offset": 416,
+          "op": "goto",
+          "bytes": "a70022",
+          "target": 450
+        },
+        {
+          "offset": 419,
+          "op": "0x2a",
+          "bytes": "2a"
+        },
+        {
+          "offset": 420,
+          "op": "getfield",
+          "bytes": "b40416",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "referenceContext",
+              "Lorg/eclipse/jdt/internal/compiler/impl/ReferenceContext;"
+            ]
+          ]
+        },
+        {
+          "offset": 423,
+          "op": "0xb9",
+          "bytes": "b905940100",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/ReferenceContext",
+            [
+              "compilationResult",
+              "()Lorg/eclipse/jdt/internal/compiler/CompilationResult;"
+            ]
+          ]
+        },
+        {
+          "offset": 428,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 429,
+          "op": "0xb5",
+          "bytes": "b50e44",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/CompilationResult",
+            [
+              "usesPreview",
+              "Z"
+            ]
+          ]
+        },
+        {
+          "offset": 432,
+          "op": "0x2a",
+          "bytes": "2a"
+        },
+        {
+          "offset": 433,
+          "op": "getfield",
+          "bytes": "b40202",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "options",
+              "Lorg/eclipse/jdt/internal/compiler/impl/CompilerOptions;"
+            ]
+          ]
+        },
+        {
+          "offset": 436,
+          "op": "getstatic",
+          "bytes": "b20e9a",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/IrritantSet",
+            [
+              "PREVIEW",
+              "Lorg/eclipse/jdt/internal/compiler/impl/IrritantSet;"
+            ]
+          ]
+        },
+        {
+          "offset": 439,
+          "op": "invokevirtual",
+          "bytes": "b60ea0",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/impl/CompilerOptions",
+            [
+              "isAnyEnabled",
+              "(Lorg/eclipse/jdt/internal/compiler/impl/IrritantSet;)Z"
+            ]
+          ]
+        },
+        {
+          "offset": 442,
+          "op": "ifeq",
+          "bytes": "990008",
+          "target": 450
+        },
+        {
+          "offset": 445,
+          "op": "ldc_w",
+          "bytes": "130e98",
+          "constant": 4195412
+        },
+        {
+          "offset": 448,
+          "op": "0x36",
+          "bytes": "3608"
+        },
+        {
+          "offset": 450,
+          "op": "0x15",
+          "bytes": "1508"
+        },
+        {
+          "offset": 452,
+          "op": "iconst_m1",
+          "bytes": "02"
+        },
+        {
+          "offset": 453,
+          "op": "0xa0",
+          "bytes": "a00004",
+          "target": 457
+        },
+        {
+          "offset": 456,
+          "op": "0xb1",
+          "bytes": "b1"
+        },
+        {
+          "offset": 457,
+          "op": "0x15",
+          "bytes": "1509"
+        },
+        {
+          "offset": 459,
+          "op": "iconst_m1",
+          "bytes": "02"
+        },
+        {
+          "offset": 460,
+          "op": "0xa0",
+          "bytes": "a0000c",
+          "target": 472
+        },
+        {
+          "offset": 463,
+          "op": "0x2a",
+          "bytes": "2a"
+        },
+        {
+          "offset": 464,
+          "op": "ldc_w",
+          "bytes": "130e98",
+          "constant": 4195412
+        },
+        {
+          "offset": 467,
+          "op": "invokevirtual",
+          "bytes": "b601e1",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "computeSeverity",
+              "(I)I"
+            ]
+          ]
+        },
+        {
+          "offset": 470,
+          "op": "0x36",
+          "bytes": "3609"
+        },
+        {
+          "offset": 472,
+          "op": "iconst_1",
+          "bytes": "04"
+        },
+        {
+          "offset": 473,
+          "op": "0xbd",
+          "bytes": "bd00cd",
+          "constant": "java/lang/String"
+        },
+        {
+          "offset": 476,
+          "op": "0x59",
+          "bytes": "59"
+        },
+        {
+          "offset": 477,
+          "op": "iconst_0",
+          "bytes": "03"
+        },
+        {
+          "offset": 478,
+          "op": "0x19",
+          "bytes": "1905"
+        },
+        {
+          "offset": 480,
+          "op": "0x53",
+          "bytes": "53"
+        },
+        {
+          "offset": 481,
+          "op": "0x3a",
+          "bytes": "3a0a"
+        },
+        {
+          "offset": 483,
+          "op": "0x2a",
+          "bytes": "2a"
+        },
+        {
+          "offset": 484,
+          "op": "0x15",
+          "bytes": "1508"
+        },
+        {
+          "offset": 486,
+          "op": "0x19",
+          "bytes": "190a"
+        },
+        {
+          "offset": 488,
+          "op": "0x19",
+          "bytes": "190a"
+        },
+        {
+          "offset": 490,
+          "op": "0x15",
+          "bytes": "1509"
+        },
+        {
+          "offset": 492,
+          "op": "0x1c",
+          "bytes": "1c"
+        },
+        {
+          "offset": 493,
+          "op": "0x1d",
+          "bytes": "1d"
+        },
+        {
+          "offset": 494,
+          "op": "invokevirtual",
+          "bytes": "b600d7",
+          "constant": [
+            "org/eclipse/jdt/internal/compiler/problem/ProblemReporter",
+            [
+              "handle",
+              "(I[Ljava/lang/String;[Ljava/lang/String;III)V"
+            ]
+          ]
+        },
+        {
+          "offset": 497,
+          "op": "0xb1",
+          "bytes": "b1"
+        }
+      ]
+    },
+    {
+      "classFile": "org/eclipse/jdt/internal/compiler/classfmt/ClassFileConstants.class",
+      "classSha256": "eaf5ed21402cbfe1a7198ae7e4b629a2eea4af4b3dfdae499d001f09088e6779",
+      "major": 61,
+      "minor": 0,
+      "name": "getLatestJDKLevel",
+      "descriptor": "()J",
+      "codeSha256": "51466fa19829d87f7aec3e07a8304f61e3baa92d9ae58b4599b616ca11086316",
+      "instructions": [
+        {
+          "offset": 0,
+          "op": "ldc2_w",
+          "bytes": "1400fe",
+          "constant": 4653056
+        },
+        {
+          "offset": 3,
+          "op": "lreturn",
+          "bytes": "ad"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,140 @@
+{
+  "sourceSHA": "5a10b46fe74b8d956591a6ebb484f07d2509c27f",
+  "fullStatus": "FAIL",
+  "originalSummary": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-host-operator/lsp-preview-policy-attempt-summary.json",
+  "originalSummarySha256": "1835e4d268e0a04eecaed471d69615da811779bd42e0ea595a83f76e5aafaaa3",
+  "java21": {
+    "status": "FAIL",
+    "compilerPolicy": {
+      "status": "PASS",
+      "expected": {
+        "org.eclipse.jdt.core.compiler.codegen.targetPlatform": "21",
+        "org.eclipse.jdt.core.compiler.compliance": "21",
+        "org.eclipse.jdt.core.compiler.source": "21",
+        "org.eclipse.jdt.core.compiler.release": "enabled",
+        "org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures": "disabled",
+        "org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures": "warning",
+        "org.eclipse.jdt.ls.core.vm.location": "/opt/java/openjdk"
+      },
+      "actual": {
+        "org.eclipse.jdt.core.compiler.codegen.targetPlatform": "21",
+        "org.eclipse.jdt.core.compiler.source": "21",
+        "org.eclipse.jdt.ls.core.vm.location": "/opt/java/openjdk",
+        "org.eclipse.jdt.core.compiler.release": "enabled",
+        "org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures": "disabled",
+        "org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures": "warning",
+        "org.eclipse.jdt.core.compiler.compliance": "21"
+      },
+      "scope": "Observed inherited project options; not a substitute for original semantic diagnostic oracle"
+    },
+    "javaVersions": {
+      "server": {
+        "executable": "/opt/jdk27/bin/java",
+        "major": 27,
+        "raw": "openjdk version \"27.0.1.0.2\" 2026-10-21\nOpenJDK Runtime Environment Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1)\nOpenJDK 64-Bit Server VM Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1, mixed mode, sharing)\n"
+      },
+      "target": {
+        "release": 21,
+        "javaMajor": 21,
+        "javacMajor": 21,
+        "javaRaw": "openjdk version \"21.0.13\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-21.0.13+9 (build 21.0.13+9-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.13+9 (build 21.0.13+9-LTS, mixed mode, sharing)\n",
+        "javacRaw": "javac 21.0.13\n"
+      },
+      "observedUTC": "2026-11-11T19:51:58.260Z"
+    },
+    "diagnosticVersionFields": [
+      {
+        "sequence": 16,
+        "uri": "file:///work/src/Demo.java",
+        "hasVersion": false,
+        "diagnostics": [
+          {
+            "range": {
+              "start": {
+                "line": 3,
+                "character": 2
+              },
+              "end": {
+                "line": 3,
+                "character": 13
+              }
+            },
+            "severity": 2,
+            "code": "4195412",
+            "source": "Java",
+            "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+          },
+          {
+            "range": {
+              "start": {
+                "line": 3,
+                "character": 31
+              },
+              "end": {
+                "line": 3,
+                "character": 42
+              }
+            },
+            "severity": 2,
+            "code": "4195412",
+            "source": "Java",
+            "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+          }
+        ]
+      },
+      {
+        "sequence": 20,
+        "uri": "file:///work/src/Demo.java",
+        "hasVersion": false,
+        "diagnostics": [
+          {
+            "range": {
+              "start": {
+                "line": 3,
+                "character": 2
+              },
+              "end": {
+                "line": 3,
+                "character": 13
+              }
+            },
+            "severity": 2,
+            "code": "4195412",
+            "source": "Java",
+            "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+          },
+          {
+            "range": {
+              "start": {
+                "line": 3,
+                "character": 31
+              },
+              "end": {
+                "line": 3,
+                "character": 42
+              }
+            },
+            "severity": 2,
+            "code": "4195412",
+            "source": "Java",
+            "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+          }
+        ]
+      }
+    ]
+  },
+  "frozenSpike": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-ab-lsp/repo/spike/stage09/lsp/spike.mjs",
+  "frozenSpikeSha256": "8e0876256e9f9cc733cc20029c219b7d324dcbf07a392ebabf361d62a9c31a82",
+  "javaTextFactoryLine": "const javaText=(method,bad=false)=>`import java.lang.ScopedValue;\\r\\npublic class Demo {\\r\\n  static class Helper { public String ${method}() { return \"żółć 😀\"; } }\\r\\n  ScopedValue<String> scoped = ScopedValue.newInstance();\\r\\n  void demo() { Helper h = new Helper(); h.${method}(); ${bad?'int broken = \"not-int\";':''} }\\r\\n}\\r\\n`;",
+  "oracleLine165": "      const d=await rpc.waitFor(diagnosticEvent(uri,ds=>ds.some(d=>/ScopedValue/.test(d.message)&&d.severity===1)),0,90000);",
+  "scope": "Read-only excerpt from completed ROOT attempt; NOT a new run",
+  "exactSnippet": {
+    "path": "raw/Demo.java",
+    "sha256": "d9a01bba6dd72195bddce0aa57afe4eba51d761d8eacf7097bfa121d674704c8",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-lsp-5a10b46-run01/java21-wire.jsonl",
+    "sourceSha256": "69335be831451baeb31a16dafdef90dbb43f1f914a5fa8442d99e0f28ddd408d",
+    "line": 24,
+    "utc": "2026-11-11T19:52:12.983Z",
+    "version": 1
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "extends":"../../tsconfig.json",
+  "compilerOptions":{"types":["node"],"lib":["ES2022","DOM"],"allowJs":false},
+  "files":["configuration.test.ts","source-evidence.test.ts","fixture.ts","missing-policy.probe.ts"],
+  "include":[],"exclude":[]
+}

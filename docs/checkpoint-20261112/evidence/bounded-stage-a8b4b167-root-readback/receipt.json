@@ -1,0 +1,45 @@
+{
+  "at_ms": 1794466648867,
+  "status": "PASS_SOURCE_AND_RAW_READBACK_ONLY_NO_NEW_CORRECTNESS_FINDING",
+  "source": "a8b4b167b503160fadecf44975ae54aea9d85497",
+  "tree": "8d9bca4e139342a20cbf23bc3ba6d4406e737eef",
+  "parent": "6859489f087b44695e196681922b5e6bc36a3716",
+  "sourceBlobsMatch": 532,
+  "oldBlobsPreserved": 523,
+  "authorizedChangedPaths": [
+    "src/server/language/LanguageShadowStore.ts",
+    "src/server/language/ProductionLanguageRegistryFactory.ts"
+  ],
+  "newPaths": [
+    "src/server/language/LanguageBoundedRead.ts",
+    "src/server/language/LanguageBoundedRead.worker.mjs",
+    "tests/language-bounded-stage-integration/integration.test.ts",
+    "tests/language-bounded-stage-integration/read-token.test.ts",
+    "tests/language-bounded-stage-integration/registry.test.ts",
+    "tests/language-bounded-stage-integration/selected-fixture.ts",
+    "tests/language-bounded-stage-integration/store-fixture.ts"
+  ],
+  "adopted66ProductHashesMatch": true,
+  "artifactHashesChecked": 72,
+  "finalTargetedRaw": {
+    "tests": 63,
+    "pass": 63,
+    "fail": 0,
+    "cancelled": 0,
+    "skipped": 0,
+    "todo": 0
+  },
+  "sourceReadInFull": [
+    "entire2prodpatch",
+    "all5NEWtest/fixturefiles",
+    "delivery/verification/risks/validation-sites"
+  ],
+  "limitations": "Real native files/workers and actual Registry/Selected/Factory/Store with synthetic OCI/lease/process transport; not actual Gate/backend/Docker/Windows or30sREADY",
+  "ROOT_testRuns": 0,
+  "ROOT_profileRuns": 0,
+  "ROOT_productLogicEdits": 0,
+  "upstreamReplay": false,
+  "KAdmission": "PENDING",
+  "performance": "UNMEASURED",
+  "final37": "NOT_RUN"
+}

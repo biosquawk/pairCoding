@@ -1,0 +1,82 @@
+[
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/JavaClientConnection.java",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/JavaClientConnection.java",
+    "file": "raw/JavaClientConnection.java",
+    "sha256": "9cfe33b213e3aaf618c1e55a417e9dffcb168857394b24cb47414ce202887763"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/BaseInitHandler.java",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/BaseInitHandler.java",
+    "file": "raw/BaseInitHandler.java",
+    "sha256": "a64f12a2b970ae8475f3e970c22e567f1f8ad7e40629d18ecd0f6fc0435810f4"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/JDTLanguageServer.java",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/handlers/JDTLanguageServer.java",
+    "file": "raw/JDTLanguageServer.java",
+    "sha256": "b12b19e5c4f2c026bd83699d232eba22fb71cb1828cb5076a6afc0b921012547"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/managers/StandardProjectsManager.java",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/managers/StandardProjectsManager.java",
+    "file": "raw/StandardProjectsManager.java",
+    "sha256": "ab3fdcb339c95706cd63e84ddbab83dbc46cd266c2858c310d913c6bfbe85b57"
+  },
+  {
+    "url": "https://raw.githubusercontent.com/eclipse/eclipse.jdt.ls/d98abba8f04cf041542d9ebb6df0d472a1395606/org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/preferences/Preferences.java",
+    "path": "org.eclipse.jdt.ls.core/src/org/eclipse/jdt/ls/core/internal/preferences/Preferences.java",
+    "file": "raw/Preferences.java",
+    "sha256": "fe1a4e88334306b95bc273a62475067b3a16d6959043a97ac394b9886bc81320"
+  },
+  {
+    "file": "prior/diagnosis.md",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/diagnosis.md",
+    "sha256": "ec03a2765aa85eb1a2fccb92dc8aab7d5576db57d61aa198bb14d4d927669a98"
+  },
+  {
+    "file": "prior/observations.json",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/observations.json",
+    "sha256": "651c6961ddec6637c59179e11bbbc070f9da17aa21a3729a13a97c63ddef22ca"
+  },
+  {
+    "file": "prior/bytecode.json",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/bytecode.json",
+    "sha256": "314f0cbe69f6a61cde323cb844ef7fdd1df6ac4e003639100200bf32b5bbd97d"
+  },
+  {
+    "file": "prior/sources.json",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/sources.json",
+    "sha256": "dfb67b4626abaeffd0fea48f5136a2fa5421a0e279f7bc5d4f3ecd7515e2b981"
+  },
+  {
+    "file": "prior/raw/jdt-ProblemReporter.java",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/raw/jdt-ProblemReporter.java",
+    "sha256": "39d12865f38fdb1665817c7ed8861528ee42f9ec9862b9d800ae22a1b3d8b511"
+  },
+  {
+    "file": "prior/raw/jdt-ClassFileConstants.java",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/raw/jdt-ClassFileConstants.java",
+    "sha256": "17266f3b3404755e70e9784106caff6d6378fbbd3a82b5ae7269e796ca9f9e20"
+  },
+  {
+    "file": "prior/raw/jdt-JavaCore.java",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/raw/jdt-JavaCore.java",
+    "sha256": "04777b5dfc54cb6fb62fb60ac746d6e77be1faf51f7ff13323208061540b4d2e"
+  },
+  {
+    "file": "prior/raw/org.eclipse.jdt.ls.core_1.63.0.202610191322.jar.manifest.txt",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/raw/org.eclipse.jdt.ls.core_1.63.0.202610191322.jar.manifest.txt",
+    "sha256": "3f4d5b8b279a3a7b7b06ce51ac3b55c654a20d989025de5eed8231b786840a6e"
+  },
+  {
+    "file": "prior/raw/org.eclipse.jdt.core.compiler.batch_3.46.200.v20261008-1115.jar.manifest.txt",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-de-jdt21-diagnosis/repo/investigations/stage09/jdt21/raw/org.eclipse.jdt.core.compiler.batch_3.46.200.v20261008-1115.jar.manifest.txt",
+    "sha256": "07779000d1b0490d1f0c13ee1424cd7f0a23ecf8e54de5511561bcf7f9a62fe6"
+  },
+  {
+    "file": "prior/actual5a-summary.json",
+    "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/stage09-host-operator/lsp-preview-policy-attempt-summary.json",
+    "sha256": "1835e4d268e0a04eecaed471d69615da811779bd42e0ea595a83f76e5aafaaa3"
+  }
+]

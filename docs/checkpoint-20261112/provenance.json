@@ -1,0 +1,159 @@
+{
+  "publicationBase": "a8b4b167b503160fadecf44975ae54aea9d85497",
+  "mergedCheckpoints": [
+    "48c8aea5482f31a3c6ff273436d10a7a7d83564a",
+    "902da3ccd8d1133ce692b1bc676e87b3d0bd0652"
+  ],
+  "worktreesInventoried": 159,
+  "distinctHeadsPreserved": 123,
+  "archiveBranches": [
+    {
+      "sha": "66c315d4fd5e7f5e0b7e558d21b35a7614fded62",
+      "ref": "checkpoint/20261112/66c315d4fd5e"
+    },
+    {
+      "sha": "3caffb7ee1c492dd87f908d15f7226a874bf854d",
+      "ref": "checkpoint/20261112/3caffb7ee1c4"
+    },
+    {
+      "sha": "5bbce1f852d61c100d9b64587cdfa411e6c499bd",
+      "ref": "checkpoint/20261112/5bbce1f852d6"
+    },
+    {
+      "sha": "495a418d1abef1c34e48c80c56544f36684fdab9",
+      "ref": "checkpoint/20261112/495a418d1abe"
+    },
+    {
+      "sha": "a43a6c9d94af8500babdab7373d92df816fc8621",
+      "ref": "checkpoint/20261112/a43a6c9d94af"
+    },
+    {
+      "sha": "247011108bd0e6f10b1231a7ae66e7e56c4754b6",
+      "ref": "checkpoint/20261112/247011108bd0"
+    },
+    {
+      "sha": "fd51e23568fd7af4618611da40a9bb590f540a48",
+      "ref": "checkpoint/20261112/fd51e23568fd"
+    },
+    {
+      "sha": "2d5340fa621d011873ec11e3f937def80a967bdf",
+      "ref": "checkpoint/20261112/2d5340fa621d"
+    },
+    {
+      "sha": "337dbb3aa1d439a4c9cf706037c80a595419f773",
+      "ref": "checkpoint/20261112/337dbb3aa1d4"
+    },
+    {
+      "sha": "f26aa57e35a7ebe5cf012400b33ff27c53fbfbad",
+      "ref": "checkpoint/20261112/f26aa57e35a7"
+    },
+    {
+      "sha": "cb9ab804d2b0435efd4427d88cf802774382a1d8",
+      "ref": "checkpoint/20261112/cb9ab804d2b0"
+    },
+    {
+      "sha": "4cdff63bc41403738fa0fee695f4a25989fd408f",
+      "ref": "checkpoint/20261112/4cdff63bc414"
+    },
+    {
+      "sha": "aefcad9734cd6747a7291c37e489e2127d828e01",
+      "ref": "checkpoint/20261112/aefcad9734cd"
+    },
+    {
+      "sha": "0eaafb9a7c35fd9a003b535aeceba09cb5200c0b",
+      "ref": "checkpoint/20261112/0eaafb9a7c35"
+    },
+    {
+      "sha": "26e223664a577a46c9c87893f53c2aa4d012daa4",
+      "ref": "checkpoint/20261112/26e223664a57"
+    },
+    {
+      "sha": "202037c7b2e5489c15e1cc4c7486542385bc584b",
+      "ref": "checkpoint/20261112/202037c7b2e5"
+    },
+    {
+      "sha": "c3f738ff279e7e18d476ea2deff1618ad99a6a4c",
+      "ref": "checkpoint/20261112/c3f738ff279e"
+    },
+    {
+      "sha": "0c6fbe0d50e52c3fd230af82f28128a83797ec2c",
+      "ref": "checkpoint/20261112/0c6fbe0d50e5"
+    },
+    {
+      "sha": "32984e7cc7ca0516ceb6cd84d4582780ea8c1376",
+      "ref": "checkpoint/20261112/32984e7cc7ca"
+    },
+    {
+      "sha": "c707f837ad2f7d163cde3f41ce9cbde58fcbb436",
+      "ref": "checkpoint/20261112/c707f837ad2f"
+    },
+    {
+      "sha": "5a10b46fe74b8d956591a6ebb484f07d2509c27f",
+      "ref": "checkpoint/20261112/5a10b46fe74b"
+    },
+    {
+      "sha": "b4069da76ab5be4ff5d45df4ac5cb1808ec25cd3",
+      "ref": "checkpoint/20261112/b4069da76ab5"
+    },
+    {
+      "sha": "ffa4955d074eeb021f5f860a4487516180e6dd53",
+      "ref": "checkpoint/20261112/ffa4955d074e"
+    },
+    {
+      "sha": "87cf818a57adbc819f0ce6d6dc1fba13f2c670ad",
+      "ref": "checkpoint/20261112/87cf818a57ad"
+    },
+    {
+      "sha": "d3a4613ad4265d1a15c2ccd7385fb7354bc95fc4",
+      "ref": "checkpoint/20261112/d3a4613ad426"
+    },
+    {
+      "sha": "e2c56d959963127676f408c9d3622e5bec77976c",
+      "ref": "checkpoint/20261112/e2c56d959963"
+    },
+    {
+      "sha": "640e0705703fb769bf448c97a02d20ed7da9bf4a",
+      "ref": "checkpoint/20261112/640e0705703f"
+    },
+    {
+      "sha": "2a3dc442d2158168b2242362abb6be0eedbcd066",
+      "ref": "checkpoint/20261112/2a3dc442d215"
+    },
+    {
+      "sha": "333c955669cd8050a4426b3b39e8df7a136e35e3",
+      "ref": "checkpoint/20261112/333c955669cd"
+    },
+    {
+      "sha": "c6a2eb84bfe97324501b2bc0c3e81d6501e57ea1",
+      "ref": "checkpoint/20261112/c6a2eb84bfe9"
+    },
+    {
+      "sha": "5b31db74cb1ee50063784e2e07296c022397cf31",
+      "ref": "checkpoint/20261112/5b31db74cb1e"
+    },
+    {
+      "sha": "1f465d31ad0ae1d5be175a71fe7c85bf455b17fd",
+      "ref": "checkpoint/20261112/1f465d31ad0a"
+    },
+    {
+      "sha": "6b0a13c41a19d46469963fd6e38493654ef7bf41",
+      "ref": "checkpoint/20261112/6b0a13c41a19"
+    },
+    {
+      "sha": "8d5e54f871b5dfda10770d6a25d8434656c858f5",
+      "ref": "checkpoint/20261112/8d5e54f871b5"
+    },
+    {
+      "sha": "4664600ff1f6cb94f4e8b0df16207553dbc4254b",
+      "ref": "checkpoint/20261112/4664600ff1f6"
+    },
+    {
+      "sha": "5ef4f4898b1da47841b0d8e51d89633be4598919",
+      "ref": "checkpoint/20261112/5ef4f4898b1d"
+    },
+    {
+      "sha": "f891f8eab97ffd58afd76e9db36eda340a6b00de",
+      "ref": "checkpoint/20261112/f891f8eab97f"
+    }
+  ]
+}

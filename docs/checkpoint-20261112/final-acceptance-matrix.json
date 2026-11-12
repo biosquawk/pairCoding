@@ -1,0 +1,191 @@
+{
+  "scope": "Final release acceptance NOT performed; historical component results are separate",
+  "final_sha": null,
+  "requirements": [
+    {
+      "id": "REGRESSION-01",
+      "status": "NOT_RUN",
+      "required_evidence": "Poprawna odpowiedź/zerwanie tylko żądania zasobu; backend, REST i WS pozostają żywe po błędzie otwarcia/odczytu oraz przerwaniu pobierania. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-02",
+      "status": "NOT_RUN",
+      "required_evidence": "Skróty zamiast pełnych historycznych treści, kontrolowany budżet i lifecycle bez ponownego wykonania starszych mutacji; brak ślepego LRU niszczącego idempotencję. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-03",
+      "status": "NOT_RUN",
+      "required_evidence": "Run zatrzymany przez finish trafia do faktów raportu, ale nie wyzwala nowej analizy ani interwencji podczas utrwalania; jawny test opóźnionego snapshotu. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-04",
+      "status": "NOT_RUN",
+      "required_evidence": "Autoryzowany odczyt poprzedniego raportu i prosta ścieżka z UI po nowej sesji/restartcie; niezmienne dane i izolacja między projektami. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-05",
+      "status": "NOT_RUN",
+      "required_evidence": "Monaco→transport→wersjonowany stan widoku→kontekst i jawna projekcja Codexa. Sam ruch kursora nie wywołuje modelu; następne pytanie dostaje aktualny fragment. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-06",
+      "status": "NOT_RUN",
+      "required_evidence": "Dymek zachowuje dostępny uchwyt/zamknięcie w panelu po drag/resize/splitter oraz nie zasłania aktywnego fragmentu; poprawny tekst < > i checkboxy bez wykonywania HTML. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-07",
+      "status": "NOT_RUN",
+      "required_evidence": "Nie proponować niewykonalnego GENERATE_TESTS; obsłużyć naturalne prośby o przerwę z kontrolą źródła; jawna lista dozwolonych evidenceIds/pusty zestaw, czytelny błąd bez ślepego usuwania nieznanych dowodów. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient."
+    },
+    {
+      "id": "REGRESSION-08",
+      "status": "NOT_RUN",
+      "required_evidence": "Spójny opis raportu Codex i modelu sol/medium; historyczne kontrakty/QA jawnie historyczne; windows-verify rzeczywiście potwierdza Revision wobec źródeł/zaufanego manifestu, odrzuca zły SHA; jeden czytelny zapis finalnej wersji i dowodów. Final frozen release SHA + affected integration/native evidence; prior implementation acceptance alone insufficient. Portable quoted TS/MJS test selection and commandClosure must cover all intended final test files without shell-dependent omissions; original assertions/timing/goldens preserved."
+    },
+    {
+      "id": "REQ-101-LOCAL-REFERENCES",
+      "status": "NOT_RUN",
+      "required_evidence": "Preserve and verify existing local Docker reconnaissance paths/hash/revision, actual base images/cache/mount/port/Stop patterns and explicit adapted/discarded rationale; show read-only/no foreign service or .env/credentials access. Verify original A–B operator decision and final actual Windows/WSL/engine topology. Reuse existing frozen evidence; do not repeat broad scans or foreign services without a new evidence defect."
+    },
+    {
+      "id": "TEST-101",
+      "status": "NOT_RUN",
+      "required_evidence": "Real GUI edit/ACK/Main/Test FAILED→fix→PASSED with fresh JUnit + completion."
+    },
+    {
+      "id": "TEST-102",
+      "status": "NOT_RUN",
+      "required_evidence": "Real GUI type-error marker→fix→clear; Main/Test reflect fresh changed code; real tsc."
+    },
+    {
+      "id": "TEST-103",
+      "status": "NOT_RUN",
+      "required_evidence": "Real GUI Main/Test negative and positive; java/javac/release11 inside actual container."
+    },
+    {
+      "id": "TEST-104",
+      "status": "NOT_RUN",
+      "required_evidence": "Real GUI Main/Test negative and positive; java/javac/release17 inside actual container."
+    },
+    {
+      "id": "TEST-105",
+      "status": "NOT_RUN",
+      "required_evidence": "Separate full GUI runs across config-file change/restart; actual custom-method completion then method-rename changes completion; diagnostic error→fix→clear; actual configured AI coach and 2×Esc."
+    },
+    {
+      "id": "TEST-106",
+      "status": "NOT_RUN",
+      "required_evidence": "Separate Spring GUI tests wrong endpoint logic FAIL→edit→PASS; Main stays RUNNING, real loopback HTTP ready; Stop confirmed container ended then HTTP unavailable. Include genuine user preparation of the same installation service environment through the supported documented path, not a ROOT-only Docker/network shortcut."
+    },
+    {
+      "id": "TEST-107",
+      "status": "NOT_RUN",
+      "required_evidence": "Real GUI completion+method rename, Main, pytest fresh JUnit FAIL→fix→PASS, marker error→fix→clear, real configured AI coach."
+    },
+    {
+      "id": "AC-101",
+      "status": "NOT_RUN",
+      "required_evidence": "All TEST101–107 without host task JDK/Maven/Python dependency; no global changes, record child PATH/tool locations."
+    },
+    {
+      "id": "AC-102",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual config restart Java21→Java27→Python3.13→Java21; measured selected images/tools and no AI/Run/LSP state carryover."
+    },
+    {
+      "id": "AC-103",
+      "status": "NOT_RUN",
+      "required_evidence": "UNCHANGED actual architecture repository oracle passes on final source, not merely fixture detector tests; no forbidden dispatch/imports in GUI/core."
+    },
+    {
+      "id": "AC-104",
+      "status": "NOT_RUN",
+      "required_evidence": "Hash original sources/tests/config before/after each actual Run/Test; isolated input tied to ACK workspaceVersion+rawhash; writing while running sets workspaceChangedDuringRun without changing frozen input."
+    },
+    {
+      "id": "AC-105",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual fresh current run/input JUnit with tests>0/non-skipped>0, zero failures/errors, exit0; missing report UNKNOWN, zero NO_TESTS, all skipped not PASSED, stale XML rejected, nonzero exit with green XML not PASSED."
+    },
+    {
+      "id": "AC-106",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual GUI Stop and timeout for infinite program/server, exact owned container confirmed stopped/collected/durable/removed, independent control untouched; lost-daemon Stop remains PROCESS_STOP_UNCONFIRMED and retries SAME runId; restart orphan cleanup real, never-started uncertainty resolved honestly."
+    },
+    {
+      "id": "AC-107",
+      "status": "NOT_RUN",
+      "required_evidence": "After explicit prepare repeated Main/Test use local pinned images --pull=never and isolated caches with registry access cut; dependency change invalidates ready without stale classes/reports."
+    },
+    {
+      "id": "AC-108",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual container Java/Python project methods, rename changes suggestions; GUI INDEXING/ON/FAILED truthful. Real JDT Maven dependency import and Python installed package completion; pinned JDT27 support and JDT21 preview diagnosis debt explicitly resolved/proved, no historical failure erasure."
+    },
+    {
+      "id": "AC-109",
+      "status": "NOT_RUN",
+      "required_evidence": "Models/tabs/cursor/selection/show/UndoRedo/singleflight and unchanged METRIC001–004/2×Esc; widget→CONTROL_PREPARE→Enter causes zero model mutations before blue and after veto no stale widget resurrection."
+    },
+    {
+      "id": "AC-110",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual daemonOFF/missingimage/invalidconfig/LSPfail: clear actionable GUI, original draft/recovery/manual editor available, no host/mock fallback; unbound startup allows explicit project open."
+    },
+    {
+      "id": "AC-111",
+      "status": "NOT_RUN",
+      "required_evidence": "Every receipt has actual execution topology, frozen code SHA, exact runtime config+image lock and IDs/digests; WSL proof never called native Windows."
+    },
+    {
+      "id": "AC-112",
+      "status": "NOT_RUN",
+      "required_evidence": "Owner instructions match actual CLI/config/settings paths and all examples; packager/commandClosure/SHA check; at least one full GUI scenario from freshly extracted archive on approved owner topology. A concrete executable ordinary owner preparation workflow for service/Spring using the existing authenticated product flow; API type declarations or operator-only raw POST/manual ID discovery do not prove self-service. No language branches/new technology controls outside permitted neutral UI scope."
+    },
+    {
+      "id": "ANNEX-LSP-SYNC",
+      "status": "NOT_RUN",
+      "required_evidence": "Unsaved buffer before disk ACK and all student/coach/UndoRedo/external/restore/create/rename/delete synchronized without a second autosave or original workspace RW. Central URI roundtrip spaces/Polish/CRLF/nonBMP UTF16; stale optional-version diagnostics never stamped current."
+    },
+    {
+      "id": "ANNEX-COMPLETION-BOUNDARY",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual Tab/Enter same-document main+additional edit atomic/version-bound/STUDENT only; command/snippet/resolve/multifile/workspaceapplyEdit refused, no silent provider bypass."
+    },
+    {
+      "id": "ANNEX-PROVENANCE-ACK",
+      "status": "NOT_RUN",
+      "required_evidence": "Actual HTTP/WS source ID→real WriteGate commit→real original ACK ID broadcast→same-issuer acknowledge under fresh held after-commit full-vector source lease. Immutable analysis source distinct from presentation; forged/ABA/late/cross-project negatives."
+    },
+    {
+      "id": "ANNEX-CONFIG-TASK",
+      "status": "NOT_RUN",
+      "required_evidence": "Runtime env/file and project GUI/env/file precedence; relative paths resolved from config; explicit settings migration preserves raw and no executable fallback; second project with different class/module names works without app changes."
+    },
+    {
+      "id": "ANNEX-CONTAINERS",
+      "status": "NOT_RUN",
+      "required_evidence": "Run/prepare/LSP nonroot, no privileged/socket/privatehome/APIsecrets/arbitraryflags; actual capdrop/no-newpriv/CPU-memory-PIDs/driver loglimit and64KiB output; separate Run vs LSP lifecycles."
+    },
+    {
+      "id": "ANNEX-REPORT-RECOVERY",
+      "status": "NOT_RUN",
+      "required_evidence": "Post-finish historical report retrievable after new session/restart with immutable frozen facts and project isolation; lost-finish socket preserves exact requestId and no duplicate effect."
+    },
+    {
+      "id": "ANNEX-CODEX-PROVIDER",
+      "status": "NOT_RUN",
+      "required_evidence": "Configured gpt-6.1-sol medium through Codex instance/ChatGPT auth/exec--ephemeral, no APIKEY URL or computer-use; actual Java and Python physical model receipts, final report provider consistent."
+    },
+    {
+      "id": "ANNEX-NATIVE-FAULTS",
+      "status": "NOT_RUN",
+      "required_evidence": "Native Windows journal exclusive lock/live contention/process kill recovery, writable persistence/fsync policy/NTFS ownership guards, ledger spill ACL/privacy and bounded memory; unconfirmed states honest."
+    },
+    {
+      "id": "RELEASE",
+      "status": "NOT_RUN",
+      "required_evidence": "One coherent final accepted SHA, owner repo/mirror clean and agreed push, source/image/config manifests tied to actual package; safe deployment preserving previous workspace/data; owner instructions and measured performance report; normal roles P3–P6 and JUDGE restored before final campaign; Sound OK actual accepted receipt only after all requirements PASS."
+    }
+  ]
+}

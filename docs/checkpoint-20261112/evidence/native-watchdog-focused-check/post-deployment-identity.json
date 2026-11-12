@@ -1,0 +1,56 @@
+{
+  "at_ms": 1794465683719,
+  "status": "PASS_DEPLOYED_IDENTITIES_PRESERVED_K_RESUMED",
+  "newPID": 2977980,
+  "newPIDStartTicks": "121363195",
+  "ui": {
+    "httpStatus": 200,
+    "contentType": "text/html; charset=utf-8"
+  },
+  "snapshotApiMs": 3623.817649902776,
+  "projectIdentityChecks": {
+    "software_dev": {
+      "rolesPreserved": 4,
+      "nativeSessionIdentitiesPreserved": 8,
+      "pauseFlagsPreserved": true,
+      "callsBefore": 0,
+      "callsAfter": 0
+    },
+    "software_dev_2": {
+      "rolesPreserved": 14,
+      "nativeSessionIdentitiesPreserved": 851,
+      "pauseFlagsPreserved": true,
+      "callsBefore": 17010,
+      "callsAfter": 17010
+    },
+    "sprawa_kontrakt_it": {
+      "rolesPreserved": 6,
+      "nativeSessionIdentitiesPreserved": 7,
+      "pauseFlagsPreserved": true,
+      "callsBefore": 24,
+      "callsAfter": 24
+    },
+    "sprawa_prawna_live": {
+      "rolesPreserved": 6,
+      "nativeSessionIdentitiesPreserved": 74,
+      "pauseFlagsPreserved": true,
+      "callsBefore": 1695,
+      "callsAfter": 1695
+    }
+  },
+  "softwareDevK": [
+    {
+      "id": "K",
+      "busy": false,
+      "alive": false,
+      "paused": true
+    }
+  ],
+  "full9Complete": false,
+  "sound": "NOT_RUN",
+  "KMaintenancePauseRestored": true,
+  "KOriginallyPaused": false,
+  "completed_ms": 1794465978756,
+  "KReviewDecision": "00ed92c3-6156-4ee8-8eed-e7be8117ea6b",
+  "hotfixCommit": "b235eea413a1df84e4be4cea813a25ac8a5de984"
+}

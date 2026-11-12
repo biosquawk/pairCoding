@@ -1,0 +1,6 @@
+# Preserve checkpoint evidence and stopped WIP byte-for-byte on Windows/WSL.
+STATUS.md text eol=lf
+docs/checkpoint-20261112/** -text
+investigations/stage09/** -text
+tests/k-async87cf/** -text
+tests/language-provider-preview-policy/** -text

@@ -1,0 +1,411 @@
+{
+  "source_sha": "5a10b46fe74b8d956591a6ebb484f07d2509c27f",
+  "status": "FAIL",
+  "scope": "Actual WSL Docker LSP spike; not GUI/native/final gate",
+  "prepared": {
+    "nonce": "d338d5a3dd38",
+    "upstreamLockSHA256": "ef27b3eb7f5cdbc551d68d669ade5b453c82121988898e8519137fb1a4e29bf6",
+    "createdUTC": "2026-11-11T19:51:25.796Z",
+    "images": {
+      "java": {
+        "tag": "paircoach/spike-lsp-java:d338d5a3dd38",
+        "imageId": "sha256:fea3e1e7a3012c541d476906ccb74b71df3e1ef49ef769e3fd6bd5aab8bbcdeb",
+        "repoDigests": [
+          "paircoach/spike-lsp-java@sha256:fea3e1e7a3012c541d476906ccb74b71df3e1ef49ef769e3fd6bd5aab8bbcdeb"
+        ]
+      },
+      "python": {
+        "tag": "paircoach/spike-lsp-python:d338d5a3dd38",
+        "imageId": "sha256:3a82c0a1be6c3c22d110198831f42bb642de6f484554ba5a49aadf80220221a4",
+        "repoDigests": [
+          "paircoach/spike-lsp-python@sha256:3a82c0a1be6c3c22d110198831f42bb642de6f484554ba5a49aadf80220221a4"
+        ]
+      }
+    }
+  },
+  "cases": {
+    "java27": {
+      "status": "PASS",
+      "error": null,
+      "imageId": "sha256:fea3e1e7a3012c541d476906ccb74b71df3e1ef49ef769e3fd6bd5aab8bbcdeb",
+      "name": "paircoach-spike-p1-2-lsp-d338d5a3dd38-java27",
+      "target": 27,
+      "javaVersions": {
+        "server": {
+          "executable": "/opt/jdk27/bin/java",
+          "major": 27,
+          "raw": "openjdk version \"27.0.1.0.2\" 2026-10-21\nOpenJDK Runtime Environment Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1)\nOpenJDK 64-Bit Server VM Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1, mixed mode, sharing)\n"
+        },
+        "target": {
+          "release": 27,
+          "javaMajor": 27,
+          "javacMajor": 27,
+          "javaRaw": "openjdk version \"27.0.1.0.2\" 2026-10-21\nOpenJDK Runtime Environment Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1)\nOpenJDK 64-Bit Server VM Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1, mixed mode, sharing)\n",
+          "javacRaw": "javac 27.0.1.0.2\n"
+        },
+        "observedUTC": "2026-11-11T19:51:33.658Z"
+      },
+      "compilerPolicy": {
+        "status": "PASS",
+        "expected": {
+          "org.eclipse.jdt.core.compiler.codegen.targetPlatform": "27",
+          "org.eclipse.jdt.core.compiler.compliance": "27",
+          "org.eclipse.jdt.core.compiler.source": "27",
+          "org.eclipse.jdt.core.compiler.release": "enabled",
+          "org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures": "disabled",
+          "org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures": "warning",
+          "org.eclipse.jdt.ls.core.vm.location": "/opt/jdk27"
+        },
+        "actual": {
+          "org.eclipse.jdt.core.compiler.codegen.targetPlatform": "27",
+          "org.eclipse.jdt.core.compiler.source": "27",
+          "org.eclipse.jdt.ls.core.vm.location": "/opt/jdk27",
+          "org.eclipse.jdt.core.compiler.release": "enabled",
+          "org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures": "disabled",
+          "org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures": "warning",
+          "org.eclipse.jdt.core.compiler.compliance": "27"
+        },
+        "scope": "Observed inherited project options; not a substitute for original semantic diagnostic oracle"
+      },
+      "projectImport": {
+        "status": "PASS",
+        "initialization": {
+          "type": "Started",
+          "message": "Ready"
+        },
+        "projectUris": [
+          "file:/work/"
+        ],
+        "importedProject": "file:///work",
+        "statusEvent": {
+          "sequence": 13,
+          "receivedUTC": "2026-11-11T19:51:41.363Z",
+          "message": {
+            "jsonrpc": "2.0",
+            "method": "language/status",
+            "params": {
+              "type": "Started",
+              "message": "Ready"
+            }
+          }
+        }
+      },
+      "capabilityObservations": {
+        "positionEncoding": "utf-16 (LSP default)",
+        "completionProvider": {
+          "resolveProvider": true,
+          "triggerCharacters": [
+            ".",
+            "@",
+            "#",
+            "*",
+            " "
+          ]
+        },
+        "diagnosticProvider": null
+      },
+      "pullObservation": {
+        "status": "NOT_RUN",
+        "reason": "Server did not advertise diagnosticProvider"
+      },
+      "diagnosticVersionFields": [
+        {
+          "sequence": 20,
+          "uri": "file:///work/src/Demo.java",
+          "hasVersion": false,
+          "diagnostics": [
+            {
+              "range": {
+                "start": {
+                  "line": 4,
+                  "character": 81
+                },
+                "end": {
+                  "line": 4,
+                  "character": 90
+                }
+              },
+              "severity": 1,
+              "code": "16777233",
+              "source": "Java",
+              "message": "Type mismatch: cannot convert from String to int"
+            }
+          ]
+        },
+        {
+          "sequence": 22,
+          "uri": "file:///work/src/Demo.java",
+          "hasVersion": false,
+          "diagnostics": []
+        }
+      ],
+      "projectDiagnostics": {
+        "status": "PASS",
+        "scope": "No non-project/classpath warnings in observed document diagnostics; not version correlation proof"
+      },
+      "stopConfirmed": true,
+      "collectionComplete": true,
+      "completion": [
+        "equals(Object obj) : boolean",
+        "getClass() : Class<?>",
+        "hashCode() : int",
+        "notifyAll() : void",
+        "notify() : void",
+        "pairCoachUniqueMethod() : String",
+        "toString() : String",
+        "wait() : void",
+        "wait(long timeoutMillis) : void",
+        "wait(long timeoutMillis, int nanos) : void"
+      ],
+      "explicitCompletion": [
+        "equals(Object obj) : boolean",
+        "getClass() : Class<?>",
+        "hashCode() : int",
+        "notifyAll() : void",
+        "notify() : void",
+        "pairCoachUniqueMethod() : String",
+        "toString() : String",
+        "wait() : void",
+        "wait(long timeoutMillis) : void",
+        "wait(long timeoutMillis, int nanos) : void"
+      ],
+      "renamedCompletion": [
+        "equals(Object obj) : boolean",
+        "getClass() : Class<?>",
+        "hashCode() : int",
+        "notifyAll() : void",
+        "notify() : void",
+        "pairCoachRenamedMethod() : String",
+        "toString() : String",
+        "wait() : void",
+        "wait(long timeoutMillis) : void",
+        "wait(long timeoutMillis, int nanos) : void"
+      ],
+      "exact_rm": [
+        {
+          "argv": [
+            "docker",
+            "rm",
+            "paircoach-spike-p1-2-lsp-d338d5a3dd38-java27"
+          ],
+          "exit": 0,
+          "timedOut": false,
+          "startedUTC": "2026-11-11T19:51:57.249Z",
+          "endedUTC": "2026-11-11T19:51:57.349Z"
+        }
+      ]
+    },
+    "java21": {
+      "status": "FAIL",
+      "error": "Error: LSP observation timeout\n    at Timeout.<anonymous> (file:///home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/worktrees/P1_2/paircoach-seq09-ab-lsp/repo/spike/stage09/lsp/rpc.mjs:92:57)\n    at listOnTimeout (node:internal/timers:585:17)\n    at process.processTimers (node:internal/timers:521:7)",
+      "imageId": "sha256:fea3e1e7a3012c541d476906ccb74b71df3e1ef49ef769e3fd6bd5aab8bbcdeb",
+      "name": "paircoach-spike-p1-2-lsp-d338d5a3dd38-java21",
+      "target": 21,
+      "javaVersions": {
+        "server": {
+          "executable": "/opt/jdk27/bin/java",
+          "major": 27,
+          "raw": "openjdk version \"27.0.1.0.2\" 2026-10-21\nOpenJDK Runtime Environment Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1)\nOpenJDK 64-Bit Server VM Temurin-27.0.1.0.2+1 (build 27.0.1.0.2+1, mixed mode, sharing)\n"
+        },
+        "target": {
+          "release": 21,
+          "javaMajor": 21,
+          "javacMajor": 21,
+          "javaRaw": "openjdk version \"21.0.13\" 2026-10-20 LTS\nOpenJDK Runtime Environment Temurin-21.0.13+9 (build 21.0.13+9-LTS)\nOpenJDK 64-Bit Server VM Temurin-21.0.13+9 (build 21.0.13+9-LTS, mixed mode, sharing)\n",
+          "javacRaw": "javac 21.0.13\n"
+        },
+        "observedUTC": "2026-11-11T19:51:58.260Z"
+      },
+      "compilerPolicy": {
+        "status": "PASS",
+        "expected": {
+          "org.eclipse.jdt.core.compiler.codegen.targetPlatform": "21",
+          "org.eclipse.jdt.core.compiler.compliance": "21",
+          "org.eclipse.jdt.core.compiler.source": "21",
+          "org.eclipse.jdt.core.compiler.release": "enabled",
+          "org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures": "disabled",
+          "org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures": "warning",
+          "org.eclipse.jdt.ls.core.vm.location": "/opt/java/openjdk"
+        },
+        "actual": {
+          "org.eclipse.jdt.core.compiler.codegen.targetPlatform": "21",
+          "org.eclipse.jdt.core.compiler.source": "21",
+          "org.eclipse.jdt.ls.core.vm.location": "/opt/java/openjdk",
+          "org.eclipse.jdt.core.compiler.release": "enabled",
+          "org.eclipse.jdt.core.compiler.problem.enablePreviewFeatures": "disabled",
+          "org.eclipse.jdt.core.compiler.problem.reportPreviewFeatures": "warning",
+          "org.eclipse.jdt.core.compiler.compliance": "21"
+        },
+        "scope": "Observed inherited project options; not a substitute for original semantic diagnostic oracle"
+      },
+      "projectImport": {
+        "status": "PASS",
+        "initialization": {
+          "type": "Started",
+          "message": "Ready"
+        },
+        "projectUris": [
+          "file:/work/"
+        ],
+        "importedProject": "file:///work",
+        "statusEvent": {
+          "sequence": 12,
+          "receivedUTC": "2026-11-11T19:52:03.823Z",
+          "message": {
+            "jsonrpc": "2.0",
+            "method": "language/status",
+            "params": {
+              "type": "Started",
+              "message": "Ready"
+            }
+          }
+        }
+      },
+      "capabilityObservations": {
+        "positionEncoding": "utf-16 (LSP default)",
+        "completionProvider": {
+          "resolveProvider": true,
+          "triggerCharacters": [
+            ".",
+            "@",
+            "#",
+            "*",
+            " "
+          ]
+        },
+        "diagnosticProvider": null
+      },
+      "pullObservation": {
+        "status": "NOT_RUN",
+        "reason": "Server did not advertise diagnosticProvider"
+      },
+      "diagnosticVersionFields": [
+        {
+          "sequence": 16,
+          "uri": "file:///work/src/Demo.java",
+          "hasVersion": false,
+          "diagnostics": [
+            {
+              "range": {
+                "start": {
+                  "line": 3,
+                  "character": 2
+                },
+                "end": {
+                  "line": 3,
+                  "character": 13
+                }
+              },
+              "severity": 2,
+              "code": "4195412",
+              "source": "Java",
+              "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+            },
+            {
+              "range": {
+                "start": {
+                  "line": 3,
+                  "character": 31
+                },
+                "end": {
+                  "line": 3,
+                  "character": 42
+                }
+              },
+              "severity": 2,
+              "code": "4195412",
+              "source": "Java",
+              "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+            }
+          ]
+        },
+        {
+          "sequence": 20,
+          "uri": "file:///work/src/Demo.java",
+          "hasVersion": false,
+          "diagnostics": [
+            {
+              "range": {
+                "start": {
+                  "line": 3,
+                  "character": 2
+                },
+                "end": {
+                  "line": 3,
+                  "character": 13
+                }
+              },
+              "severity": 2,
+              "code": "4195412",
+              "source": "Java",
+              "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+            },
+            {
+              "range": {
+                "start": {
+                  "line": 3,
+                  "character": 31
+                },
+                "end": {
+                  "line": 3,
+                  "character": 42
+                }
+              },
+              "severity": 2,
+              "code": "4195412",
+              "source": "Java",
+              "message": "You are using an API that is part of the preview feature 'Scoped Values' and may be removed in future"
+            }
+          ]
+        }
+      ],
+      "projectDiagnostics": {
+        "status": "PASS",
+        "scope": "No non-project/classpath warnings in observed document diagnostics; not version correlation proof"
+      },
+      "stopConfirmed": true,
+      "collectionComplete": true,
+      "completion": [
+        "equals(Object obj) : boolean",
+        "getClass() : Class<?>",
+        "hashCode() : int",
+        "notifyAll() : void",
+        "notify() : void",
+        "pairCoachUniqueMethod() : String",
+        "toString() : String",
+        "wait() : void",
+        "wait(long timeoutMillis) : void",
+        "wait(long timeoutMillis, int nanos) : void"
+      ],
+      "explicitCompletion": [
+        "equals(Object obj) : boolean",
+        "getClass() : Class<?>",
+        "hashCode() : int",
+        "notifyAll() : void",
+        "notify() : void",
+        "pairCoachUniqueMethod() : String",
+        "toString() : String",
+        "wait() : void",
+        "wait(long timeoutMillis) : void",
+        "wait(long timeoutMillis, int nanos) : void"
+      ],
+      "renamedCompletion": null,
+      "exact_rm": [
+        {
+          "argv": [
+            "docker",
+            "rm",
+            "paircoach-spike-p1-2-lsp-d338d5a3dd38-java21"
+          ],
+          "exit": 0,
+          "timedOut": false,
+          "startedUTC": "2026-11-11T19:53:44.025Z",
+          "endedUTC": "2026-11-11T19:53:44.116Z"
+        }
+      ]
+    },
+    "python": {
+      "status": "NOT_RUN"
+    }
+  }
+}

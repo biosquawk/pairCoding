@@ -1,0 +1,319 @@
+diff --git a/next-runtime/runtime/src/main/java/io/thalamus/rebirth/runtime/WatchdogAndVenetianJudge.java b/next-runtime/runtime/src/main/java/io/thalamus/rebirth/runtime/WatchdogAndVenetianJudge.java
+index 854af9b..4b8d026 100644
+--- a/next-runtime/runtime/src/main/java/io/thalamus/rebirth/runtime/WatchdogAndVenetianJudge.java
++++ b/next-runtime/runtime/src/main/java/io/thalamus/rebirth/runtime/WatchdogAndVenetianJudge.java
+@@ -356,23 +356,37 @@ public final class WatchdogAndVenetianJudge implements AutoCloseable {
+     }
+ 
+     private List<Map<String, Object>> scopedCommands(String role, String work) {
+-        var result = new ArrayList<Map<String, Object>>();
+-        for (var row :
+-                store.rows(
+-                        "SELECT c.command,c.exit_code FROM commands c JOIN turns t ON t.id=c.turn"
+-                            + " WHERE c.role=? AND (c.work=? OR EXISTS(SELECT 1 FROM events e WHERE"
+-                            + " e.kind='LocalActionObserved' AND"
+-                            + " json_extract(e.payload,'$.operation_id')='command:'||c.role||':'||c.id"
+-                            + " AND json_extract(e.payload,'$.context.work_id')=?)) ORDER BY"
+-                            + " c.created_ms DESC LIMIT 3",
+-                        role,
+-                        work,
+-                        work)) {
+-            var entry = new LinkedHashMap<>(row);
+-            entry.put("command", VitalityAndSleepService.prefix((String) row.get("command"), 500));
+-            result.add(entry);
+-        }
+-        return result;
++        return store.transaction(
++                c -> {
++                    // Materialize membership once, not one full event scan per command. Keep
++                    // malformed/JSON5 payloads on the original lazy EXISTS path: eager IN could
++                    // otherwise evaluate a bad payload after EXISTS would already have matched.
++                    boolean legacyJson =
++                            !rows(c, "SELECT 1 FROM events WHERE kind='LocalActionObserved'"
++                                            + " AND NOT json_valid(payload) LIMIT 1")
++                                    .isEmpty();
++                    String sql =
++                            legacyJson
++                                    ? "SELECT c.command,c.exit_code FROM commands c JOIN turns t ON t.id=c.turn"
++                                            + " WHERE c.role=? AND (c.work=? OR EXISTS(SELECT 1 FROM events e WHERE"
++                                            + " e.kind='LocalActionObserved' AND"
++                                            + " json_extract(e.payload,'$.operation_id')='command:'||c.role||':'||c.id"
++                                            + " AND json_extract(e.payload,'$.context.work_id')=?)) ORDER BY"
++                                            + " c.created_ms DESC LIMIT 3"
++                                    : "SELECT c.command,c.exit_code FROM commands c JOIN turns t ON t.id=c.turn"
++                                            + " WHERE c.role=? AND (c.work=? OR 'command:'||c.role||':'||c.id IN"
++                                            + " (SELECT json_extract(e.payload,'$.operation_id') FROM events e WHERE"
++                                            + " e.kind='LocalActionObserved' AND"
++                                            + " json_extract(e.payload,'$.context.work_id')=?)) ORDER BY"
++                                            + " c.created_ms DESC LIMIT 3";
++                    var result = new ArrayList<Map<String, Object>>();
++                    for (var row : rows(c, sql, role, work, work)) {
++                        var entry = new LinkedHashMap<>(row);
++                        entry.put("command", VitalityAndSleepService.prefix((String) row.get("command"), 500));
++                        result.add(entry);
++                    }
++                    return result;
++                });
+     }
+ 
+     private void analyzeLater(String incident, long delay) {
+diff --git a/next-runtime/runtime/src/test/java/io/thalamus/rebirth/runtime/NativeScopedCommandsTest.java b/next-runtime/runtime/src/test/java/io/thalamus/rebirth/runtime/NativeScopedCommandsTest.java
+new file mode 100644
+index 0000000..6f2841d
+--- /dev/null
++++ b/next-runtime/runtime/src/test/java/io/thalamus/rebirth/runtime/NativeScopedCommandsTest.java
+@@ -0,0 +1,254 @@
++package io.thalamus.rebirth.runtime;
++
++import static io.thalamus.rebirth.core.ProjectStore.*;
++import static org.junit.jupiter.api.Assertions.*;
++
++import io.thalamus.rebirth.core.*;
++
++import org.junit.jupiter.api.Test;
++import org.junit.jupiter.api.io.TempDir;
++
++import java.lang.reflect.*;
++import java.nio.file.*;
++import java.sql.*;
++import java.util.*;
++
++/** Real SQLite/ProjectStore and actual private selector; no provider, CLI or daemon. */
++class NativeScopedCommandsTest {
++    @TempDir Path root;
++
++    // Literal pre-fix oracle. Do not "improve" its scoping, duplicate or tie behavior.
++    static final String ORIGINAL =
++            "SELECT c.command,c.exit_code FROM commands c JOIN turns t ON t.id=c.turn"
++                    + " WHERE c.role=? AND (c.work=? OR EXISTS(SELECT 1 FROM events e WHERE"
++                    + " e.kind='LocalActionObserved' AND"
++                    + " json_extract(e.payload,'$.operation_id')='command:'||c.role||':'||c.id"
++                    + " AND json_extract(e.payload,'$.context.work_id')=?)) ORDER BY"
++                    + " c.created_ms DESC LIMIT 3";
++
++    final class Fixture implements AutoCloseable {
++        final ProjectStore store;
++        final WatchdogAndVenetianJudge watchdog;
++        final Method selector;
++        final List<String> queries = new ArrayList<>();
++        final Field connectionField;
++        final Connection nativeConnection;
++
++        Fixture() throws Exception {
++            store = new ProjectStore(root.resolve(UUID.randomUUID() + "/db"), "scoped");
++            var team = new TeamAndAccessRegistry(store, store.file().getParent());
++            // Only Judge: constructor has no worker reminders, pending work or runtime calls.
++            team.add("HUMAN", "J", TeamAndAccessRegistry.Kind.JUDGE, "J", "J", List.of());
++            watchdog = new WatchdogAndVenetianJudge(store, team, null, null, null, "J");
++            watchdog.close(); // selector is independent of sensors; no background work in fixture.
++            selector = WatchdogAndVenetianJudge.class.getDeclaredMethod(
++                    "scopedCommands", String.class, String.class);
++            selector.setAccessible(true);
++            // Forward every operation to the SAME native SQLite connection. Capture only SQL
++            // submitted by compiled production code, so EXPLAIN cannot test a copied new query.
++            connectionField = ProjectStore.class.getDeclaredField("connection");
++            connectionField.setAccessible(true);
++            nativeConnection = (Connection) connectionField.get(store);
++            Connection observed = (Connection) Proxy.newProxyInstance(
++                    Connection.class.getClassLoader(), new Class<?>[] {Connection.class},
++                    (proxy, method, args) -> {
++                        if (method.getName().equals("prepareStatement") && args[0] instanceof String sql)
++                            queries.add(sql);
++                        try {
++                            return method.invoke(nativeConnection, args);
++                        } catch (InvocationTargetException ex) {
++                            throw ex.getCause();
++                        }
++                    });
++            connectionField.set(store, observed);
++        }
++
++        @SuppressWarnings("unchecked")
++        List<Map<String, Object>> actual(String role, String work) throws Exception {
++            queries.clear();
++            try {
++                return (List<Map<String, Object>>) selector.invoke(watchdog, role, work);
++            } catch (InvocationTargetException ex) {
++                if (ex.getCause() instanceof Exception cause) throw cause;
++                throw ex;
++            }
++        }
++
++        List<Map<String, Object>> reference(String role, String work) {
++            var result = new ArrayList<Map<String, Object>>();
++            for (var row : store.rows(ORIGINAL, role, work, work)) {
++                var entry = new LinkedHashMap<>(row);
++                entry.put("command", VitalityAndSleepService.prefix((String) row.get("command"), 500));
++                result.add(entry);
++            }
++            return result;
++        }
++
++        String executedSelector() {
++            return queries.stream().filter(q -> q.startsWith("SELECT c.command,c.exit_code"))
++                    .findFirst().orElseThrow();
++        }
++
++        void turn(String id, String role) {
++            store.transaction(c -> execute(c, "INSERT INTO turns VALUES(?,?, 's','e',1,'COMPLETED',NULL,0)", id, role));
++        }
++
++        void command(String id, String turn, String role, String work, String text, Integer exit, long at) {
++            store.transaction(c -> execute(c, "INSERT INTO commands VALUES(?,?,?,?,?,'/',?,?)", id, turn, role, work, text, exit, at));
++        }
++
++        void event(String kind, String role, String payload) {
++            store.transaction(c -> execute(c, "INSERT INTO events(kind,role,payload,created_ms) VALUES(?,?,?,0)", kind, role, payload));
++        }
++
++        void match(String op, Object work, String eventRole) {
++            event("LocalActionObserved", eventRole, Json.write(Json.object(
++                    "operation_id", op, "context", Json.object("work_id", work))));
++        }
++
++        void same(String role, String work) throws Exception {
++            var expected = reference(role, work);
++            assertEquals(expected, actual(role, work), "role=" + role + ", work=" + work);
++        }
++
++        @Override public void close() throws Exception {
++            connectionField.set(store, nativeConnection);
++            store.close();
++        }
++    }
++
++    @Test void exactScopeOrDuplicatesNullsAndNoExtraRoleOrTurnFiltering() throws Exception {
++        try (var f = new Fixture()) {
++            f.turn("t", "OTHER"); // Original filters c.role, NOT t.role.
++            f.turn("t2", "K");
++            f.command("direct", "t", "K", "A", "direct", null, 1);
++            f.same("K", "A"); // no events still includes direct work.
++            f.command("event", "t", "K", null, "event-only", 7, 2);
++            f.match("command:K:event", "A", "FOREIGN"); // e.role intentionally unrestricted.
++            f.match("command:K:event", "A", "K"); // duplicate observation cannot multiply.
++            f.command("both", "t", "K", "A", "same-text", 0, 3);
++            f.match("command:K:both", "A", "K");
++            f.command("both", "t2", "K", "A", "same-text", 0, 4); // distinct command row preserved.
++            f.command("foreign", "t", "P1", "A", "foreign-command", 0, 99);
++            f.match("command:P1:foreign", "A", "K");
++            f.command("orphan", "missing", "K", "A", "orphan", 0, 100);
++            f.command("wrong-kind", "t", "K", "B", "wrong-kind", 0, 101);
++            f.event("NotLocal", "K", "{\"operation_id\":\"command:K:wrong-kind\",\"context\":{\"work_id\":\"A\"}}");
++            f.command("wrong-op", "t", "K", "B", "wrong-op", 0, 102);
++            f.match("command:P1:wrong-op", "A", "K");
++            f.event("LocalActionObserved", null, "{}");
++            f.event("LocalActionObserved", null, "{\"operation_id\":null,\"context\":null}");
++            f.event("LocalActionObserved", null, "{\"operation_id\":12,\"context\":{\"work_id\":12}}");
++            f.event("LocalActionObserved", null, "{\"operation_id\":{},\"context\":{\"work_id\":[]}}");
++            for (String role : Arrays.asList("K", "P1", "NONE", "K' OR 1=1 --", null))
++                for (String work : Arrays.asList("A", "B", "", "12", "' OR 1=1 --", null)) f.same(role, work);
++            var result = f.actual("K", "A");
++            assertEquals(List.of("same-text", "same-text", "event-only"), result.stream().map(r -> r.get("command")).toList());
++            assertEquals(7, ((Number) result.getLast().get("exit_code")).intValue());
++        }
++    }
++
++    @Test void prefixLimitAndExistingTimestampTiePolicy() throws Exception {
++        try (var f = new Fixture()) {
++            f.turn("t", "K");
++            for (int i = 0; i < 6; i++)
++                f.command("c" + i, "t", "K", "A", i + "😀".repeat(510), i == 5 ? null : i, i < 2 ? 0 : 5);
++            f.same("K", "A");
++            var result = f.actual("K", "A");
++            assertEquals(3, result.size());
++            // Tie output compared to literal oracle on this engine, not a new tie-breaker contract.
++            for (var row : result) assertTrue(((String) row.get("command"))
++                    .getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= 500);
++            assertFalse(f.executedSelector().contains("ORDER BY c.created_ms DESC,"));
++        }
++    }
++
++    @Test void laterEventsAreFreshAndProjectStoresDoNotShareMembership() throws Exception {
++        try (var a = new Fixture(); var b = new Fixture()) {
++            for (var f : List.of(a, b)) {
++                f.turn("t", "K");
++                f.command("late", "t", "K", null, "late", null, 1);
++                assertTrue(f.actual("K", "A").isEmpty());
++            }
++            a.match("command:K:late", "A", "OTHER");
++            a.same("K", "A");
++            assertEquals(1, a.actual("K", "A").size());
++            assertTrue(b.actual("K", "A").isEmpty());
++        }
++    }
++
++    @Test void malformedJsonPreservesLazySuccessAndOriginalError() throws Exception {
++        try (var f = new Fixture()) {
++            f.turn("t", "K");
++            f.command("c", "t", "K", "direct", "c", 0, 1);
++            f.match("command:K:c", "A", "K");
++            f.event("LocalActionObserved", "K", "{bad");
++            f.same("NONE", "A"); // no eligible candidates: no malformed-payload failure.
++            f.same("K", "direct"); // direct OR never evaluates JSON.
++            f.same("K", "A"); // EXISTS matched before encountering malformed JSON.
++            assertTrue(f.executedSelector().contains("EXISTS(SELECT 1 FROM events"));
++            RuntimeException before = assertThrows(RuntimeException.class, () -> f.reference("K", "absent"));
++            Exception after = assertThrows(Exception.class, () -> f.actual("K", "absent"));
++            assertTrue(rootCause(before).getMessage().contains("malformed JSON"));
++            assertEquals(rootCause(before).getClass(), rootCause(after).getClass());
++            assertEquals(rootCause(before).getMessage(), rootCause(after).getMessage());
++        }
++        try (var f = new Fixture()) {
++            f.turn("t", "K");
++            f.command("c", "t", "K", "A", "c", 0, 1);
++            f.event("NotLocal", "K", "{bad");
++            f.same("K", "A");
++            assertTrue(f.executedSelector().contains(" IN"));
++        }
++    }
++
++    @Test void boundedNativeShapeAndExplainOfActuallyExecutedSql() throws Exception {
++        try (var f = new Fixture()) {
++            // Bounded sample: 1600 commands / 1200 observations, one O(C*E) reference only.
++            // Exercises same non-indexed schema as reported 12396/9900; not a latency SLA.
++            f.turn("t", "OTHER");
++            f.store.transaction(c -> {
++                try (var q = c.prepareStatement("INSERT INTO commands VALUES(?,'t',?,NULL,?,'/',0,?)")) {
++                    for (int i = 0; i < 1600; i++) {
++                        q.setString(1, "c" + i); q.setString(2, i < 500 ? "K" : "P1");
++                        q.setString(3, "cmd" + i); q.setInt(4, i); q.addBatch();
++                    }
++                    q.executeBatch();
++                }
++                try (var q = c.prepareStatement("INSERT INTO events(kind,role,payload,created_ms) VALUES('LocalActionObserved','OTHER',?,0)")) {
++                    for (int i = 0; i < 1200; i++) {
++                        q.setString(1, Json.write(Json.object("operation_id", "command:K:c" + (i % 500),
++                                "context", Json.object("work_id", i % 2 == 0 ? "A" : "B"))));
++                        q.addBatch();
++                    }
++                    q.executeBatch();
++                }
++                return null;
++            });
++            long before = System.nanoTime();
++            var expected = f.reference("K", "A");
++            long referenceNanos = System.nanoTime() - before;
++            before = System.nanoTime();
++            var result = f.actual("K", "A");
++            long actualNanos = System.nanoTime() - before;
++            String productionSql = f.executedSelector();
++            assertEquals(expected, result);
++            var originalPlan = f.store.rows("EXPLAIN QUERY PLAN " + ORIGINAL, "K", "A", "A");
++            var actualPlan = f.store.rows("EXPLAIN QUERY PLAN " + productionSql, "K", "A", "A");
++            assertTrue(originalPlan.toString().contains("CORRELATED"), originalPlan.toString());
++            assertFalse(actualPlan.toString().contains("CORRELATED"), actualPlan.toString());
++            assertTrue(actualPlan.toString().contains("SCAN e"), actualPlan.toString());
++            assertTrue(productionSql.contains(" IN"));
++            System.out.println("SCOPED_COMMANDS_NATIVE " + Json.write(Json.object(
++                    "commands", 1600, "observations", 1200, "reference_ns", referenceNanos,
++                    "actual_ns", actualNanos, "old_plan", originalPlan, "actual_plan", actualPlan,
++                    "production_sql", productionSql, "result", result, "models", 0)));
++            assertTrue(f.store.rows("SELECT * FROM calls").isEmpty());
++        }
++    }
++
++    static Throwable rootCause(Throwable value) {
++        while (value.getCause() != null) value = value.getCause();
++        return value;
++    }
++}

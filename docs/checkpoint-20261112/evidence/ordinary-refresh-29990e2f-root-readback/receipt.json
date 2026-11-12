@@ -1,0 +1,15 @@
+{
+  "status": "CONFIRMED_COST_FINDING_NOT_PRODUCT_PASS",
+  "at_ms": 1794461157262,
+  "source": "29990e2f226336e64a0e92588505483b91fce4a9",
+  "fullStoreRefreshMs": 35271.65579999999,
+  "unchangedDependencyFilesRewritten": 1847,
+  "unchangedDependencyBytesRewritten": 56727070,
+  "nativeFileFsyncCalls": 1853,
+  "nativeDirectoryFsyncCalls": 1853,
+  "inputWitnessesEqual": true,
+  "trackedDescriptorsAndStreamsAtEnd": 0,
+  "artifactHashesMatched": 18,
+  "review": "Full112line native-forwardingprofile/3md/callgraph read; actual native write->rename correlation+complete witnesses corroboratefulldeprewrite, not inferred solelyfrominode. Instrumentationoverhead included/methodsnested. ONE rawrun, ROOT no rerun. No actualFIFO/LSP/GUI/nativeWindows/AI claim.",
+  "next": "Data-supported minimal privatecompletiondelta writes with full freshness scans/FD/path fences, separateP1_2-ownedStore glue. No method timing SLA invented."
+}
