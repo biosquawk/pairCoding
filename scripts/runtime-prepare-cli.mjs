@@ -5,6 +5,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { registerHooks, stripTypeScriptTypes } from 'node:module';
 import { createHash } from 'node:crypto';
+import { isMainThread } from 'node:worker_threads';
+import { supervisePublicPrepare } from './runtime-prepare-control.mjs';
 import { spawnSync } from 'node:child_process';
 import { canonicalDirectory, readPrivate, receiptWriter, stamp, syncDirectory } from './runtime-files.mjs';
 import { dependencyHash } from './runtime-dependencies.mjs';
@@ -60,11 +62,16 @@ async function accepted() {
 
 export function parseArguments(argv) {
   const result = { execute: false };
-  check(Array.isArray(argv) && argv.length <= 7, 'Usage: runtime:prepare --project ABS --profile catalogId --output NEW_ABS [--execute]');
+  check(Array.isArray(argv) && argv.length <= 9, 'Usage: runtime:prepare --project ABS --profile catalogId --output NEW_ABS [--prepare-timeout-ms 1000..86400000] [--execute]');
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--execute') { check(!result.execute, 'Duplicate --execute'); result.execute = true; continue; }
-    check(['--project', '--profile', '--output'].includes(arg), 'Unknown prepare flag; only --project --profile --output [--execute] are supported');
+    if (arg === '--prepare-timeout-ms') {
+      const value = argv[++i];
+      check(!Object.hasOwn(result, 'prepareTimeoutMs') && typeof value === 'string' && /^[1-9][0-9]*$/.test(value) && Number(value) >= 1000 && Number(value) <= 86400000, 'Prepare timeout must be an integer 1000..86400000 milliseconds, supplied once');
+      result.prepareTimeoutMs = Number(value); continue;
+    }
+    check(['--project', '--profile', '--output'].includes(arg), 'Unknown prepare flag; only --project --profile --output [--prepare-timeout-ms MS] [--execute] are supported');
     const key = arg.slice(2), value = argv[++i];
     check(!Object.hasOwn(result, key) && typeof value === 'string' && value.length > 0 && !value.startsWith('--'), 'Missing/duplicate prepare flag');
     result[key] = value;
@@ -174,7 +181,7 @@ export async function buildPublicPreparePlan(argv) {
   const plan = { schemaVersion: 1, status: 'PLAN_ONLY', scope: 'PUBLIC_PREPARE_NOT_RUNTIME_OR_FINAL_ACCEPTANCE', ...loc,
     profile, settingsFile: settings.file, settingsSha256: settings.sha256, settingsIdentity: settings.identity, settings: settings.value,
     workingDirectory: directories[0], sourceInventory: await sourceSnapshot(loc.project, api),
-    limits: { maxHeavyConcurrency: 1, maxElapsedMs: 2700000, maxCommandMs: 480000 },
+    limits: { maxHeavyConcurrency: 1, maxElapsedMs: args.prepareTimeoutMs ?? 2700000, maxCommandMs: 480000 },
     offlineFixtureContainers: 0, languageRequired: profile.language.imageLockKey,
     preparedRuntime: path.join(loc.output, 'jobs', profile.id), runtimeConfig: path.join(loc.output, 'runtime-config.json'),
   };
@@ -264,8 +271,10 @@ async function artifacts(plan, prepared, run, api) {
  * producers and child transport. Callers must never present injected UNIT results as live proof. */
 export async function executePublicPreparePlan(plan, dependencies = {}, requiredPins = []) {
   const api = await accepted();
-  const rebuilt = await buildPublicPreparePlan(['--project', plan.project, '--profile', plan.profile.id, '--output', plan.output]);
+  const rebuilt = await buildPublicPreparePlan(['--project', plan.project, '--profile', plan.profile.id, '--output', plan.output, '--prepare-timeout-ms', String(plan.limits.maxElapsedMs)]);
   check(equal(rebuilt, plan), 'Preparation plan/source changed before execution');
+  dependencies.checkCancelled?.();
+  const progress = (phase, text = '') => dependencies.onProgress?.({ phase, text });
   const publish = receiptWriter(plan.output), started = Date.now(), deadline = started + plan.limits.maxElapsedMs;
   const endpoint = process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock';
   const configDirectory = path.join(plan.output, 'docker-config');
@@ -274,7 +283,8 @@ export async function executePublicPreparePlan(plan, dependencies = {}, required
   let clientState;
   let publicationFailed = false;
   const save = () => { try { publish(receipt); } catch (e) { publicationFailed = true; throw e; } }; save();
-  const budget = () => check(Date.now() < deadline, 'Public preparation time budget exceeded; retain/reconcile');
+  const budget = () => { dependencies.checkCancelled?.(); check(Date.now() < deadline, 'Public preparation time budget exceeded; retain/reconcile'); };
+  progress('started', `profile=${plan.profile.id} prepareTimeoutMs=${plan.limits.maxElapsedMs}; Ctrl+C cancels, resources/receipts retained`);
   const engineArgs = ['info', '--format', '{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const invoke = (args, allowMissing = false) => {
     budget(); const issued = beginDockerCommand(clientState), env = issued.env;
@@ -304,9 +314,10 @@ export async function executePublicPreparePlan(plan, dependencies = {}, required
     const staged = await api.readRunSourceInventory(plan.request.project.root);
     check(equal(staged, plan.sourceInventory.map(({ path, sha256, bytes }) => ({ path, sha256, bytes }))), 'Staged raw input changed');
     receipt.status = 'CAPTURED_RAW_NOT_ACK'; save(); budget();
-    await (dependencies.stageInputs ?? stageInputs)(path.join(plan.output, 'assets'));
+    progress('download', 'Acquiring exact approved artifacts');
+    await (dependencies.stageInputs ?? stageInputs)(path.join(plan.output, 'assets'), { signal: dependencies.signal, onProgress: dependencies.onProgress });
     budget(); check(equal(observeEngine(), receipt.engine), 'Docker engine changed during acquisition');
-    const produced = (dependencies.prepare ?? prepare)(plan.request, true, deadline, receipt.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) }, retention.pins());
+    const produced = (dependencies.prepare ?? prepare)(plan.request, true, deadline, receipt.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}), ...(dependencies.control ? { control: dependencies.control } : {}) }, retention.pins());
     receipt.prepareReceipt = path.join(plan.preparedRuntime, 'receipt.json'); save();
     const prepared = json(receipt.prepareReceipt);
     check(equal(prepared, produced), 'Actual durable prepared receipt differs from producer result');
@@ -318,13 +329,15 @@ export async function executePublicPreparePlan(plan, dependencies = {}, required
     // Missing OCI/evidence is an explicit NOTREADY, never a synthetic digest or usable config.
     let generated;
     try { generated = await artifacts(plan, prepared, run, api); }
-    catch (e) { receipt.status = 'NOTREADY'; receipt.problem = e.message; save(); return { schemaVersion: 1, status: receipt.status, output: plan.output, receipt: path.join(plan.output, 'receipt.json'), preparedRuntime: plan.preparedRuntime, runtimeConfig: null, problem: e.message }; }
-    retention.verifyAll();
+    catch (e) { if (dependencies.control?.cancelled()) throw e; receipt.status = 'NOTREADY'; receipt.problem = e.message; save(); return { schemaVersion: 1, status: receipt.status, output: plan.output, receipt: path.join(plan.output, 'receipt.json'), preparedRuntime: plan.preparedRuntime, runtimeConfig: null, problem: e.message }; }
+    retention.verifyAll(); budget();
+    progress('publish', 'Measured config after actual tool/cache/image checks; not final acceptance');
     receipt.measuredArtifacts = generated; receipt.status = 'MEASURED_ARTIFACTS_PENDING_PUBLICATION'; save();
     const bytes = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
     put(path.join(plan.output, 'catalog.json'), bytes(generated.catalog));
     put(path.join(plan.output, 'images.lock.json'), bytes(generated.imageLock));
     // RuntimeConfig is published LAST, after all proof and actual guards; never a partial usable selector.
+    budget(); dependencies.control?.commit?.();
     put(plan.runtimeConfig, bytes(generated.runtimeConfig));
     const loaded = api.loadRuntimeConfiguration({ configPath: plan.runtimeConfig, environment: {}, explicitWorkspaceRoot: plan.project });
     check(loaded.resolved && loaded.resolved.profile.id === plan.profile.id && loaded.resolved.workspaceRoot === plan.project, 'Generated runtime configuration could not be independently loaded');
@@ -332,7 +345,7 @@ export async function executePublicPreparePlan(plan, dependencies = {}, required
     return { schemaVersion: 1, status: receipt.status, output: plan.output, receipt: path.join(plan.output, 'receipt.json'), preparedRuntime: plan.preparedRuntime, runtimeConfig: plan.runtimeConfig,
       startupArgs: ['--prepared-runtime', plan.preparedRuntime, '--runtime-config', plan.runtimeConfig], finalQa: 'NOT_RUN' };
   } catch (e) {
-    receipt.status = 'FAILED_RETAIN_AND_RECONCILE'; receipt.problem = e.message;
+    receipt.status = dependencies.control?.cancelled() ? 'CANCELLED_RETAIN_AND_RECONCILE' : 'FAILED_RETAIN_AND_RECONCILE'; receipt.problem = e.message;
     if (!publicationFailed) save(); throw e;
   }
 }
@@ -340,7 +353,12 @@ export async function main(argv, dependencies = {}) {
   const args = parseArguments(argv), plan = await buildPublicPreparePlan(argv);
   return args.execute ? executePublicPreparePlan(plan, dependencies) : plan;
 }
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try { const result = await main(process.argv.slice(2)); process.stdout.write(JSON.stringify(result, null, 2) + '\n'); if (result.status === 'NOTREADY') process.exitCode = 2; }
-  catch (error) { process.stderr.write(JSON.stringify({ schemaVersion: 1, status: 'REFUSED_OR_FAILED_RETAIN', problem: error.message }) + '\n'); process.exitCode = 1; }
+if (isMainThread && process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const controller = new AbortController();
+  const interrupt = () => controller.abort('PREPARE_CANCELLED: Ctrl+C/SIGTERM; resources and receipts retained');
+  process.on('SIGINT', interrupt); process.on('SIGTERM', interrupt);
+  try { const argv = process.argv.slice(2), args = parseArguments(argv);
+    const result = args.execute ? await supervisePublicPrepare(argv, { timeoutMs: args.prepareTimeoutMs ?? 2700000, signal: controller.signal }) : await main(argv); process.stdout.write(JSON.stringify(result, null, 2) + '\n'); if (result.status === 'NOTREADY') process.exitCode = 2; }
+  catch (error) { process.stderr.write(JSON.stringify({ schemaVersion: 1, status: /^PREPARE_(?:CANCELLED|TIMEOUT|COMMAND_TIMEOUT):/.test(error.message) ? 'CANCELLED_RETAIN_AND_RECONCILE' : 'REFUSED_OR_FAILED_RETAIN', problem: error.message }) + '\n'); process.exitCode = 1; }
+  finally { process.off('SIGINT', interrupt); process.off('SIGTERM', interrupt); }
 }

@@ -166,11 +166,37 @@ export function finishDockerCommand(client, issued) {
   assertDockerClient(client);
 }
 
+/** Cancellation never adopts by name alone. Only a returned create ID from this execution,
+ * exact engine (caller's run), image, labels and private input/cache mounts authorize kill.
+ * Leave the stopped container, cache, images and receipts intact; no rm/retry/recovery protocol. */
+export function stopOwnedPreparation(request, receipt, run, save) {
+  const id = receipt.createdContainerId, name = receipt.containerName;
+  if (!/^[a-f0-9]{64}$/.test(id ?? '') || name !== `paircoach-${request.installationId}-prepare-${request.key}` || !/^sha256:[a-f0-9]{64}$/.test(receipt.imageId ?? '')) throw new Error('Cancellation ownership unknown; retain/reconcile, no stop by name');
+  const cache = path.join(request.outputRoot, 'cache', request.family, receipt.toolchainHash, request.dependencySha256);
+  const observe = () => {
+    const values = JSON.parse(run(['inspect', id]).stdout), c = values?.[0];
+    if (!Array.isArray(values) || values.length !== 1 || c.Id !== id || c.Name !== '/' + name || c.Config?.Image !== receipt.imageId || c.Config.Labels?.['paircoach.installation'] !== request.installationId || c.Config.Labels?.['paircoach.role'] !== 'prepare' || typeof c.State?.Running !== 'boolean' || !Array.isArray(c.Mounts)) throw new Error('Cancellation exact container identity unknown; retain/reconcile');
+    const mounts = c.Mounts.filter(m => m.Type === 'bind');
+    if (mounts.length !== 2 || !mounts.some(m => m.Source === request.project.root && m.Destination === '/input' && m.RW === false) || !mounts.some(m => m.Source === cache && m.Destination === '/cache/0' && m.RW === true)) throw new Error('Cancellation container mounts differ; no foreign stop');
+    return c;
+  };
+  receipt.cancellation = { status: 'INSPECTING_OWNED_CONTAINER', containerId: id }; save();
+  const before = observe();
+  if (before.State.Running) {
+    receipt.cancellation.status = 'KILL_INTENT'; save();
+    run(['kill', '--signal=KILL', id]);
+  }
+  const after = observe();
+  if (after.State.Running) throw new Error('Cancellation termination unconfirmed; retain/reconcile');
+  receipt.cancellation.status = 'STOPPED_RETAINED'; receipt.cancellation.observed = after; save();
+}
+
 // Optional explicit transport retains endpoint/config fields; an in-process owned client capability
 // is required for shared outer/nested state. No arbitrary existing home/state path is accepted.
 export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null,transport=null,requiredPins=[]) {
   if(transport!==null) {
-    if(!transport || !['unix:///var/run/docker.sock','npipe:////./pipe/docker_engine'].includes(transport.endpoint) || !path.isAbsolute(transport.configDirectory) || Object.keys(transport).some(k=>!['endpoint','configDirectory','clientState','spawnSync'].includes(k)) || transport.spawnSync!==undefined && typeof transport.spawnSync!=='function') throw new Error('Explicit local Docker transport required');
+    if(!transport || !['unix:///var/run/docker.sock','npipe:////./pipe/docker_engine'].includes(transport.endpoint) || !path.isAbsolute(transport.configDirectory) || Object.keys(transport).some(k=>!['endpoint','configDirectory','clientState','spawnSync','control'].includes(k)) || transport.spawnSync!==undefined && typeof transport.spawnSync!=='function') throw new Error('Explicit local Docker transport required');
+    if(transport.control!==undefined && (!transport.control || typeof transport.control.cancelled!=='function' || typeof transport.control.progress!=='function')) throw new Error('Explicit in-process prepare control required');
     dockerClientEnvironment(transport.clientState);
     if(transport.configDirectory!==transport.clientState.configDirectory)throw new Error('Docker credential config alias/outside owned root refused');
   }
@@ -183,11 +209,12 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
   let client=transport?.clientState;
   let publicationFailed=false;
   const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}}; save();
-  const invoke=(args,allowMissing=false)=>{
-    if(Date.now()>=deadline) throw new Error('Preparation global budget reached; retain/reconcile');
+  const invoke=(args,allowMissing=false,cleanup=false)=>{
+    if(!cleanup && transport?.control?.cancelled()) throw new Error('Preparation cancelled; retain/reconcile');
+    if(!cleanup && Date.now()>=deadline) throw new Error('Preparation global budget reached; retain/reconcile');
     const endpoint=transport?.endpoint??(process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock');
     const issued=beginDockerCommand(client),actualArgs=['--host',endpoint,'--config',issued.configDirectory,...args],env=issued.env;
-    const startedAt=new Date().toISOString(),res=(transport?.spawnSync??spawnSync)('docker',actualArgs,{env,shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
+    const startedAt=new Date().toISOString(),res=(transport?.spawnSync??spawnSync)('docker',actualArgs,{env,shell:false,encoding:'utf8',timeout:cleanup?10000:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024,...(cleanup?{prepareCleanup:true}:{})});
     receipt.commands.push({argv:['docker',...actualArgs],...(transport?{endpoint:transport.endpoint,configDirectory:transport.configDirectory}:{}),startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
     finishDockerCommand(client,issued); // including final/unknown operations, retain never reused config
     if(allowMissing) imageCommandOutput(args,res,true);
@@ -230,7 +257,8 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     const name=`paircoach-${r.installationId}-prepare-${r.key}`; receipt.containerName=name; receipt.status='CONTAINER_INTENT'; save();
     const common=['--pull=never','--name',name,'--label',`paircoach.installation=${r.installationId}`,'--label','paircoach.role=prepare','--user','10001:10001','--cap-drop=ALL','--security-opt=no-new-privileges','--read-only','--network=bridge','--memory=2g','--cpus=2','--pids-limit=256','--log-driver=json-file','--log-opt','max-size=10m','--log-opt','max-file=1','--tmpfs','/tmp:rw,nosuid,size=256m,mode=1777','--tmpfs','/workspace:rw,nosuid,size=1g,uid=10001,gid=10001','--mount',`type=bind,source=${r.project.root},target=/input,readonly`,'--mount',`type=bind,source=${cache},target=/cache/0`];
     // No auto-rm: artifacts/exit/ownership durable before exact nonforce cleanup.
-    run(['create',...common,image[0].Id,'/opt/paircoach/node/bin/node','/opt/paircoach/runtime-cache.mjs',r.family,Buffer.from(JSON.stringify(r.expectedTools)).toString('base64url'),r.workingDirectory,r.dependencySha256]);
+    const created = run(['create',...common,image[0].Id,'/opt/paircoach/node/bin/node','/opt/paircoach/runtime-cache.mjs',r.family,Buffer.from(JSON.stringify(r.expectedTools)).toString('base64url'),r.workingDirectory,r.dependencySha256]);
+    if (/^[a-f0-9]{64}$/.test(created.trim())) { receipt.createdContainerId=created.trim(); save(); }
     run(['start','--attach',name]);
     const state=JSON.parse(run(['inspect',name]));
     if(state.length!==1 || state[0].State.Running || state[0].State.ExitCode!==0 || state[0].Config.Image!==image[0].Id || state[0].Config.Labels?.['paircoach.installation']!==r.installationId || state[0].Config.Labels?.['paircoach.role']!=='prepare') throw new Error('Prepare terminal ownership uncertain');
@@ -244,7 +272,24 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     // Operators publish production images.lock only after separate exact tools/offline check. Local imageId is NOT invented registry digest.
     if(!/^sha256:[a-f0-9]{64}$/.test('sha256:'+state[0].Id)) throw new Error('Terminal container ID malformed');
     run(['rm',state[0].Id]); checkEngine(); retention.verifyAll(); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
-  } catch(err) { receipt.status='FAILED_RETAIN_AND_RECONCILE'; receipt.error=err.message; if(!publicationFailed)save(); throw err; }
+  } catch(err) {
+    const cancelled=transport?.control?.cancelled();
+    receipt.status=cancelled?'CANCELLED_RETAIN_AND_RECONCILE':'FAILED_RETAIN_AND_RECONCILE'; receipt.error=err.message;
+    if(!publicationFailed) {
+      save();
+      if(cancelled && receipt.containerName) {
+        try {
+          const cleanupRun=args=>{
+            const current=JSON.parse(invoke(engineArgs,false,true).stdout);
+            if(!isDeepStrictEqual(current,receipt.engine))throw new Error('Cancellation engine changed; no stop');
+            return invoke(args,false,true);
+          };
+          stopOwnedPreparation(r,receipt,cleanupRun,save);
+        } catch(e) { receipt.cancellation={...receipt.cancellation,status:'UNKNOWN_RETAIN_AND_RECONCILE',problem:e.message}; if(!publicationFailed)save(); }
+      }
+    }
+    throw err;
+  }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url)===path.resolve(process.argv[1])) {
   try { const args=process.argv.slice(2); if(args.length<1 || args.length>2 || args[1] && args[1]!=='--execute') throw new Error('Usage: node scripts/runtime-prepare.mjs REQUEST.json [--execute]'); prepare(JSON.parse(readFileSync(args[0],'utf8')),args[1]==='--execute'); }
