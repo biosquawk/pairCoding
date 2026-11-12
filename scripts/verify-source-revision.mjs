@@ -18,6 +18,14 @@ const runtimeScripts = [
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
   'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
 ].map(name => `scripts/${name}`);
+// Private inert test-support source, NOT a public prepare/npm/HTTP entry point.
+// Conditional: old source compositions without these regressions need no operator module.
+const runtimeTestSupport = 'scripts/runtime-operator-remainder.mjs';
+const runtimeTestImporters = [
+  'tests/runtime-prepare-cli/remainder.test.mjs',
+  'tests/runtime-remainder-image-equality/image-equality.test.mjs',
+  'tests/runtime-image-retention/seams.test.mjs', // includes dynamic fixture.load reference
+];
 const runtimeAssets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json',
   'runtimes/pin-status.json', 'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
@@ -47,7 +55,7 @@ export function allowedSource(name) {
   if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
   if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || runtimeScriptSet.has(name) || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
+  return top.has(name) || runtimeScriptSet.has(name) || name === runtimeTestSupport || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 function fail(code, identity = {}) { const error = new Error(code); error.identity = identity; throw error; }
@@ -94,6 +102,8 @@ function validateSet(files) {
     if (!Number.isSafeInteger(file.bytes) || file.bytes < 0 || !hashSHA.test(file.sha256 ?? '')) fail('INVALID_FILE_IDENTITY');
   }
   for (const name of requiredFiles) if (!files.some(f => f.path === name)) fail('MISSING_REQUIRED_FILE');
+  if (runtimeTestImporters.some(name => files.some(f => f.path === name)) &&
+      !files.some(f => f.path === runtimeTestSupport)) fail('MISSING_TEST_SUPPORT');
   if (!files.some(f => /^tests\/execution\/.+\.test\.ts$/.test(f.path))) fail('MISSING_EXECUTION_TESTS');
 }
 function inventory(root) {

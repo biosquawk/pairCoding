@@ -299,10 +299,20 @@ kontrakt snapshot recovery. Wykluczone są m.in. `.env*`, sekrety/klucze, node_m
 obrazy/tar, download binaries, cache/target/__pycache__, raw receipts/logi i artifacts.
 Symlink, submodule w wybranym zakresie i alias nazwy Windows są odrzucane.
 `manifest.commands` obejmuje także literalny `runtime:prepare`; pakieter niczego nie wykonuje.
-Obie polityki źródłowe (pakieter i weryfikator) wymagają dokładnie14skryptów runtime,
-w tym publicznego CLI. Operator-only `runtime-operator-remainder.mjs` nie jest jego
-importem i pozostaje poza obiema allowlistami; nie ma publicznego polecenia npm
-do tego helpera. Nie rozszerzaj listy do15 ani do wildcarda `scripts/**`.
+Obie polityki źródłowe (pakieter i weryfikator) wymagają dokładnie15skryptów runtime
+publicznego przepływu, w tym CLI i jego helpera `runtime-image-retention.mjs`.
+Osobno dopuszczają **jedno prywatne źródło test-support**:
+`scripts/runtime-operator-remainder.mjs`. Nie jest ono importem publicznego CLI ani
+nową komendą npm/HTTP/acquisition API. Jest wymagane, jeżeli paczka wybiera którykolwiek
+z testów `runtime-prepare-cli/remainder.test.mjs`,
+`runtime-remainder-image-equality/image-equality.test.mjs` lub
+`runtime-image-retention/seams.test.mjs` pod `tests/` (także dynamiczny import fixture).
+Brak tego modułu powoduje odmowę planu/weryfikacji przed zapisem, nie pominięcie testu.
+Wszystkie oryginalne asercje pozostają; pakieter i weryfikator nie wykonują modułu.
+Samo dołączenie źródła nie upoważnia do uruchomienia operator-only remainder i nie
+dowodzi dostępności obrazów ani zakończenia naprawy. Kontrolery historycznej naprawy,
+ROOT recovery i prywatne proof fixtures pozostają izolowane i poza paczką.
+Nie rozszerzaj polityki do wildcarda `scripts/**` ani nie twórz kopii implementacji.
 Zaufanie pochodzi z niezależnie przekazanego SHA256 manifestu od K/operatora,
 nie z leżącego obok SHA256SUMS. Nie osłabia to istniejącego weryfikatora/recovery.
 

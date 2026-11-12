@@ -62,6 +62,14 @@ const runtimeScripts = [
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
   'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
 ].map(name => `scripts/${name}`);
+// Private inert test-support source, NOT a public prepare/npm/HTTP entry point.
+// Conditional: old source compositions without these regressions need no operator module.
+const runtimeTestSupport = 'scripts/runtime-operator-remainder.mjs';
+const runtimeTestImporters = [
+  'tests/runtime-prepare-cli/remainder.test.mjs',
+  'tests/runtime-remainder-image-equality/image-equality.test.mjs',
+  'tests/runtime-image-retention/seams.test.mjs', // includes dynamic fixture.load reference
+];
 const runtimeAssets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json',
   'runtimes/pin-status.json', 'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
@@ -91,7 +99,7 @@ function allowed(name) {
   if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
   if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || runtimeScriptSet.has(name) || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
+  return top.has(name) || runtimeScriptSet.has(name) || name === runtimeTestSupport || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 // Deliberately finite contract, not a shell parser. Unknown/changed scripts require
@@ -108,7 +116,7 @@ function commandClosure(pkg, paths) {
     start: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
     'dev:full': ['concurrently --kill-others "npm run server" "npm run dev"', ['src/server/index.ts', 'vite.config.ts', 'index.html'], ['concurrently', 'tsx', 'vite']],
     typecheck: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
-    test: ['tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"', ['playwright.config.ts'], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
+    test: ['tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"', ['playwright.config.ts', ...(runtimeTestImporters.some(p => paths.has(p)) ? [runtimeTestSupport] : [])], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
   };
   if (!pkg.scripts || typeof pkg.scripts !== 'object' || Array.isArray(pkg.scripts)) throw new Error('Brak poprawnych npm scripts.');
   for (const name of ['clean', 'build', 'start', 'typecheck', 'runtime:prepare']) {
@@ -175,6 +183,9 @@ function main() {
   const paths = new Set(selected.map(e => e.path));
   for (const name of sourceRequired) {
     if (!paths.has(name)) throw new Error(`Brak wymaganego pliku: ${name}`);
+  }
+  if (runtimeTestImporters.some(name => paths.has(name)) && !paths.has(runtimeTestSupport)) {
+    throw new Error(`Missing test support: ${runtimeTestSupport}`);
   }
   const pkg = JSON.parse(git(root, ['show', `${commit}:package.json`]).toString('utf8'));
   const commands = commandClosure(pkg, paths);
