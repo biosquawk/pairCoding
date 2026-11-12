@@ -241,7 +241,7 @@ export class LiveBackend {
       current: () => {
         const p = this.project, execution = p && 'execution' in p.capabilities ? p.capabilities.execution : null;
         return p && this.session && execution ? { projectId:p.projectId,sessionId:this.session.sessionId,clientId:this.clientId,
-          connectionGeneration:this.connectionGeneration,workspaceVersion:this.state.workspaceVersion,
+          connectionGeneration:this.connectionGeneration,workspaceVersion:this.state.workspaceVersion,controlEpoch:this.session.controlEpoch,
           configurationGeneration:execution.runtime.configurationGeneration,connected:this.synced && !this.stopped,
           canExecute:this.synced && !this.stopped,
           canSaveSettings:this.synced && !this.stopped && !this.preparing && !this.vetoPending && this.session.writeOwner==='STUDENT' && !this.savesHasConflict() } : null;
@@ -253,7 +253,16 @@ export class LiveBackend {
           const timeoutMs=this.wiring.runtime.snapshot().project?.settings.runProfiles.find(p=>p.kind===body.mode)?.timeoutMs ?? 30000;
           return this.http('/api/run','POST',body,true,signal,Math.max(30000,timeoutMs));
         },
-        stop:(runId,body,signal)=>this.http(`/api/run/${encodeURIComponent(runId)}/stop`,'POST',body,true,signal),
+        stop:(runId,body,signal)=>{
+          // Response includes physical exit, collection, durable result and cleanup.
+          // Existing executor CLI bounds: Stop 5 calls (2x info+inspect, stop),
+          // collect 3 (info+inspect, logs), cleanup up to 7 (info+inspect, rm,
+          // 2x info+inspect for lost-rm reconciliation/absence), each 10s;
+          // add the 500ms endpoint probe. Not the task Run/readiness budget.
+          // IO/queue delays may still exceed this: UNKNOWN stays UNKNOWN, no resend.
+          const stopResponseTimeoutMs=15*10000+500;
+          return this.http(`/api/run/${encodeURIComponent(runId)}/stop`,'POST',body,true,signal,stopResponseTimeoutMs);
+        },
         saveSettings:(body,signal)=>{this.retainRuntimeMutation('SAVE',body);return this.http('/api/project/settings','PUT',body,true,signal);},
       },
     },
