@@ -67,6 +67,34 @@ export class WriteGate {
     return this.workspace._withQueuedMutation(async () => this.writeAuthorized(accepted,assertScopeCurrent));
   }
 
+  /** Actual CODE_CHANGED commit seam. Precommit capture is synchronous; the postcommit token
+   * is minted ONLY AFTER the real write at its NEW version, while the SAME FIFO is still held.
+   * Callback owns original ACK publication; a failed publication is never retried here. */
+  _writeWithLanguageCommit<T>(input: MutationAuth & { path:string; baseVersion:number; content:string },
+      callbacks:{assertCurrent():void;beforeCommit():T;afterCommit(document:Document,capture:T,lease:LanguageSourceLease):Promise<void>}):Promise<Document> {
+    const accepted=structuredClone(input);
+    return this.workspace._withQueuedMutation(async()=>{
+      callbacks.assertCurrent();this.authorize(accepted);
+      this.workspace._safePath(accepted.path);this.workspace._fresh(accepted.path,accepted.baseVersion);
+      if(accepted.actor==='COACH')this.coachPath(accepted.path);
+      const capture=callbacks.beforeCommit();
+      const document=this.writeAuthorized(accepted,callbacks.assertCurrent);
+      const version=this.workspace.workspaceVersion;
+      let held=true,completed=false;
+      const assertRetainedCurrent=()=>{
+        if(!held && !completed)throw new AppError(409,'LANGUAGE_LEASE_RELEASED','Failed postcommit preparation has no retained token.');
+        callbacks.assertCurrent();this.authorize(accepted);this.workspace._settingsVersionStore().assertCurrent();
+        if(this.workspace.workspaceVersion!==version)throw new AppError(409,'WORKSPACE_VERSION_CONFLICT','Postcommit source changed.');
+      };
+      const lease:LanguageSourceLease=Object.freeze({assertRetainedCurrent,assertCurrent:()=>{
+        if(!held)throw new AppError(409,'LANGUAGE_LEASE_RELEASED','Postcommit source token is no longer held.');
+        assertRetainedCurrent();
+      }});
+      try {await callbacks.afterCommit(structuredClone(document),capture,lease);completed=true;return document;}
+      finally {held=false;}
+    });
+  }
+
   /** Frozen copy-helper signature; implementation stays executor-owned and is injected until reviewed. */
   captureRun(input: MutationAuth & { runId: string; profileId: string; configurationGeneration: string; expectedWorkspaceVersion: number;
       runDirectory: string }, collaborators: {
