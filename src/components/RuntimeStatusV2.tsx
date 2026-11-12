@@ -19,7 +19,7 @@ export function RuntimeStatusV2({ execution, language, run, connected, canExecut
       <button type="button" onClick={onSettings} className="underline">Ustawienia wykonania</button>
     </div>
     <div role="status" aria-live="polite">
-      {!connected ? 'Offline — uruchamianie niedostępne. Połącz ponownie; ręczna edycja i draft pozostają dostępne.' : !execution ? 'Ładowanie gotowości środowiska…' : `Środowisko: ${execution.runtime.state}`}
+      {!connected ? 'Offline — uruchamianie niedostępne. Połącz ponownie; ręczna edycja i draft pozostają dostępne.' : preparation?.pending || preparation?.uncertain ? 'Przygotowanie niepotwierdzone — gotowość wymaga bieżącego odczytu.' : !execution ? 'Ładowanie gotowości środowiska…' : `Środowisko: ${execution.runtime.state}`}
       {language && <p>Autouzupełnianie: {language.autocomplete} · Diagnostyka: {language.state} · Docs: {language.docs}</p>}
       {language?.problem && <p>{language.problem.message} {language.problem.recovery} Pisanie pozostaje dostępne.</p>}
       {execution?.runtime.problem && <p>{execution.runtime.problem.message} {execution.runtime.problem.recovery}</p>}
