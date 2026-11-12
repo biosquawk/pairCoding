@@ -4,3 +4,4 @@ docs/checkpoint-20261112/** -text
 investigations/stage09/** -text
 tests/k-async87cf/** -text
 tests/language-provider-preview-policy/** -text
+tests/node-junit-dialect/actual-node22-failed.xml -text
