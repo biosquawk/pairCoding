@@ -11,12 +11,15 @@ test('integrated actual GUI: CtrlSpace local completion -> original CODE_CHANGED
   if(!url||!token||!path||!revision)throw Error('Set PAIRCOACH_GUI_URL/TOKEN/PATH and exact PAIRCOACH_QA_REVISION for isolated INTEGRATED backend.');
   const endpoint=new URL(url);expect(['127.0.0.1','localhost']).toContain(endpoint.hostname);
   expect([8080,8081,8765,8766,8767,8768]).not.toContain(Number(endpoint.port));
-  const headers={Authorization:`Bearer ${token}`},frames:{direction:string;type:string;id?:string;replyTo?:string;content?:string;path?:string;status?:string;documentVersion?:number;workspaceVersion?:number;languageDocumentMessageId?:string}[]=[];
+  const headers={Authorization:`Bearer ${token}`},frames:{direction:string;type:string;at:number;id?:string;replyTo?:string;content?:string;path?:string;status?:string;documentVersion?:number;workspaceVersion?:number;languageDocumentMessageId?:string;controlEpoch?:number;writeOwner?:string}[]=[];
+  const currentness=process.env.PAIRCOACH_GUI_CURRENTNESS==='1';
+  let currentnessObservation:{openedAt:number;frameStart:number;priorEpoch?:number;priorOwner?:string}|null=null;
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   page.on('websocket',ws=>{
     const capture=(direction:string,data:string|Buffer)=>{
       const m=JSON.parse(data.toString());if(typeof m.type!=='string')return;
-      frames.push({direction,type:m.type,id:m.messageId,replyTo:m.payload?.replyTo,path:m.payload?.path,status:m.payload?.status,
+      frames.push({direction,type:m.type,at:Date.now(),id:m.messageId,replyTo:m.payload?.replyTo,path:m.payload?.path,status:m.payload?.status,
+        ...(m.type==='SESSION_STATE'?{controlEpoch:m.payload.controlEpoch,writeOwner:m.payload.writeOwner}:{}),
         ...(m.type==='CODE_CHANGED'?{content:m.payload.content,languageDocumentMessageId:m.payload.languageDocumentMessageId}:{}),
         ...(m.type==='ACK'?{documentVersion:m.payload.documentVersion,workspaceVersion:m.payload.workspaceVersion}:{})});
     };
@@ -45,9 +48,28 @@ test('integrated actual GUI: CtrlSpace local completion -> original CODE_CHANGED
     const input=page.getByRole('textbox',{name:`Edytor pliku ${path}`,exact:true});
     await expect(input).toBeVisible();await input.focus();await page.keyboard.press('Control+End');await paste(append);
     const dirty=original.content+append;await assertAck(dirty);
+    const frameStart=frames.length;
+    // Real keyboard movement queues the normal 120ms VIEW_CHANGED publication. Never
+    // inject/replay a WS event: keep the list open across that actual backend response.
+    if(currentness){await page.keyboard.press('ArrowLeft');await page.keyboard.press('ArrowRight');}
     await page.keyboard.press('Control+Space');
     const list=page.getByRole('listbox',{name:/Podpowiedzi kodu/});await expect(list).toBeVisible();
+    if(currentness){
+      const prior=[...frames.slice(0,frameStart)].reverse().find(f=>f.type==='SESSION_STATE');
+      currentnessObservation={openedAt:Date.now(),frameStart,priorEpoch:prior?.controlEpoch,priorOwner:prior?.writeOwner};
+    }
     const option=list.getByRole('option',{name:marker,exact:true});await expect(option).toBeVisible();
+    if(currentnessObservation){
+      const observation=currentnessObservation;
+      await expect.poll(()=>frames.slice(frameStart).some(f=>f.type==='SESSION_STATE'&&f.at>=observation.openedAt)).toBe(true);
+      const update=frames.slice(frameStart).find(f=>f.type==='SESSION_STATE'&&f.at>=observation.openedAt)!;
+      expect(update.controlEpoch).toBe(observation.priorEpoch);expect(update.writeOwner).toBe(observation.priorOwner);
+      const view=frames.slice(frameStart).find(f=>f.direction==='send'&&f.type==='VIEW_CHANGED');
+      expect(view,'actual keyboard view publication required').toBeTruthy();
+      await expect.poll(()=>frames.some(f=>f.type==='ACK'&&f.replyTo===view!.id)).toBe(true);
+      await expect(list,'view-only SESSION_STATE must preserve an open completion').toBeVisible();
+      await expect(option).toBeVisible();
+    }
     // Choose using keyboard only; existing controlled widget consumes Enter, not the native widget.
     for(let i=0;await option.getAttribute('aria-selected')!=='true';i++){expect(i).toBeLessThan(100);await page.keyboard.press('ArrowDown');}
     await page.screenshot({path:info.outputPath('completion-desktop.png')});
@@ -64,7 +86,7 @@ test('integrated actual GUI: CtrlSpace local completion -> original CODE_CHANGED
     fs.writeFileSync(info.outputPath('proof.json'),JSON.stringify({revision,url,node:process.version,platform:process.platform,browser:browser.version(),path,
       profile:process.env.PAIRCOACH_GUI_PROFILE??'operator-supplied',docker:process.env.PAIRCOACH_GUI_DOCKER??'NOT_ASSERTED',
       inputSha256:createHash('sha256').update(original.content).digest('hex'),initialVersion,finalDocumentVersion:(await getDocument()).version,
-      viewports:['1365x900','390x844'],frames,errors,
+      viewports:['1365x900','390x844'],currentnessObservation,frames,errors,
       boundary:'Actual integrated HTTP/WS and Monaco; editor/save/Undo/Redo only. No Docker execution, model AI or whole final acceptance.'},null,2));
   } finally {
     // Restore ONLY the tested isolated current file through the normal GUI/save path, not raw file writes/API mutation.
@@ -77,7 +99,7 @@ test('integrated actual GUI: CtrlSpace local completion -> original CODE_CHANGED
       }
     }
     } catch(e) {cleanupError=String(e);}
-    fs.writeFileSync(info.outputPath('observed-frames.json'),JSON.stringify({revision,url,frames,errors},null,2));
+    fs.writeFileSync(info.outputPath('observed-frames.json'),JSON.stringify({revision,url,currentnessObservation,frames,errors},null,2));
     fs.writeFileSync(info.outputPath('cleanup.json'),JSON.stringify({restored,cleanupError,scope:'isolated task source only; backend process not touched'}));
     expect.soft(cleanupError,'GUI cleanup').toBeNull();expect.soft(restored,'exact original source restored').toBe(true);
   }
