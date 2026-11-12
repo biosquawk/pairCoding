@@ -438,3 +438,42 @@ for (const choice of ['KEEP_LOCAL', 'LOAD_DISK'] as const) {
     assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
   });
 }
+
+// AC011 composition: a rejected late coach step reads authenticated disk bytes,
+// without a settings/project refresh. Project.files may legitimately lag that GET.
+for (const choice of ['KEEP_LOCAL', 'LOAD_DISK'] as const) {
+  test(`AC011 current document ahead of metadata permits explicit ${choice}, reselection and original-ACK restore`, async t => {
+    const f = await fixture(t); f.control('COACH', 1); await f.step(1);
+    const veto = f.veto();
+    f.live.saveFileContent('main.txt', 'protected local');
+    await f.step(2); f.confirmVeto(veto); await pause(180);
+    assert.equal(f.live.getState().files[0].version, 2, 'older project metadata is not the current document version');
+    assert.equal(f.live.getState().fileConflict?.diskContent, 'coach-2', 'authenticated GET has newer disk bytes');
+    assert.equal(f.live.getState().files[0].content, 'protected local');
+    assert.equal(f.sent.some(m => m.type === 'CODE_CHANGED'), false, 'no write before explicit choice');
+    await f.live.selectFile('main.txt');
+    assert.equal(f.live.getState().fileConflict?.diskContent, 'coach-2', 'reselect retains genuinely current read authority');
+    await f.live.resolveConflict(choice);
+    if (choice === 'LOAD_DISK') {
+      assert.equal(f.live.getState().files[0].content, 'coach-2');
+      assert.deepEqual(f.live.getState().pendingPaths, []);
+      assert.equal(f.sent.some(m => m.type === 'CODE_CHANGED'), false);
+      f.live.saveFileContent('main.txt', 'protected local');
+    }
+    await pause(180);
+    const changes = () => f.sent.filter(m => m.type === 'CODE_CHANGED');
+    assert.equal(changes().length, 1); assert.equal(changes()[0].payload.baseVersion, 3);
+    assert.equal(changes()[0].payload.content, 'protected local');
+    f.receive('ACK', { replyTo: 'foreign', status: 'OK', documentVersion: 4, workspaceVersion: 4, controlEpoch: 2, error: null });
+    assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
+    f.receive('ACK', { replyTo: changes()[0].messageId, status: 'OK', documentVersion: 4, workspaceVersion: 4, controlEpoch: 2, error: null });
+    assert.deepEqual(f.live.getState().pendingPaths, []);
+    f.live.saveFileContent('main.txt', 'draft'); await pause(180);
+    assert.equal(changes().length, 2); assert.equal(changes()[1].payload.baseVersion, 4);
+    f.receive('ACK', { replyTo: changes()[1].messageId, status: 'OK', documentVersion: 5, workspaceVersion: 5, controlEpoch: 2, error: null });
+    assert.deepEqual(f.live.getState().pendingPaths, []); assert.equal(f.live.getState().files[0].content, 'draft');
+    assert.equal(f.http.filter(r => r.path === '/api/file').length, 1, 'no backward read at stale metadata version');
+    assert.equal(f.http.some(r => r.method === 'PUT'), false, 'existing AC011 requires no settings SAVE');
+    assert.equal(f.rendered.length, 1); assert.equal(f.sent.filter(m => m.type === 'STEP_RENDERED').length, 1);
+  });
+}

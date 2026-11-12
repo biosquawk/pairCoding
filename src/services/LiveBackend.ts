@@ -898,7 +898,7 @@ export class LiveBackend {
     // of the old cached bytes. Only the existing explicit conflict choice may
     // authorize replacement after an authenticated document read.
     const diskVersion = this.project?.files.find(file => file.path === path)?.version;
-    if (!current && doc && typeof diskVersion === 'number' && diskVersion !== doc.version) {
+    if (!current && doc && typeof diskVersion === 'number' && diskVersion > doc.version) {
       this.saves.get(path)!.conflict = true;
       this.invalidateEditorView();
       const scope = this.getEditorViewScope(), epoch = this.session?.controlEpoch;
@@ -985,7 +985,7 @@ export class LiveBackend {
         const doc = this.documents.get(path), entry = this.project?.files.find(file => file.path === path);
         // A protected draft is not proof that this cached document is current.
         // Reselecting a tab must not turn a pending/failed read into authority.
-        this.state.fileConflict = (deletedDraft && !entry) || (doc && doc.version === entry?.version)
+        this.state.fileConflict = (deletedDraft && !entry) || (doc && typeof entry?.version === 'number' && doc.version >= entry.version)
           ? { path, localDraftContent: save.draft.content, diskContent: doc?.content ?? '', diskDeleted: deletedDraft } : null;
       }
       if (this.synced && !deletedDraft) this.observePathOnly(true); this.publish();
@@ -1410,7 +1410,9 @@ export class LiveBackend {
     const save = this.saves.get(conflict.path), doc = this.documents.get(conflict.path); if (!save || (!doc && !conflict.diskDeleted)) return;
     if (save.flight) { this.fail(new Error('Najpierw poczekaj na ACK lub połącz ponownie.')); return; }
     const entry = this.project?.files.find(file => file.path === conflict.path);
-    if (conflict.diskDeleted ? !!doc || !!entry : !doc || doc.version !== entry?.version || doc.content !== conflict.diskContent) {
+    // An authenticated file GET can be newer than Project.files (e.g. a committed
+    // late coach step). Metadata is a lower bound, never grounds to use older bytes.
+    if (conflict.diskDeleted ? !!doc || !!entry : !doc || typeof entry?.version !== 'number' || doc.version < entry.version || doc.content !== conflict.diskContent) {
       this.state.fileConflict = null;
       this.fail(new Error('Brak potwierdzonej bieżącej treści pliku. Draft zachowany; połącz ponownie, aby odczytać stan.')); return;
     }
