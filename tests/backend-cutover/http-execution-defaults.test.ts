@@ -21,7 +21,7 @@ function fixture(t: TestContext, overlap=false) {
   return {root,project,config,a,request,token};
 }
 test('HTTP actual default path constructs SAME durable private identity/public neutral Runner without Docker or host fallback',async t=>{
-  const f=fixture(t),port=await f.a.listen(),p=await f.request(port,'GET','/api/project');assert.equal(p.status,200);
+  const f=fixture(t),port=await f.a.listen(),p=await f.request(port,'GET','/api/project?readiness=actual');assert.equal(p.status,200);
   assert.equal(p.body.capabilities.execution.runtime.problem,null);assert.equal(p.body.capabilities.execution.modes.RUN_MAIN.canRun,false);assert.equal(p.body.capabilities.execution.modes.RUN_MAIN.problem.code,'TASK_CONFIG_INVALID');
   const state=path.join(f.root,'.paircoach-runtime','projects',createHash('sha256').update(f.project).digest('hex')),file=path.join(state,'installation.json'),record=JSON.parse(fs.readFileSync(file,'utf8'));
   assert.equal(record.projectId,p.body.projectId);assert.equal(record.workspaceRoot,f.project);assert.ok(record.installationId);
