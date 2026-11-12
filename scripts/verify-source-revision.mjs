@@ -16,7 +16,7 @@ const runtimeScripts = [
   'runtime-operator.mjs', 'runtime-stage-inputs.mjs', 'runtime-files.mjs',
   'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
-  'runtime-generate-templates.mjs',
+  'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
 ].map(name => `scripts/${name}`);
 const runtimeAssets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json',
