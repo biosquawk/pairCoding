@@ -21,6 +21,8 @@ export interface CoachOptions {
   provider?: CoachProvider;
   /** Synchronous admission policy; omitted only by standalone adapters without a server transition. */
   canAnalyze?: () => boolean;
+  /** Admit the full synchronous context read after the bound workspace/source capture releases. */
+  readContext?: <T>(read: () => T, signal: AbortSignal) => Promise<T>;
   sensitiveValues?: readonly string[];
 }
 type Ready = { requestId: string; workspaceVersion: number; ready: boolean };
@@ -120,13 +122,6 @@ export class CoachAdapter {
     if (this.active || !this.pending || !this.allowed()) return;
     const pending = this.pending;
     this.pending = null;
-    const context = buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
-      this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView());
-    context.trigger = { reason: pending.reason, messageId: pending.message?.messageId ?? null };
-    const fingerprint = contextFingerprint(context);
-    if (this.fingerprints.has(fingerprint)) return;
-    this.fingerprints.add(fingerprint);
-    if (this.fingerprints.size > 200) this.fingerprints.delete(this.fingerprints.values().next().value!);
     const generation = this.generation;
     const controller = new AbortController();
     this.controller = controller;
@@ -139,19 +134,33 @@ export class CoachAdapter {
       this.error('COACH_ANALYSIS_TIMEOUT', 'Przekroczono limit 30 s analizy trenera. Edytor pozostaje dostępny.');
     }, 30000);
     this.analysisTimer = analysisTimeout;
+    let capturing = true;
     try {
+      // Singleflight/controller are claimed BEFORE the admission hook's first await.
+      // Legacy callers still build synchronously here, inside this guarded lifecycle.
+      const read = this.contextReader(generation, controller.signal);
+      const context = this.options.readContext ? await this.options.readContext(read, controller.signal) : read();
+      if (!this.fresh(context, generation, controller.signal)) return;
+      context.trigger = { reason: pending.reason, messageId: pending.message?.messageId ?? null };
+      const fingerprint = contextFingerprint(context);
+      if (this.fingerprints.has(fingerprint)) return;
+      this.fingerprints.add(fingerprint);
+      if (this.fingerprints.size > 200) this.fingerprints.delete(this.fingerprints.values().next().value!);
+      capturing = false;
       // Keep at most one actual provider invocation alive even if an injected provider ignores abort.
       const raw = await this.provider.decide(structuredClone(context), controller.signal);
       clearTimeout(analysisTimeout);
       if (!this.fresh(context, generation, controller.signal)) return;
       const decision = parseCoachDecision(raw);
       this.setStatus('READY');
-      await this.applyDecision(decision, context, pending, controller.signal);
+      await this.applyDecision(decision, context, pending, generation, controller.signal);
     } catch (error) {
       // Never log provider error/message/body: these can include request content or keys.
-      if (!controller.signal.aborted && !this.closed) {
+      if (!controller.signal.aborted && generation === this.generation && !this.closed && this.options.canAnalyze?.() !== false) {
         this.setStatus('FAILED');
-        this.error('COACH_RESPONSE_REJECTED', error instanceof CoachResponseRejected ? error.safeMessage :
+        this.error(capturing ? 'COACH_CONTEXT_UNAVAILABLE' : 'COACH_RESPONSE_REJECTED', capturing ?
+          'Kontekst trenera jest obecnie niedostępny; zachowano pracę w edytorze.' :
+          error instanceof CoachResponseRejected ? error.safeMessage :
           'Odpowiedź trenera jest nieprawidłowa lub nieaktualna; zachowano pracę.');
       }
     } finally {
@@ -167,13 +176,27 @@ export class CoachAdapter {
     }
   }
 
+  private contextReader(generation: number, signal: AbortSignal): () => CoachContext {
+    // Only freshness metadata is captured before admission, never files/messages/view/run.
+    const epoch = this.options.session.getSession().controlEpoch;
+    const version = this.options.workspace.workspaceVersion;
+    return () => {
+      signal.throwIfAborted();
+      if (generation !== this.generation || !this.allowed() ||
+          epoch !== this.options.session.getSession().controlEpoch || version !== this.options.workspace.workspaceVersion)
+        throw new Error('COACH_CONTEXT_REVOKED');
+      return buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
+        this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView());
+    };
+  }
+
   private fresh(context: CoachContext, generation: number, signal: AbortSignal): boolean {
     return !signal.aborted && generation === this.generation && this.allowed() &&
       context.controlEpoch === this.options.session.getSession().controlEpoch &&
       context.workspaceVersion === this.options.workspace.workspaceVersion;
   }
 
-  private async applyDecision(decision: CoachDecision, context: CoachContext, pending: Pending, signal: AbortSignal): Promise<void> {
+  private async applyDecision(decision: CoachDecision, context: CoachContext, pending: Pending, generation: number, signal: AbortSignal): Promise<void> {
     switch (decision.kind) {
       case 'SILENT': return;
       case 'REPLY': {
@@ -203,7 +226,7 @@ export class CoachAdapter {
         const { kind: _, showPointer: __, ...hint } = decision;
         this.options.emit('COACH_HINT_BUBBLE', { id, ...hint, text: redactSecrets(hint.text, this.sensitive) });
         this.rememberReply(redactSecrets(hint.text, this.sensitive));
-        this.remember(decision.kind, decision.path);
+        await this.remember(decision.kind, decision.path, generation, signal);
         return;
       }
       case 'PROPOSE':
@@ -211,7 +234,7 @@ export class CoachAdapter {
           throw new CoachResponseRejected('CAPABILITY');
         if (decision.paths.some(path => !isContextPathAllowed(path))) throw new Error('PROPOSAL_PATH_DENIED');
         this.options.onProposal({ ...decision, questionText: redactSecrets(decision.questionText, this.sensitive) });
-        this.remember(decision.kind, null);
+        await this.remember(decision.kind, null, generation, signal);
         return;
       case 'MUTE': {
         const message = pending.message;
@@ -222,7 +245,7 @@ export class CoachAdapter {
         this.options.session.mute(decision.durationSeconds);
         return;
       }
-      case 'EDIT': return this.executePlan(decision, context, signal);
+      case 'EDIT': return this.executePlan(decision, context, generation, signal);
     }
   }
 
@@ -231,7 +254,7 @@ export class CoachAdapter {
     if (this.messages.length > 20) this.messages.shift();
   }
 
-  private async executePlan(plan: Extract<CoachDecision, { kind: 'EDIT' }>, context: CoachContext, signal: AbortSignal): Promise<void> {
+  private async executePlan(plan: Extract<CoachDecision, { kind: 'EDIT' }>, context: CoachContext, generation: number, signal: AbortSignal): Promise<void> {
     const { workspace, session, gate, emit } = this.options;
     if (!isCoachWriteAllowed(plan.path, workspace.settings) || !context.documents.some(doc => doc.path === plan.path) ||
       plan.workspaceVersion !== workspace.workspaceVersion || plan.workspaceVersion !== context.workspaceVersion) throw new Error('STALE_OR_FORBIDDEN_PLAN');
@@ -277,7 +300,7 @@ export class CoachAdapter {
           range: step.range, textBlock: step.textBlock.replace(/\r\n?/g, '\n'), contentHash: document.contentHash });
         if (!await rendered) return;
       }
-      this.remember('EDIT', plan.path);
+      await this.remember('EDIT', plan.path, generation, signal);
     } finally {
       clearTimeout(cutoff);
       this.releaseOwned();
@@ -322,14 +345,16 @@ export class CoachAdapter {
     if (payload.stepId === this.renderedWaiter?.stepId) this.renderedWaiter.accept(payload);
   }
 
-  private remember(kind: string, path: string | null): void {
+  private async remember(kind: string, path: string | null, generation: number, signal: AbortSignal): Promise<void> {
     this.interventions.push({ kind, path, workspaceVersion: this.options.workspace.workspaceVersion });
     if (this.interventions.length > 20) this.interventions.shift();
-    // Own response/edit is not a new fact, nor a reason to reanalyze the resultant context.
-    if (this.options.workspace.settings.aiConsent) {
-      this.fingerprints.add(contextFingerprint(buildContext(this.options.workspace, this.options.session.getSession(),
-        this.messages, this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView())));
-    }
+    // Optional postdecision dedup uses the SAME admission, never an unguarded file read.
+    // A failed/unavailable recomputation cannot undo an emitted decision or certify analysis.
+    try {
+      const read = this.contextReader(generation, signal);
+      const context = this.options.readContext ? await this.options.readContext(read, signal) : read();
+      if (this.fresh(context, generation, signal)) this.fingerprints.add(contextFingerprint(context));
+    } catch { /* Skip only the optional fingerprint; no retry or successful context fabrication. */ }
   }
   private clearPointer(): void {
     if (!this.pointer) return;
