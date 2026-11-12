@@ -349,7 +349,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       runs=new RuntimeRunMutation(core,mutations,boundRuntime ?? {start:async()=>fail(503,'RUNTIME_UNAVAILABLE','Neutral runtime is unavailable; no host fallback exists.')});
       if(boundRuntime) {
         try {
-          await boundRuntime.recover(mutations.runAdmissions(),(identity,stage)=>runs!.validate(identity.payload as RunRequestV2,stage));
+          await boundRuntime.recover(mutations.runAdmissions(),(identity,stage)=>runs!.validate(identity.payload as RunRequestV2,stage),
+            (identity,stage)=>mutations!.revokeRunDispatch(identity,stage));
           // Publish only original acceptance recovery, never a new start/current result.
           for(const a of mutations.runAdmissions())await runs.recover(a.identity.payload as RunRequestV2);
         } catch(error) {runtimeError=error;}

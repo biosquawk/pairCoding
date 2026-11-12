@@ -24,7 +24,7 @@ import type { PreparedRuntimeResolver, VerifiedPreparedCache, PreparedRuntimeSel
 
 /** Original private execution policy. Kept with the original admission, not later config. */
 export interface RetainedRunPolicy { managedCacheRoot: string; serviceNetwork: string | null }
-export type OriginalRunAdmission = (run: RunV2, plan: ExecutionPlan, policy: RetainedRunPolicy) => void;
+export type OriginalRunAdmission = (run: RunV2, plan: ExecutionPlan, policy: RetainedRunPolicy) => void | (() => void);
 
 export interface RuntimeExecutionOptions {
   core: RuntimeWorkspace;
@@ -50,6 +50,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   const byRun = new Map<string, DockerExecutor>();
   const states = new RuntimeRunState(path.join(layout.stateDirectory,'run-state'));
   const knownPlans = new Map<string,ExecutionPlan>();
+  const noDispatchProof = new Map<string,()=>boolean>();
   let recoveryError:unknown=null, recovered=false;
   const maintenanceQueue = new SerialQueue();
   const check = () => { options.assertCurrent(); if (core.workspace.rootPath !== layout.workspaceRoot || core.workspace.projectId !== layout.projectId)
@@ -141,14 +142,18 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     };
     assertCurrent();
     let retainedPolicy: RetainedRunPolicy | undefined;
+    let claimDispatch:(()=>void)|undefined;
     return runner.start({ projectId: core.workspace.projectId, request, profile: runtime.profile,
       runProfile: run, adapter: adapters.get(runtime.profile), assertCurrent,
       admitOriginal: (result, plan) => {
         assertCurrent();
         if (!retainedPolicy) throw Error('No original captured execution policy');
-        admitOriginal?.(result, plan, structuredClone(retainedPolicy));
+        const claim=admitOriginal?.(result, plan, structuredClone(retainedPolicy));
+        if(admitOriginal && typeof claim!=='function')throw Error('Original admission did not retain durable dispatch authority');
+        claimDispatch=claim || undefined;
         knownPlans.set(result.runId,structuredClone(plan));
       },
+      claimDispatch: () => claimDispatch?.(),
       capture: async runId => {
         let selected: VerifiedPreparedCache | undefined;
         let retainedLease: { assertCurrent(): void } | undefined;
@@ -184,6 +189,8 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     if(recoveryError)throw new AppError(409,'RUN_RECOVERY_REQUIRED','Unaccounted/corrupt durable Run owner; preserve original admissions and executor journal for exact recovery.');
     await journal.initialize();
     const records=await journal.list();
+    for(const id of knownPlans.keys())if(!records.some(r=>r.handle.runId===id) && !noDispatchProof.get(id)?.())
+      throw new AppError(409,'RUN_RECOVERY_REQUIRED','Missing executor record is not positive no-dispatch proof; preserve original ownership.');
     for(const record of records) {
       const plan=knownPlans.get(record.handle.runId);
       if(!plan || !same(plan,record.plan) || !byRun.has(record.handle.runId))
@@ -195,7 +202,8 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   }
   /** Awaited startup only, under real project kernel + mutation journal exclusion. No
    * current settings/profile/cache resolution, Docker invocation, create/start or cleanup. */
-  async function recover(admissions:readonly {identity:MutationIdentity;stage:RunAdmissionStage}[],validate?:(identity:MutationIdentity,stage:RunAdmissionStage)=>void):Promise<void> {
+  async function recover(admissions:readonly {identity:MutationIdentity;stage:RunAdmissionStage}[],validate?:(identity:MutationIdentity,stage:RunAdmissionStage)=>void,
+    revokeDispatch?:(identity:MutationIdentity,stage:RunAdmissionStage)=>boolean):Promise<void> {
     if(recovered)throw Error('Run ownership may be restored only once');recovered=true;
     try {
       for(const a of admissions)validate?.(a.identity,a.stage);
@@ -226,9 +234,13 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         if(!record && retained && (retained.run.startedAt!==null || retained.run.exitCode!==null ||
             retained.run.finishedAt!==null && retained.run.processProblem?.code!=='RUN_NOT_DISPATCHED'))
           throw Error('Missing executor intent contradicts retained process/terminal evidence');
+        // Read and revoke original-admission authority under its native lifetime lease.
+        // Missing executor intent, phase, run-state or timestamps are NEVER a certificate.
+        const undispatched=!record && !!revokeDispatch?.(identity,stage);
+        if(undispatched)noDispatchProof.set(id,()=>revokeDispatch!(identity,stage));
         runner.restore({sessionId:identity.sessionId,original,plan,adapter:adapters.get(plan.profile),
           handle:record?.handle??null,exit:record?.exit??null,collection:record?.collection??null,outcome:record?.outcome??null,
-          removed:record?.phase==='REMOVED',noProcess:record===null,cancellation,retained});
+          removed:record?.phase==='REMOVED',noProcess:undispatched,cancellation,retained});
       }
       if(records.some(r=>!ids.has(r.handle.runId)))throw Error('Executor orphan has no unique original admission');
       await assertAccounted();

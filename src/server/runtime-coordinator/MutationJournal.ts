@@ -6,7 +6,7 @@ import type { RetainedRunPolicy } from './RuntimeExecution';
 import type { SettingsTransactionIdentity } from '../settings-v2';
 import { AppError } from '../errors';
 import { JournalLease } from './JournalLease';
-import { canonical, createRecord, privateDirectory, readRecord, replaceRecord, SerialQueue, sha256 } from './storage';
+import { canonical, createRecord, privateDirectory, readRecord, replaceRecord, SerialQueue, sha256, syncDirectory } from './storage';
 
 /** Internal identity. HTTP validates exact public request schema before construction. */
 export interface MutationIdentity {
@@ -18,11 +18,14 @@ export type MutationOutcome<T> = { state: 'UNKNOWN'; result: null } |
 export type DefinitiveOutcome<T> = Exclude<MutationOutcome<T>, { state: 'UNKNOWN' }>;
 export interface SettingsResultStage<T> { identity: SettingsTransactionIdentity; result: T }
 export interface RunAdmissionStage { result: RunV2; plan: ExecutionPlan; policy: RetainedRunPolicy }
+export type RunEffectDispatch = 'NOT_DISPATCHED' | 'MAY_HAVE_BEEN_DISPATCHED' | 'REVOKED';
 const RUN_PROTOCOL = 'ORIGINAL_RUN_ADMISSION_V1';
 type RecordBody = { version: 1; identity: MutationIdentity; fingerprint: string; outcome: MutationOutcome<unknown>;
-  settingsStage?: SettingsResultStage<unknown>; runProtocol?: typeof RUN_PROTOCOL; runStage?: RunAdmissionStage };
+  settingsStage?: SettingsResultStage<unknown>; runProtocol?: typeof RUN_PROTOCOL; runStage?: RunAdmissionStage; runDispatch?: RunEffectDispatch };
 const validRunStage = (body: RecordBody): boolean => {
   if (body.runProtocol !== undefined && (body.identity.kind !== 'RUN' || body.runProtocol !== RUN_PROTOCOL)) return false;
+  if (body.runDispatch !== undefined && (!body.runStage || body.runProtocol !== RUN_PROTOCOL ||
+      !['NOT_DISPATCHED','MAY_HAVE_BEEN_DISPATCHED','REVOKED'].includes(body.runDispatch))) return false;
   if (body.runStage === undefined) return true;
   const s = body.runStage, payload = body.identity.payload as Record<string, unknown> | null;
   return body.runProtocol === RUN_PROTOCOL && !!payload && !!s.result && !!s.plan && !!s.policy &&
@@ -163,10 +166,46 @@ export class DurableMutationJournal {
   stageRun(original: MutationIdentity, stage: RunAdmissionStage): void {
     this.assertOwner();
     const identity = snapshot(original), key = this.key(identity), prior = this.existing(key, identity);
-    const body: RecordBody = { ...prior!, runStage: snapshot(stage) };
+    const body: RecordBody = { ...prior!, runStage: snapshot(stage), runDispatch: 'NOT_DISPATCHED' };
     if (!prior || prior.outcome.state !== 'UNKNOWN' || prior.runStage || !this.activeEffects || !validRunStage(body))
       fail('INVALID_RUN_STAGE', 'Original RUN acceptance must be staged once before execution.start.');
     this.settle(key, body);
+  }
+  /** Positive durable effect authority lives WITH original admission, not the losable
+   * executor record. The native lifetime lease excludes other processes; no await may
+   * intervene between exact read, transition, fsync/readback and dispatch authorization.
+   * A failed/ambiguous publication poisons this owner and can NEVER authorize an effect. */
+  claimRunDispatch(original: MutationIdentity, stage: RunAdmissionStage): void {
+    this.assertOwner();
+    const key=this.key(original), prior=this.existing(key,original);
+    if(!prior || !this.activeEffects || prior.outcome.state!=='UNKNOWN' ||
+        prior.runDispatch!=='NOT_DISPATCHED' || canonical(prior.runStage)!==canonical(stage))
+      return fail('RUN_DISPATCH_UNPROVEN','Original Run has no exclusive durable undispatched authority.');
+    this.settle(key,{...prior,runDispatch:'MAY_HAVE_BEEN_DISPATCHED'});
+  }
+  /** Startup only, after active-effect exclusion. Atomically revoke a positively retained
+   * pre-effect admission, so neither this owner nor a future callback may dispatch it.
+   * Legacy/missing/MAY evidence is UNKNOWN, never backfilled from executor absence. */
+  revokeRunDispatch(original: MutationIdentity, stage: RunAdmissionStage): boolean {
+    this.assertOwner();
+    const key=this.key(original), prior=this.existing(key,original);
+    if(!prior || !prior.runStage || canonical(prior.runStage)!==canonical(stage) ||
+        !['NOT_DISPATCHED','REVOKED'].includes(prior.runDispatch ?? '')) return false;
+    if(prior.runDispatch==='REVOKED') {
+      // A prior rename may have lost its flush acknowledgement. Reflush the
+      // exact directory and reread before accepting visible bytes as authority.
+      syncDirectory(this.directory);this.assertOwner();this.existing(key,original);return true;
+    }
+    if(this.activeEffects)return false;
+    // Admission result may already be COMMITTED. Changing dispatch authority is a
+    // monotonic private lifecycle transition, never a mutation-result rewrite.
+    const next:RecordBody={...prior,runDispatch:'REVOKED'}, bytes=this.encoded(next);
+    const total=this.bytes-this.encoded(prior).length+bytes.length;
+    if(total>(this.options.maxBytes??128*1024*1024))throw Error('Mutation journal budget exhausted');
+    try {replaceRecord(path.join(this.directory,key+'.json'),bytes);}
+    catch(error){this.poisoned=true;throw error;}
+    this.records.set(key,next);this.bytes=total;
+    return true;
   }
   readRunReservation(original: MutationIdentity): { protocol: boolean; stage: RunAdmissionStage | null } {
     this.assertOwner();
@@ -174,11 +213,11 @@ export class DurableMutationJournal {
     return { protocol: prior?.runProtocol === RUN_PROTOCOL, stage: prior?.runStage ? snapshot(prior.runStage) : null };
   }
   /** Exact inventory for startup join; never a synthesized plan/current configuration lookup. */
-  runAdmissions(): { identity: MutationIdentity; stage: RunAdmissionStage }[] {
+  runAdmissions(): { identity: MutationIdentity; stage: RunAdmissionStage; dispatch?: RunEffectDispatch }[] {
     this.assertOwner();
     return [...this.records.entries()].flatMap(([key, cached]) => {
       const record = this.existing(key, cached.identity)!;
-      return record.runStage ? [{ identity: snapshot(record.identity), stage: snapshot(record.runStage) }] : [];
+      return record.runStage ? [{ identity: snapshot(record.identity), stage: snapshot(record.runStage), ...(record.runDispatch ? {dispatch:record.runDispatch} : {}) }] : [];
     });
   }
   /** The exclusive reservation itself records this protocol BEFORE the callback can execute.

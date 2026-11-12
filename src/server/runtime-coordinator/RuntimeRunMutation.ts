@@ -52,6 +52,7 @@ export class RuntimeRunMutation {
         const stage = structuredClone({ result: run, plan, policy });
         this.validate(request, stage);
         this.journal.stageRun(identity, stage);
+        return () => this.journal.claimRunDispatch(identity, stage);
       });
       const stage = this.journal.readRunReservation(identity).stage;
       if (!stage) throw Error('RUN returned without durable original admission');

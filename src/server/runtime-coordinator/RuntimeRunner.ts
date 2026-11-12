@@ -20,6 +20,8 @@ export interface RuntimeRunAdmission {
   /** Synchronous durable original QUEUED acceptance, after final validated immutable plan,
    * before ANY execution.start. Throwing must prevent the process invocation. Internal only. */
   admitOriginal?(run: RunV2, plan: ExecutionPlan): void;
+  /** Durable effect claim, synchronous before the first executor invocation. */
+  claimDispatch?(): void;
 }
 export interface RuntimeRunnerOptions {
   execution: ExecutionPort;
@@ -107,7 +109,10 @@ export class RuntimeRunner {
       // Set before calling the port. A rejected/lost start is NOT proof that no container was created.
       job.attemptedStart=true; job.starting=true;
       let handle: ExecutionHandle;
-      try { handle=await this.options.execution.start(snapshot(job.plan)); } finally { job.starting=false; }
+      try {
+        admission.claimDispatch?.();
+        handle=await this.options.execution.start(snapshot(job.plan));
+      } finally { job.starting=false; }
       requireThat(handle.runId===runId && validId(handle.opaqueId),'Execution returned another Run handle.');
       job.handle=freeze(snapshot(handle));
       this.observe(job);
@@ -137,10 +142,10 @@ export class RuntimeRunner {
       collection:r.collection,outcome:r.outcome,receipt:null,attemptedStart:!r.noProcess,starting:false,
       requested:r.retained?.requested??null,outputSeq:0,waitAbort:new AbortController()};
     if(r.noProcess) {
-      // The composition proves exclusion + ORIGINAL_RUN_ADMISSION + complete executor
-      // journal absence BEFORE any create. No exit code/receipt is invented.
+      // The composition has durably revoked positive original-admission NOT_DISPATCHED
+      // authority under native exclusion. Executor-file absence alone proves nothing.
       job.run.status='CANCELLED';job.run.finishedAt ??=new Date(this.now()).toISOString();
-      job.run.processProblem=problem('RUN_NOT_DISPATCHED','Original accepted Run has no executor intent; no process effect was dispatched.');
+      job.run.processProblem=problem('RUN_NOT_DISPATCHED','Original accepted Run has positively revoked pre-effect dispatch authority; no process effect was dispatched.');
       this.options.retainState?.(snapshot(job.plan!),snapshot(job.run),job.requested);
     } else if(r.cancellation) {
       requireThat(r.removed && r.handle && same(r.handle,r.cancellation.handle) && !r.exit && !r.collection && !r.outcome,
