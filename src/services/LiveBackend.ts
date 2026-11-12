@@ -169,7 +169,11 @@ export class LiveBackend {
       (error.code==='SERVICE_NETWORK_NOT_DISPATCHED'||error.code==='SERVICE_NETWORK_ABSENCE_CONFIRMED'),
     refresh:async authority=>{
       const project=this.project,session=this.session,seq=this.lastSeq,generation=this.generation,source=this.maintenanceSourceRevision,connection=this.connectionGeneration;
-      const value=await this.http<import('../shared/runtime-v2').ProjectV2>('/api/project');
+      // Only a confirmed original PREPARED reaches this refresh. Bootstrap/HELLO stay cheap;
+      // PREPARED itself is not runtime readiness. The measured endpoint can spend the schema
+      // maximum 120s in EACH of three sequential phases (execution, Main probe, Tests probe).
+      // Allow those phases plus a 5s response margin, only for this authenticated read.
+      const value=await this.http<import('../shared/runtime-v2').ProjectV2>('/api/project?readiness=actual','GET',undefined,true,undefined,3*120000+5000);
       if(!this.synced||this.stopped||this.project!==project||this.session!==session||!session||seq!==this.lastSeq||generation!==this.generation||source!==this.maintenanceSourceRevision||
         connection!==this.connectionGeneration||this.preparing||this.vetoPending||this.saves.size||this.sourceRequests||
         session.writeOwner!=='STUDENT'||session.controlEpoch!==authority.controlEpoch||!validateV2WireShape('Project',value)||
