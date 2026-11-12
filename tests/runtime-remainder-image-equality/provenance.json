@@ -1,0 +1,18 @@
+{
+  "scope": "Captured actual r2 image-inspect stdout and matching frozen plan observedImage; tests replay guard only, never Docker",
+  "sourceSha": "5a0f7fe5deee33350e0e5fe2b90de2b3c35a0f91",
+  "commands": 4,
+  "jobs": 0,
+  "terminalStatus": "FAILED_RETAIN_AND_RECONCILE",
+  "sources": [
+    {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/production-runtime-adapters-prepare-only-r2-remaining/receipt.json",
+      "sha256": "c3a79a34f38cc50999c519f93337ff8cbe7e8c33cd6b9bf5f9cc18adf4b2fdc2"
+    },
+    {
+      "path": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/ROOT/sequential-review-20261111/prepare-remainder-5a0f7fe5-independent-readback/remainder-plan.json",
+      "sha256": "64bbc4df4b09d125652f30b41b126bc8656e89f3f7032e67ff459a0341bc6b0a"
+    }
+  ],
+  "fixtureSha256": "e5061b994946893ab6ad5ea7f50c4fb247d08e5cde065b99c8e0fdc6bfab9226"
+}

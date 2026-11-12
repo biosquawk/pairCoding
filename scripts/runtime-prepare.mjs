@@ -8,7 +8,9 @@ import path from 'node:path';
 import { dependencyHash } from './runtime-dependencies.mjs';
 import { literalPath } from './runtime-spec.mjs';
 import { fileURLToPath } from 'node:url';
-import { receiptWriter, canonicalDirectory, readPrivate } from './runtime-files.mjs';
+import { createImageRetention, imageCommandOutput, assertImagePin } from './runtime-image-retention.mjs';
+import { isDeepStrictEqual } from 'node:util';
+import { receiptWriter, canonicalDirectory, readPrivate, stamp } from './runtime-files.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const mavenImage='maven@sha256:be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f';
 const hash = b=>createHash('sha256').update(b).digest('hex');
@@ -79,33 +81,134 @@ function preparedIdentity(r) {
 export function resolvePreparedToolchainIdentity(request) {
   return preparedIdentity(validateProductionRequest(validatePrepareRequest(request)));
 }
-export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null) {
+// In-process ownership capability: never adopt an existing HOME/metadata directory or deserialize
+// authority from JSON/env. Paths are fixed disjoint children of an already-new private receipt root.
+const dockerClients = new WeakMap();
+export function createDockerClientState(root) {
+  if (typeof root !== 'string' || !path.isAbsolute(root) || path.resolve(root) !== root) throw new Error('Canonical owned Docker client root required');
+  canonicalDirectory(root);
+  const owner = lstatSync(root, { bigint: true });
+  const privateDirectory = st => st.isDirectory() && !st.isSymbolicLink() && (process.platform === 'win32' || (st.mode & 0o077n) === 0n && st.uid === BigInt(process.getuid()));
+  if (!privateDirectory(owner)) throw new Error('Docker client root must be private and owned');
+  const client = Object.freeze({ root, configDirectory: path.join(root, 'docker-config'), homeDirectory: path.join(root, 'docker-home'), buildxDirectory: path.join(root, 'docker-buildx') });
+  // Preflight ALL paths before creation, no partial adoption and no deleting old/unknown state.
+  for (const dir of [client.configDirectory, client.homeDirectory, client.buildxDirectory]) {
+    try { lstatSync(dir); throw new Error('Docker client state already exists; retain/reconcile'); }
+    catch (e) { if (e.code !== 'ENOENT') throw e; }
+  }
+  for (const dir of [client.configDirectory, client.homeDirectory, client.buildxDirectory]) mkdirSync(dir, { mode: 0o700 });
+  const identities = [root, client.configDirectory, client.homeDirectory, client.buildxDirectory].map(dir => ({ dir, st: lstatSync(dir, { bigint: true }) }));
+  dockerClients.set(client, { identities, privateDirectory, commands: [], active: null });
+  dockerClientEnvironment(client); return client;
+}
+/** Validate names/stat only: never read metadata/token/log contents. No same-user malicious-host
+ * race guarantee; receipt root identity + canonical ancestry rechecked around every bounded child. */
+function assertDockerClient(client, finishing = null) {
+  const owned = dockerClients.get(client);
+  if (!owned) throw new Error('Unowned Docker client state; no aliases/outside-root authority');
+  for (const { dir, st } of owned.identities) {
+    canonicalDirectory(dir); const now = lstatSync(dir, { bigint: true });
+    if (!owned.privateDirectory(now) || now.dev !== st.dev || now.ino !== st.ino) throw new Error('Owned Docker client directory identity changed');
+  }
+  const dirs = readdirSync(client.configDirectory).sort();
+  if (JSON.stringify(dirs) !== JSON.stringify(owned.commands.map(c => path.basename(c.configDirectory)).sort())) throw new Error('Unexpected Docker credential pool entry; retain/reconcile');
+  for (const command of owned.commands) {
+    canonicalDirectory(command.configDirectory);
+    const now = lstatSync(command.configDirectory, { bigint: true });
+    if (!owned.privateDirectory(now) || now.dev !== command.identity.dev || now.ino !== command.identity.ino) throw new Error('Docker command config identity changed');
+    if (command === finishing) continue;
+    if (command === owned.active) {
+      if (readdirSync(command.configDirectory).length) throw new Error('Dedicated command Docker config must be empty before child');
+    } else if (JSON.stringify(command.evidence) !== JSON.stringify(configMetadata(command.configDirectory))) throw new Error('Retired Docker credential config changed; never reuse');
+  }
+  let count = 0;
+  const visit = (dir, depth = 0) => {
+    if (depth > 32) throw new Error('Docker client metadata depth limit');
+    for (const name of readdirSync(dir)) {
+      if (++count > 4096) throw new Error('Docker client metadata count limit');
+      const file = path.join(dir, name), st = lstatSync(file, { bigint: true });
+      if (st.isSymbolicLink() || !st.isDirectory() && !st.isFile() || st.isFile() && st.nlink !== 1n || process.platform !== 'win32' && st.uid !== BigInt(process.getuid())) throw new Error('Unsafe Docker client metadata link/type/owner');
+      if (st.isDirectory()) { canonicalDirectory(file); visit(file, depth + 1); }
+    }
+  };
+  visit(client.homeDirectory); visit(client.buildxDirectory);
+  return owned;
+}
+// Newly-created per-command configs are NEVER reused or deleted. BuildKit may create its own
+// seed metadata outside BUILDX_CONFIG. Only these two regular owned names can retire unread;
+// auth/config.json/unknown writes fail closed. This is NOT acceptance of any nonempty input config.
+function configMetadata(directory) {
+  return readdirSync(directory).sort().map(name => {
+    if (!['.token_seed', '.token_seed.lock'].includes(name)) throw new Error('Unexpected Docker credential config write; retain/reconcile');
+    const st = lstatSync(path.join(directory, name), { bigint: true });
+    if (!st.isFile() || st.isSymbolicLink() || st.nlink !== 1n || process.platform !== 'win32' && st.uid !== BigInt(process.getuid())) throw new Error('Unsafe Docker command metadata link/type/owner');
+    return { name, identity: stamp(st) }; // stat only, no token/lock/log read
+  });
+}
+export function dockerClientEnvironment(client) {
+  assertDockerClient(client);
+  return { PATH: process.env.PATH, HOME: client.homeDirectory, BUILDX_CONFIG: client.buildxDirectory };
+}
+export function beginDockerCommand(client) {
+  const owned = assertDockerClient(client);
+  if (owned.active || owned.commands.length >= 4096) throw new Error('Docker client command overlap/count limit');
+  const configDirectory = path.join(client.configDirectory, 'command-' + String(owned.commands.length + 1).padStart(6, '0'));
+  mkdirSync(configDirectory, { mode: 0o700 }); canonicalDirectory(configDirectory);
+  const command = { configDirectory, identity: lstatSync(configDirectory, { bigint: true }), evidence: null };
+  owned.commands.push(command); owned.active = command;
+  return Object.freeze({ configDirectory, env: Object.freeze(dockerClientEnvironment(client)) });
+}
+export function finishDockerCommand(client, issued) {
+  const owned = dockerClients.get(client), command = owned?.active;
+  if (!command || issued.configDirectory !== command.configDirectory) throw new Error('Unowned Docker command completion');
+  assertDockerClient(client, command);
+  command.evidence = configMetadata(command.configDirectory); owned.active = null;
+  assertDockerClient(client);
+}
+
+// Optional explicit transport retains endpoint/config fields; an in-process owned client capability
+// is required for shared outer/nested state. No arbitrary existing home/state path is accepted.
+export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null,transport=null,requiredPins=[]) {
+  if(transport!==null) {
+    if(!transport || !['unix:///var/run/docker.sock','npipe:////./pipe/docker_engine'].includes(transport.endpoint) || !path.isAbsolute(transport.configDirectory) || Object.keys(transport).some(k=>!['endpoint','configDirectory','clientState','spawnSync'].includes(k)) || transport.spawnSync!==undefined && typeof transport.spawnSync!=='function') throw new Error('Explicit local Docker transport required');
+    dockerClientEnvironment(transport.clientState);
+    if(transport.configDirectory!==transport.clientState.configDirectory)throw new Error('Docker credential config alias/outside owned root refused');
+  }
   const r=validatePrepareRequest(request); inventory(r.tools); inventory(r.project);
   if(execute) validateProductionRequest(r);
   const {toolchainHash,dispatcherFiles}=execute?resolvePreparedToolchainIdentity(r):preparedIdentity(r),out=path.resolve(r.outputRoot);
   // All writes restricted to new explicit owned directory; no retry overwrites of uncertain operations.
   const publish=receiptWriter(out);
   const receipt={schemaVersion:1,status:execute?'STARTED':'PLAN_ONLY_NOT_PREPARED',startedAt:new Date().toISOString(),request:r,toolchainHash,dispatcherFiles,durability:{regularFile:'WRITABLE_HANDLE_FSYNC_REQUIRED',directory:process.platform==='win32'?'WIN32_DIRECTORY_FSYNC_MAY_BE_UNAVAILABLE':'POSIX_FSYNC_REQUIRED',privacy:process.platform==='win32'?'TRUSTED_PRIVATE_PARENT_INHERITED_ACL':'MODE_0700'},commands:[]};
+  let client=transport?.clientState;
   let publicationFailed=false;
   const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}}; save();
-  const invoke=(args)=>{
+  const invoke=(args,allowMissing=false)=>{
     if(Date.now()>=deadline) throw new Error('Preparation global budget reached; retain/reconcile');
-    const startedAt=new Date().toISOString(),res=spawnSync('docker',args,{env:{PATH:process.env.PATH,HOME:path.join(out,'docker-home')},shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
-    receipt.commands.push({argv:['docker',...args],startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
-    if(res.error || res.status!==0) throw new Error('Preparation operation failed; retain receipt/resources, reconcile by exact inspection before retry.'); return res.stdout;
+    const endpoint=transport?.endpoint??(process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock');
+    const issued=beginDockerCommand(client),actualArgs=['--host',endpoint,'--config',issued.configDirectory,...args],env=issued.env;
+    const startedAt=new Date().toISOString(),res=(transport?.spawnSync??spawnSync)('docker',actualArgs,{env,shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
+    receipt.commands.push({argv:['docker',...actualArgs],...(transport?{endpoint:transport.endpoint,configDirectory:transport.configDirectory}:{}),startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
+    finishDockerCommand(client,issued); // including final/unknown operations, retain never reused config
+    if(allowMissing) imageCommandOutput(args,res,true);
+    else if(res.error || res.signal || res.status!==0) throw new Error('Preparation operation failed; retain receipt/resources, reconcile by exact inspection before retry.'); return res;
   };
   const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const observeEngine=()=>{
-    const engine=JSON.parse(invoke(engineArgs));
+    const engine=JSON.parse(invoke(engineArgs).stdout);
     if(!exact(engine,['ID','ServerVersion','OSType','Architecture']) || Object.values(engine).some(v=>typeof v!=='string' || !v || v.length>256) || engine.OSType!=='linux' || !['x86_64','amd64'].includes(engine.Architecture)) throw new Error('Actual engine identity missing/unsupported');
     return engine;
   };
-  const checkEngine=()=>{const actual=observeEngine();if(JSON.stringify(actual)!==JSON.stringify(receipt.engine))throw new Error('Preparation engine changed; retain/reconcile');};
-  const run=args=>{checkEngine();return invoke(args);};
+  const checkEngine=()=>{const actual=observeEngine();if(!isDeepStrictEqual(actual,receipt.engine))throw new Error('Preparation engine changed; retain/reconcile');};
+  const runRaw=(args,allowMissing=false)=>{checkEngine();return invoke(args,allowMissing);};
+  const run=args=>runRaw(args).stdout;
   try {
     if(!execute) return receipt;
-    mkdirSync(path.join(out,'docker-home')); receipt.engine=observeEngine();save();
-    if(expectedEngine && JSON.stringify(receipt.engine)!==JSON.stringify(expectedEngine))throw new Error('Reviewed preparation engine differs');
+    client??=createDockerClientState(out);
+    receipt.clientState=client; receipt.engine=observeEngine();save();
+    if(expectedEngine && !isDeepStrictEqual(receipt.engine,expectedEngine))throw new Error('Reviewed preparation engine differs');
+    const retention=createImageRetention({engine:receipt.engine,requiredPins,run:runRaw,receipt,save});
+    retention.retainRequired();
     const context=path.join(out,'context'); mkdirSync(context); mkdirSync(path.join(context,'tools')); mkdirSync(path.join(context,'scripts'));
     for(const f of r.tools.files) { const dest=path.join(context,'tools',f.path); ownedParents(path.join(context,'tools'),path.dirname(f.path)); copyFileSync(path.join(r.tools.root,f.path),dest); }
     for(const f of ['runtime-task.mjs','runtime-pom.mjs','runtime-spec.mjs','runtime-cache.mjs','runtime-tools.mjs','runtime-dependencies.mjs','runtime-artifacts.mjs']) copyFileSync(path.join(repo,'scripts',f),path.join(context,'scripts',f));
@@ -114,8 +217,12 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     // Explicit pulls only here, NEVER in Run. Build uses local images/pull=false.
     run(['pull','--platform=linux/amd64',r.baseImage]); if(r.baseImage!==r.nodeImage) run(['pull','--platform=linux/amd64',r.nodeImage]);
     run(['pull','--platform=linux/amd64',mavenImage]);
+    retention.beforeBuild(r.imageTag);
+    receipt.status='BUILD_INTENT';save();
     run(['build','--pull=false','--network=none','--build-arg',`BASE_IMAGE=${r.baseImage}`,'--build-arg',`NODE_IMAGE=${r.nodeImage}`,'--tag',r.imageTag,context]);
-    const image=JSON.parse(run(['image','inspect',r.imageTag]));
+    const retained=retention.afterBuild(r.imageTag);
+    const image=JSON.parse(run(['image','inspect',retained.observedImage.Id]));
+    assertImagePin(retained,image[0]);
     if(image.length!==1 || !/^sha256:[a-f0-9]{64}$/.test(image[0].Id) || image[0].Config.User!=='10001:10001' || image[0].Config.Entrypoint?.length) throw new Error('Image inspect identity missing');
     receipt.imageId=image[0].Id; receipt.imageInspect=image[0];
     receipt.observedImage={Id:image[0].Id,RepoDigests:image[0].RepoDigests??[],Descriptor:image[0].Descriptor??null}; // never substitute config/image ID for manifest identity
@@ -136,7 +243,7 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     receipt.status='COLLECTED_DURABLE'; save();
     // Operators publish production images.lock only after separate exact tools/offline check. Local imageId is NOT invented registry digest.
     if(!/^sha256:[a-f0-9]{64}$/.test('sha256:'+state[0].Id)) throw new Error('Terminal container ID malformed');
-    run(['rm',state[0].Id]); checkEngine(); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
+    run(['rm',state[0].Id]); checkEngine(); retention.verifyAll(); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
   } catch(err) { receipt.status='FAILED_RETAIN_AND_RECONCILE'; receipt.error=err.message; if(!publicationFailed)save(); throw err; }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url)===path.resolve(process.argv[1])) {

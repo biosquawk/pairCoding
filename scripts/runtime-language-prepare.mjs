@@ -5,12 +5,13 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {canonicalDirectory,readPrivate} from './runtime-files.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),hash=b=>createHash('sha256').update(b).digest('hex');
-export function prepareLanguageImages(root,lock,{run,save,receipt}) {
+export function prepareLanguageImages(root,lock,{run,save,receipt},kinds=['java','python']) {
+ if(!Array.isArray(kinds)||!kinds.length||kinds.length>2||new Set(kinds).size!==kinds.length||kinds.some(k=>!['java','python'].includes(k)))throw new Error('Explicit nonempty unique language kinds required');
  const make=d=>{canonicalDirectory(path.dirname(d));fs.mkdirSync(d,{mode:0o700});canonicalDirectory(d);};
  const put=(p,b)=>{canonicalDirectory(path.dirname(p));const fd=fs.openSync(p,'wx',0o600);try{fs.writeFileSync(fd,b);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
  const artifact=(a,p)=>{const b=readPrivate(p,128*1024*1024).bytes;if(b.length!==a.bytes||hash(b)!==a.sha256)throw new Error('Language staging hash differs');return b;};
  make(path.join(root,'language-contexts'));receipt.language=[];save();
- for(const kind of ['java','python']) {
+ for(const kind of kinds) {
   const context=path.join(root,'language-contexts',kind);make(context);
   const key=kind==='java'?'jdt-runtime-27':'pylsp-runtime-3.13',tag=kind==='java'?'paircoach/language-jdt:stage09':'paircoach/language-pylsp:stage09';
   const item={key,engine:receipt.engine,status:'BUILD_INTENT',imageTag:tag,tools:[]};receipt.language.push(item);save();
@@ -29,8 +30,8 @@ export function prepareLanguageImages(root,lock,{run,save,receipt}) {
   item.observedImage={Id:image.Id,RepoDigests:image.RepoDigests??[],Descriptor:image.Descriptor??null};item.status='TOOL_PROBES_PENDING';save();
   const wheels=lock.language.artifacts.filter(a=>a.kind==='language-wheel'),pythonCode='import sys,json,importlib.metadata as m;print(json.dumps({"python":sys.version.split()[0],"packages":{n:m.version(n) for n in '+JSON.stringify(wheels.map(a=>a.name))+'}}))';
   const probes=kind==='java'?[
-   {name:'jdt-server-java',exe:'/opt/jdk27/bin/java',args:['-version'],version:'27.0.1.0'},
-   ...[11,17,21,27].map(release=>({name:'target-javac-'+release,exe:(release===21?'/opt/java/openjdk':'/opt/jdk'+release)+'/bin/javac',args:['-version'],version:({11:'11.0.33',17:'17.0.21',21:'21.0.13',27:'27.0.1.0'})[release]}))
+   {name:'jdt-server-java',exe:'/opt/jdk27/bin/java',args:['-version'],version:'27.0.1.0.2'},
+   ...[11,17,21,27].map(release=>({name:'target-javac-'+release,exe:(release===21?'/opt/java/openjdk':'/opt/jdk'+release)+'/bin/javac',args:['-version'],version:({11:'11.0.33',17:'17.0.21',21:'21.0.13',27:'27.0.1.0.2'})[release]}))
   ]:[{name:'python-pylsp-inventory',exe:'/usr/local/bin/python',args:['-c',pythonCode]}];
   for(const probe of probes) {
    const name='paircoach-stage09-language-'+probe.name,record={name,status:'CREATE_INTENT'};item.tools.push(record);save();
