@@ -25,6 +25,7 @@ const assets = [
 ];
 const runtimeRequired = ['paircoach.runtime.json','docs/windows-polyglot.md',...scripts,...assets];
 const excluded = [
+  'OTHER.md', 'architecture.md', 'agents.md', 'AGENTS.json', 'other/AGENTS.md',
   '.env', 'src/secret.key', 'examples/java-pattern/target/stale.xml', 'examples/python-calculator/__pycache__/cached.py',
   'examples/python-calculator/.venv/site.py', 'examples/javascript-counter/node_modules/pkg/index.js',
   'examples/.env.local','runtimes/credentials/auth.json','runtimes/secrets/token.txt','runtimes/artifacts/receipt.json',
@@ -32,10 +33,11 @@ const excluded = [
   'docker/.aws/config.json','docker/.ssh/private.txt','runtimes/download.whl','runtimes/tools.tar.gz','runtimes/receipts/prepared.json','runtimes/cache/index.json',
   'scripts/runtime-unreviewed.mjs','scripts/arbitrary.mjs','tests/qa/raw.log',
 ];
+const optionalDocs = ['ARCHITECTURE.md', 'AGENTS.md'];
 const extraSources = ['runtimes/source-metadata.json','docker/support/check.py','examples/other-project/src/Other.java','examples/other-project/task.v2.json'];
 function write(root, name, bytes) { const p=path.join(root,name);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,bytes); }
 function git(root,...args) {const r=spawnSync('git',args,{cwd:root,encoding:'utf8'});assert.equal(r.status,0,r.stderr);return r.stdout.trim();}
-function fixture(t) {
+function fixture(t, includeDocs = true) {
   const base=fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(),'runtime-package-'));
   t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
   const root=path.join(base,'repo');fs.mkdirSync(root);
@@ -45,6 +47,7 @@ function fixture(t) {
   }
   write(root,'tests/execution/synthetic.test.ts','// not executed by packager\n');
   write(root,'tests/execution/synthetic.test.mjs','// not executed by packager\n');
+  if(includeDocs) for(const name of optionalDocs) write(root,name,`synthetic optional root document: ${name}\n`);
   for(const name of [...excluded,...extraSources]) write(root,name,`fixture: ${name}\n`);
   // Forced add intentionally includes denylisted files; selection cannot rely on .gitignore.
   git(root,'init','--quiet');git(root,'config','core.autocrlf','false');
@@ -69,12 +72,17 @@ function readZip(zip) {
 test('list/dry-run: complete finite polyglot source closure, exact SHA256 of every byte, no readiness claim/writes',t=>{
   const f=fixture(t),before=git(f.root,'status','--porcelain');
   const list=pack(f,['--list']).stdout.trim().split('\n');
-  for(const name of [...oldRequired,...runtimeRequired,...extraSources])assert.ok(list.includes(name),name);
+  for(const name of [...oldRequired,...runtimeRequired,...extraSources,...optionalDocs])assert.ok(list.includes(name),name);
   for(const name of excluded)assert.ok(!list.includes(name),name);
+  for(const name of optionalDocs) assert.equal(oldRequired.includes(name),false,'optional, never sourceRequired: '+name);
   const tracked=git(f.root,'ls-tree','-r','--name-only',f.revision).split('\n');
   assert.deepEqual(list,tracked.filter(allowedSource).sort(),'packager/verifier exact finite selection parity');
   const plan=JSON.parse(pack(f,['--dry-run']).stdout);
   assert.deepEqual(plan.files.map(f=>f.path),list);assert.equal(plan.sourceCommit,f.revision);
+  for(const name of optionalDocs) {
+    assert.equal(plan.sourceVerification.requiredFiles.includes(name),false,name);
+    assert.ok(plan.commands.every(c=>!c.requiredFiles.includes(name)),name);
+  }
   assert.equal(plan.commands.length,11);const cmd=plan.commands.find(c=>c.name==='runtime:prepare');
   assert.equal(cmd.command,'node scripts/runtime-prepare-cli.mjs');assert.deepEqual(cmd.requiredFiles,runtimeRequired);
   assert.match(cmd.prerequisite,/plan-only is NOT prepared/);assert.equal(cmd.execution,'NOT_RUN_BY_PACKAGER');
@@ -84,6 +92,14 @@ test('list/dry-run: complete finite polyglot source closure, exact SHA256 of eve
   for(const file of plan.files) {const bytes=fs.readFileSync(path.join(f.root,file.path));assert.equal(file.sha256,sha(bytes));assert.equal(file.bytes,bytes.length);}
   assert.equal(git(f.root,'status','--porcelain'),before);assert.equal(fs.existsSync(path.join(f.root,'node_modules')),false);
 });
+test('optional root architecture docs are not required for packaging or verification',t=>{
+  const f=fixture(t,false),plan=JSON.parse(pack(f,['--dry-run']).stdout);
+  for(const name of optionalDocs) assert.ok(!plan.files.some(file=>file.path===name),name);
+  const copied=verifyAndCopy({source:f.root,revision:f.revision,destination:path.join(f.base,'without-docs')});
+  assert.equal(copied.byteVerification,'PASS');
+  for(const name of optionalDocs) assert.ok(!copied.files.some(file=>file.path===name),name);
+});
+
 test('synthetic --output STORE ZIP independently matches all Git bytes/manifest and rejects overwrite/inside-repo',t=>{
   const f=fixture(t),out=path.join(f.base,'synthetic-only');pack(f,['--output',out]);
   const manifestBytes=fs.readFileSync(path.join(out,'manifest.json')),m=JSON.parse(manifestBytes),zip=fs.readFileSync(path.join(out,m.archive.name)),files=readZip(zip);
@@ -122,6 +138,7 @@ test('expanded verifier: actual Git -> disposable copy and synthetic ZIP -> Gitl
   const f=fixture(t),gitCopy=path.join(f.base,'git-copy');
   const identity=verifyAndCopy({source:f.root,revision:f.revision,destination:gitCopy});
   assert.equal(identity.trustMode,'GIT_HEAD');assert.equal(identity.byteVerification,'PASS');
+  for(const name of optionalDocs) assert.ok(identity.files.some(file=>file.path===name),name);
   for(const file of identity.files)assert.deepEqual(fs.readFileSync(path.join(gitCopy,file.path)),fs.readFileSync(path.join(f.root,file.path)));
   for(const name of excluded)assert.equal(fs.existsSync(path.join(gitCopy,name)),false,name);
   const out=path.join(f.base,'archive');pack(f,['--output',out]);
