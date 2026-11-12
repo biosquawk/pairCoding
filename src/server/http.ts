@@ -65,6 +65,8 @@ export interface ServiceContext {
   onProposal: (decision: Extract<CoachDecision, {kind:'PROPOSE'}>) => void;
   /** Custom coach services must honor this policy for admission and late asynchronous decisions. */
   canAnalyze?: () => boolean;
+  /** Admit a synchronous current context read after SAME FIFO release, excluding language capture. */
+  readContext?: <T>(read: () => T, signal: AbortSignal) => Promise<T>;
 }
 export interface CoachService {
   trigger(reason: 'EDIT'|'CHAT'|'RUN'|'START'|'OVERTIME', message?: ChatEntry): void;
@@ -327,7 +329,22 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       emit(type,payload);
     };
     const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);},
-      canAnalyze:()=>active && !transitioning && !closing};
+      canAnalyze:()=>active && !transitioning && !closing,
+      readContext:async<T>(read:()=>T,signal:AbortSignal):Promise<T>=>{
+        const assertBound=()=>{
+          if(signal.aborted || !active || disposed || startup!==owner || transitioning || closing)
+            fail(409,'COACH_CONTEXT_REVOKED','Actual coach project binding changed during context admission.');
+        };
+        const checked=()=>{assertBound();const value=read();assertBound();return value;};
+        assertBound();
+        let value:T;
+        if(language)value=await language.readProjection(async()=>checked());
+        else {
+          // Context reads occur AFTER the actual mutation FIFO releases, never inside its action.
+          await boundWorkspace._withQueuedMutation(async()=>{});value=checked();
+        }
+        assertBound();return value;
+      }};
     const on=(source:WorkspaceService|SessionController,event:string,handler:(...args:any[])=>void)=>{
       source.on(event,handler);listeners.push({source,event,handler});
     };
