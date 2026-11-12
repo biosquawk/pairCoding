@@ -31,6 +31,7 @@ export interface RuntimeLanguageSourceOptions {
   /** Backend binding/config/transport currentness, not an always-current test policy. */
   assertCurrent():void;
   assertPeer(peerId:string,message:Readonly<LanguageClientMessage>):void;
+  onUnassociatedCommit?(path:string):void;
 }
 export class RuntimeLanguageSource implements RegistryAuthority {
   private readonly options:RuntimeLanguageSourceOptions;
@@ -41,6 +42,10 @@ export class RuntimeLanguageSource implements RegistryAuthority {
   private readonly overlays=new Map<string,Overlay>();
   private readonly commits=new Map<string,Readonly<LanguageSaveCommit>>();
   private readonly seen=new Map<string,string>();
+  private committing:{path:string;workspaceVersion:number}|null=null;
+  ownsCommit(change:{path?:string;workspaceVersion:number;actor:string}):boolean {
+    return change.actor==='STUDENT' && this.committing!==null && change.path===this.committing.path && change.workspaceVersion===this.committing.workspaceVersion;
+  }
   constructor(options:RuntimeLanguageSourceOptions) {
     if(typeof options.assertCurrent!=='function' || typeof options.assertPeer!=='function')throw Error('Actual source/peer authority callbacks required');
     this.options={...options,runtime:copy(options.runtime),scope:copy(options.scope),assertCurrent:options.assertCurrent.bind(options),assertPeer:options.assertPeer.bind(options)};this.scope=copy(options.scope);
@@ -153,6 +158,7 @@ export class RuntimeLanguageSource implements RegistryAuthority {
         overlays:snapshot.documents.map(d=>({stamp:d.stamp,content:d.content}))}),
       assertCurrent:()=>{gateLease.assertCurrent();check();},assertRetainedCurrent:()=>{gateLease.assertRetainedCurrent();check();}});
   }
+  hasOverlay(path:string):boolean {return this.overlays.has(path);}
   readCommittedSave(request:Readonly<LanguageSaveInput>,receiptId:string):LanguageSaveCommit|null {
     try {this.guard();const result=this.commits.get(receiptId);return result && same(result.request,request)?copy(result):null;}
     catch{return null;}
@@ -162,7 +168,7 @@ export class RuntimeLanguageSource implements RegistryAuthority {
    * Preparation failure withholds association only, never rolls back a successful ordinary save. */
   writeWithAck(input:MutationAuth & {path:string;baseVersion:number;content:string},
       correlation:{peerId:string;transactionMessageId:string;languageDocumentMessageId:string|null;receiptId:string},
-      binding:ReturnType<typeof createRuntimeLanguageBinding>,assertPeerCurrent:()=>void,publish:(document:Readonly<Document>)=>void):Promise<Document> {
+      binding:ReturnType<typeof createRuntimeLanguageBinding>,assertPeerCurrent:()=>void,publish:(document:Readonly<Document>)=>void,captureCommit?:(document:Readonly<Document>)=>void):Promise<Document> {
     const accepted=copy(input),ids=copy(correlation);
     const request:LanguageSaveInput={peerId:ids.peerId,transactionMessageId:ids.transactionMessageId,
       languageDocumentMessageId:ids.languageDocumentMessageId ?? '',path:accepted.path,baseVersion:accepted.baseVersion,
@@ -170,8 +176,10 @@ export class RuntimeLanguageSource implements RegistryAuthority {
     return this.options.core.gate._writeWithLanguageCommit(accepted,{assertCurrent:assertPeerCurrent,beforeCommit:()=>{
       let pending:ReturnType<typeof binding.beginSave>=null,before:RegistrySnapshot|null=null;
       try {before=this.capture(this.scope);pending=binding.beginSave(request);}catch{/* ordinary save needs no language capture */}
+      this.committing={path:accepted.path,workspaceVersion:this.options.core.workspace.workspaceVersion+1};
       return {pending,before};
     },afterCommit:async(document,capture,gateLease)=>{
+      this.committing=null;captureCommit?.(copy(document));
       const overlay=this.overlays.get(accepted.path);
       // Only this exact original admitted model may advance ACK presentation versions. No new draft,
       // scope or dependency identity is inferred from its content being equal to a later model.
@@ -193,8 +201,13 @@ export class RuntimeLanguageSource implements RegistryAuthority {
         }
       } else this.invalidate();
       } catch {pending=null;this.invalidate();} // only language preparation; NEVER catch/retry publication
-      binding.publishSaveAck(pending,ids.receiptId,()=>publish(copy(document)));
-    }});
+      let current=true;try{this.guard();}catch{current=false;}
+      // A control/reconnect can revoke ONLY the language join while postcommit preparation awaits.
+      // The genuine already committed ordinary result/receipt must still publish/retain exactly once.
+      if(!current){publish(copy(document));return;}
+      const associated=binding.publishSaveAck(pending,ids.receiptId,()=>publish(copy(document)));
+      if(!associated){this.invalidate();binding.invalidateSource();this.options.onUnassociatedCommit?.(accepted.path);}
+    }}).finally(()=>{this.committing=null;});
   }
   readCurrent(peerId:string,path:string):LanguageAckCurrent|null {
     try {this.guard();const o=this.overlays.get(path);if(!o || o.peerId!==peerId)return null;

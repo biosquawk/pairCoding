@@ -192,6 +192,39 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
   fileOperation(scope: LanguageProjectScope, _operation: LanguageFileOperation): Promise<void> {
     this.assertScope(scope); return this.mutate(); // Actual successful Workspace feed; recapture COMPLETE inventory even for inactive files.
   }
+  /** Trusted non-ACK source revoke. No capture, scheduling or owner guard is needed to clear
+   * old authority; callers may have just revoked their normal current-owner predicate.
+   */
+  invalidateSource(scope: LanguageProjectScope): void {
+    this.assertScope(scope);
+    const unresolved = new Set([this.completion, this.diagnostics].filter(l => l.active?.retiring && l.state === 'FAILED'));
+    this.invalidate(); // Full revoke, never the mutable completion optimization.
+    for (const l of [this.completion, this.diagnostics]) {
+      // Uncertain Stop retains the SAME owner. Only explicit reconciliation may retry it;
+      // another invalidation/refresh must not turn into a hidden Stop/launch retry loop.
+      if (unresolved.has(l)) l.state = 'FAILED';
+      else if (l.active) void this.pump(l);
+    }
+  }
+  /** Accepted scheduling only, not a semantic result/readiness promise. Capture the actual
+   * complete vector; existing selected capture leases revalidate it under the SAME FIFO.
+   */
+  async refreshSource(scope: LanguageProjectScope): Promise<void> {
+    this.assertScope(scope);
+    if (this.problem?.code === 'PROCESS_STOP_UNCONFIRMED' ||
+      [this.completion, this.diagnostics].some(l => l.active?.retiring && l.state === 'FAILED'))
+      throw new Error('Retained language process ownership unresolved');
+    this.invalidateSource(scope);
+    const epoch = this.epoch; let snapshot: RegistrySnapshot;
+    try {
+      snapshot = this.captured();
+      this.problem = null; this.schedule(snapshot); this.status();
+    } catch (error) { this.failed(String(error)); throw error; }
+    // Fence the async API's own continuation without waiting for a source FIFO or a provider.
+    // A synchronous caller can supersede the vector immediately after accepted scheduling.
+    await Promise.resolve(); this.assertScope(scope);
+    if (epoch !== this.epoch || !this.current(snapshot)) throw new Error('Language source refresh superseded');
+  }
   private valid(l: Lane, s: Slot): boolean { return l.active === s && !s.invalid && s.epoch === this.epoch && (this.current(s.snapshot) || l.phase === 'diagnostics' && this.aliasSnapshot === s.snapshot && !!this.alias && this.options.ackLedger.isVerified(this.alias)); }
   private sourceCurrent(e: Evidence): boolean {
     return this.current(e.snapshot) || this.aliasSnapshot === e.snapshot && !!this.alias && this.options.ackLedger.isVerified(this.alias);
