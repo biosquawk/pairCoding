@@ -206,13 +206,31 @@ async function assertOriginal(plan, api) {
   check(settings.identity === plan.settingsIdentity && settings.sha256 === plan.settingsSha256, 'Settings changed during preparation; retain/reconcile, no implicit retry');
   check(equal(await sourceSnapshot(plan.project, api), plan.sourceInventory), 'Current raw source changed during preparation; retain/reconcile');
 }
+// Normalize ONLY the fresh read-only task copy. Creation modes alone are masked by an
+// operator umask077; never relax process.umask, source files, receipts or client credentials.
+function stagedMode(fd, mode, directory = false) {
+  if (process.platform === 'win32') return; // POSIX modes are not a Windows ACL assertion.
+  const st = fs.fstatSync(fd);
+  check((directory ? st.isDirectory() : st.isFile() && st.nlink === 1) && st.uid === process.getuid(), 'Unsafe staged node type/owner');
+  fs.fchmodSync(fd, mode);
+  check((fs.fstatSync(fd).mode & 0o777) === mode, 'Staged task mode readback differs');
+}
 function make(directory, mode = 0o700) {
   canonicalDirectory(path.dirname(directory)); fs.mkdirSync(directory, { mode }); canonicalDirectory(directory);
+  if (mode === 0o755 && process.platform !== 'win32') {
+    const created = fs.lstatSync(directory);
+    const fd = fs.openSync(directory, fs.constants.O_RDONLY | (fs.constants.O_DIRECTORY ?? 0) | (fs.constants.O_NOFOLLOW ?? 0));
+    try {
+      const opened = fs.fstatSync(fd);
+      check(created.dev === opened.dev && created.ino === opened.ino, 'Staged directory identity changed');
+      stagedMode(fd, mode, true);
+    } finally { fs.closeSync(fd); }
+  }
 }
 function put(file, bytes, mode = 0o600) {
   canonicalDirectory(path.dirname(file));
   const fd = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | (fs.constants.O_NOFOLLOW ?? 0), mode);
-  try { fs.writeFileSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  try { fs.writeFileSync(fd, bytes); if (mode === 0o644) stagedMode(fd, mode); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   check(readPrivate(file, 4 * 1024 * 1024).bytes.equals(bytes), 'Published file readback differs'); syncDirectory(path.dirname(file));
 }
 function copySource(plan) {

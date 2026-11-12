@@ -2,7 +2,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { spawnPrepareCommand } from '../../scripts/runtime-prepare-control.mjs';
@@ -17,7 +16,7 @@ function proc(pid) {
 }
 const live = identity => identity && !['Z','X'].includes(identity.state);
 async function fixture(t, mode, { stubbornLeader = false, maxBuffer = 4096 } = {}) {
-  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? os.tmpdir(), 'owned-tree-'));
+  const dir = fs.mkdtempSync(path.join(process.env.TMPDIR ?? path.dirname(process.cwd()), 'owned-tree-'));
   const marker = path.join(dir, 'descendant.json'), controller = new AbortController();
   const sentinel = spawn(process.execPath, ['-e','setInterval(()=>{},1000)'], {stdio:'ignore'});
   let output = '', operation, leader, descendant;

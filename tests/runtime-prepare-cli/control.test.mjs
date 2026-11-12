@@ -9,7 +9,7 @@ import { spawnPrepareCommand } from '../../scripts/runtime-prepare-control.mjs';
 import { stopOwnedPreparation } from '../../scripts/runtime-prepare.mjs';
 import { stageInputs } from '../../scripts/runtime-stage-inputs.mjs';
 const repo = process.cwd();
-const root = t => { const p = fs.mkdtempSync(path.join(process.env.TMPDIR, 'cancel-')); t.after(() => fs.rmSync(p, { recursive: true, force: true })); return p; };
+const root = t => { const p = fs.mkdtempSync(path.join(process.env.TMPDIR ?? path.dirname(repo), 'cancel-')); t.after(() => fs.rmSync(p, { recursive: true, force: true })); return p; };
 const args = p => ['--project', path.join(p,'project'), '--profile','javascript-node','--output',path.join(p,'output')];
 function project(p) {
   const dest=path.join(p,'project'); fs.cpSync(path.join(repo,'examples/javascript-counter'),dest,{recursive:true});
