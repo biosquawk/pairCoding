@@ -44,6 +44,7 @@ function fixture(t) {
     write(root,name,fs.existsSync(real) ? fs.readFileSync(real) : `SYNTHETIC SOURCE ONLY: ${name}\n`);
   }
   write(root,'tests/execution/synthetic.test.ts','// not executed by packager\n');
+  write(root,'tests/execution/synthetic.test.mjs','// not executed by packager\n');
   for(const name of [...excluded,...extraSources]) write(root,name,`fixture: ${name}\n`);
   // Forced add intentionally includes denylisted files; selection cannot rely on .gitignore.
   git(root,'init','--quiet');git(root,'config','core.autocrlf','false');

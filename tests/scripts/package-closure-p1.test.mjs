@@ -56,7 +56,21 @@ test('real synthetic Git -> ZIP exact closure -> trusted archive -> verified dis
   pack(f, ['--output', output]);
   const manifestPath = path.join(output, 'manifest.json'), rawManifest = fs.readFileSync(manifestPath), manifest = JSON.parse(rawManifest);
   assert.equal(manifest.sourceCommit, f.revision); assert.equal(manifest.sourceVerification.execution, 'NOT_RUN_BY_PACKAGER');
-  assert.equal(manifest.commands.length, 10);
+  // HUMAN577 structural migration: mandatory runtime:prepare makes exactly 11.
+  assert.equal(manifest.commands.length, 11);
+  assert.deepEqual(manifest.commands.map(({ name, command }) => [name, command]).sort(), [
+    ['build', 'vite build'],
+    ['clean', 'node scripts/clean.mjs'],
+    ['dev', 'vite --port 3000 --host 127.0.0.1'],
+    ['dev:full', 'concurrently --kill-others "npm run server" "npm run dev"'],
+    ['lint', 'tsc --noEmit'],
+    ['preview', 'vite preview'],
+    ['runtime:prepare', 'node scripts/runtime-prepare-cli.mjs'],
+    ['server', 'tsx src/server/index.ts'],
+    ['start', 'tsx src/server/index.ts'],
+    ['test', 'tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"'],
+    ['typecheck', 'tsc --noEmit'],
+  ]);
   assert.deepEqual(manifest.sourceVerification.recoveryTests, ['tests/snapshots/snapshot-crash.test.ts']);
   for (const name of recoveryFiles) assert.ok(manifest.sourceVerification.requiredFiles.includes(name), name);
   for (const cmd of manifest.commands) for (const name of cmd.requiredFiles) assert.ok(list.includes(name));

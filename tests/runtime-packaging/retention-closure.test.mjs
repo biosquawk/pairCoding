@@ -31,6 +31,7 @@ function fixture(t, omit = false) {
     write(root, name, fs.readFileSync(path.join(repo, name)));
   }
   write(root, 'tests/execution/retention-fixture.test.ts', '// source-only fixture; never executed\n');
+  write(root, 'tests/execution/retention-fixture.test.mjs', '// source-only fixture; never executed\n');
   git(root, 'init', '--quiet'); git(root, 'config', 'core.autocrlf', 'false');
   git(root, 'add', '--force', '--all');
   git(root, '-c', 'user.name=retention-fixture', '-c', 'user.email=fixture@invalid.local', 'commit', '--quiet', '-m', 'source-only fixture');
