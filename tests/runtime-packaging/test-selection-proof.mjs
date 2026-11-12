@@ -53,6 +53,10 @@ export function proveSelection({ source, evidence, native = false }) {
     npm_config_script_shell: scriptShell, npm_config_update_notifier: 'false',
     npm_config_audit: 'false', npm_config_fund: 'false',
     PAIRCOACH_SELECTION_LOG: path.join(evidence, 'selected.jsonl') };
+  // This is a separate npm selection fixture, not a recursive node:test worker.
+  // Retaining Node's parent-worker marker makes its child runner silently skip files.
+  const parentTestContext = env.NODE_TEST_CONTEXT ?? null;
+  delete env.NODE_TEST_CONTEXT;
   const calls = [];
   const run = (label, command, args, cwd = fixture) => {
     const started = new Date().toISOString(), begin = performance.now();
@@ -77,7 +81,7 @@ export function proveSelection({ source, evidence, native = false }) {
     evidence, fixture, platform: process.platform, arch: process.arch, osRelease: os.release(),
     harnessArgv: process.argv, node: process.version, execPath: process.execPath,
     npm: npmVersion.stdout?.trim(), tsx: tsxVersion.stdout?.trim(), tsxPackageVersion: tsxPackage.version,
-    scriptShell, shellVersion: shellVersion.stdout?.trim(), modules,
+    scriptShell, shellVersion: shellVersion.stdout?.trim(), modules, removedParentTestContext: parentTestContext,
     moduleLink: windows ? 'existing native dependency tree via junction' : 'existing dependency tree via symlink',
     calls, expected, excluded, selected, sources,
     excludedExecuted: /EXCLUDED_FILE_EXECUTED/.test((actual.stdout || '') + (actual.stderr || '')),
