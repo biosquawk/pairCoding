@@ -48,8 +48,9 @@ i `imageLock` liczą się od **tego pliku**, nie od terminala. Format:
 
 **Pliki repo a wynik prepare.** Repozytoryjny `runtimes/images.lock.json` może
 zawierać pustą listę obrazów; nie jest dowodem przygotowania instalacji.
-`runtimes/pin-status.json` zachowuje historyczny opis LSP i zgód operatora —
-nie traktuj go jako aktualnego statusu Lightweight ani dodatkowej bramki prepare.
+`runtimes/pin-status.json` opisuje nieprzygotowany szablon repo; zachowane
+odniesienia do dawnych danych LSP są jawnie historyczne i nieaktywne. Nie jest
+to status instalacji ani dodatkowa bramka prepare lub wymóg zgody ROOT.
 Nie wypełniaj ręcznie pinów: użyj zmierzonego `images.lock.json`, wygenerowanego
 config i `jobs/<profile>` z własnego publicznego prepare. Jednoprofilowy wynik
 nie potwierdza pozostałych środowisk. W tym zakresie stosuj ten przewodnik,
