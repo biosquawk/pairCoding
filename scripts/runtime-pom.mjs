@@ -1,6 +1,7 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 /** Input MUST be Maven help:effective-pom output, never a guessed source pom. */
-export function inspectEffectivePom(xml, release, preview) {
+export function inspectEffectivePom(xml, actualJDK, preview) {
+  // actualJDK is selected tool identity, NOT Maven targetRelease. The compiler decides compatibility.
   if (typeof xml !== 'string' || Buffer.byteLength(xml) > 4*1024*1024 || /<!\s*(DOCTYPE|ENTITY)/i.test(xml) || XMLValidator.validate(xml) !== true) throw new Error('Invalid/unsafe effective POM');
   const p = new XMLParser({ ignoreAttributes: false, parseTagValue: false, processEntities: false }).parse(xml).project;
   if (!p || p.modules) throw new Error('Select one Maven module; aggregate reactors require explicit module task.');
@@ -13,8 +14,9 @@ export function inspectEffectivePom(xml, release, preview) {
   if(properties['maven.compiler.executable'] || properties['maven.compiler.fork']==='true' || properties['maven.compiler.compilerId'] && properties['maven.compiler.compilerId']!=='javac') throw new Error('Alternate compiler properties prohibited');
   const configurations = [compiler[0].configuration ?? {}, ...list(compiler[0].executions?.execution).map(e => e.configuration ?? {})];
   const releases = [properties['maven.compiler.release'], properties['maven.compiler.testRelease'], ...configurations.flatMap(c => [c.release, c.testRelease])].filter(v => v !== undefined);
-  if (!releases.length || releases.some(v => String(v) !== String(release))) throw new Error('TARGET_PROFILE_CONFLICT: effective release differs or is absent');
-  for (const value of [properties['maven.compiler.source'], properties['maven.compiler.target'], properties['maven.compiler.testSource'], properties['maven.compiler.testTarget'], ...configurations.flatMap(c => [c.source,c.target,c.testSource,c.testTarget])].filter(v => v !== undefined)) if (String(value) !== String(release)) throw new Error('TARGET_PROFILE_CONFLICT: source/target differs');
+  const targetRelease = Number(releases[0]);
+  if (!releases.length || !/^[1-9][0-9]{0,2}$/.test(String(releases[0])) || releases.some(v => String(v) !== String(targetRelease))) throw new Error('TARGET_PROFILE_CONFLICT: effective release is absent, invalid or inconsistent');
+  for (const value of [properties['maven.compiler.source'], properties['maven.compiler.target'], properties['maven.compiler.testSource'], properties['maven.compiler.testTarget'], ...configurations.flatMap(c => [c.source,c.target,c.testSource,c.testTarget])].filter(v => v !== undefined)) if (String(value) !== String(targetRelease)) throw new Error('TARGET_PROFILE_CONFLICT: source/target differs');
   for (const c of configurations) {
     if (c.fork === 'true' || c.executable || c.jdkToolchain || c.compilerId && c.compilerId !== 'javac') throw new Error('Alternate compiler/toolchain prohibited');
     const args = list(c.compilerArgs?.arg).concat(c.compilerArgument ? [c.compilerArgument] : []);
@@ -28,5 +30,5 @@ export function inspectEffectivePom(xml, release, preview) {
   if (surefire.configuration?.reportsDirectory && surefire.configuration.reportsDirectory !== '/artifacts/junit') throw new Error('Custom report directory unsupported');
   if (surefire.configuration?.argLine && !/^(?:--enable-preview)?$/.test(surefire.configuration.argLine)) throw new Error('Unreviewed test VM arguments');
   const spring = plugins.find(v => v.artifactId === 'spring-boot-maven-plugin');
-  return { release, preview, compilerVersion: compiler[0].version, springVersion: spring?.version ?? null };
+  return { actualJDK, targetRelease, release: targetRelease, preview, compilerVersion: compiler[0].version, springVersion: spring?.version ?? null };
 }

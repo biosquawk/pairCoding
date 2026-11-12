@@ -10,7 +10,7 @@ test('production plan is deterministic/no operations: seven profiles, nine examp
  const p=buildOperatorPlan(root);assert.deepEqual(p,buildOperatorPlan(root));assert.equal(p.maxHeavyConcurrency,1);assert.equal(p.jobs.length,9);assert.equal(new Set(p.jobs.map((j:any)=>j.profile.id)).size,7);
  for(const j of p.jobs){const fixed=correctedExercise(j);assert.deepEqual(fixed.filter((f:any,i:number)=>f.sha256!==j.assets[i].sha256).map((f:any)=>f.path),[j.correction.path]);assert.match(j.request.baseImage,/@sha256:[a-f0-9]{64}$/);validateProductionRequest(j.request);
    for(const a of j.assets)assert.equal(createHash('sha256').update(Buffer.from(a.bytes,'base64')).digest('hex'),a.sha256);
-   if(j.profile.compilerRelease){const pom=Buffer.from(j.assets.find((a:any)=>a.path==='pom.xml').bytes,'base64').toString();assert.ok(pom.includes(`<maven.compiler.release>${j.profile.compilerRelease}</maven.compiler.release>`));assert.equal(j.profile.expectedTools.find((t:any)=>t.name==='maven').version,'3.9.12');}
+   if(j.profile.compilerRelease){const pom=Buffer.from(j.assets.find((a:any)=>a.path==='pom.xml').bytes,'base64').toString();assert.equal(pom,readFileSync(`examples/${j.example}/pom.xml`,'utf8'));assert.ok(pom.includes(`<maven.compiler.release>${j.example==='java-pattern'?11:21}</maven.compiler.release>`));assert.equal(j.profile.expectedTools.find((t:any)=>t.name==='maven').version,'3.9.12');}
  }
  const n=structuredClone(p.jobs[0].request);n.baseImage='node@sha256:'+'a'.repeat(64);assert.throws(()=>validateProductionRequest(n),/pin differs/);
  const wrong=structuredClone(p.jobs[0].request);wrong.tools.files[0].sha256='a'.repeat(64);assert.throws(()=>validateProductionRequest(wrong),/inventory differs/);

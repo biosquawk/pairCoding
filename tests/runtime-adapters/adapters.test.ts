@@ -10,6 +10,7 @@ import type { RuntimeProfile, RunProfileV2, AdapterFamily } from '../../src/shar
 import type { PlanContext, ExecutionPlan, CollectedArtifacts, ExecutionExit } from '../../src/server/execution/ports';
 import { parseJUnit as legacyParse } from '../../src/server/Runner';
 import { verifyBuildCopy, buildChildEnvironment } from '../../scripts/runtime-task.mjs';
+import { verifySelectedJdk } from '../../scripts/runtime-task.mjs';
 import { inspectEffectivePom } from '../../scripts/runtime-pom.mjs';
 import { validateSpec, encodeSpec, decodeSpec, canonicalJSON } from '../../scripts/runtime-spec.mjs';
 import { validatePrepareRequest, prepare } from '../../scripts/runtime-prepare.mjs';
@@ -97,9 +98,13 @@ test('artifact reader uses actual regular files, rejects symlinks and bounded ov
  await mkdir(path.join(root,'dir'));await assert.rejects(readArtifact(path.join(root,'dir'),4096));
 });
 const pom=(release='21',configuration='')=>`<project><properties><maven.compiler.release>${release}</maven.compiler.release></properties><build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId><version>3.14.0</version><configuration>${configuration}</configuration></plugin><plugin><artifactId>maven-surefire-plugin</artifactId><version>3.5.3</version></plugin></plugins></build></project>`;
-test('effective-pom release/source/test/preview/toolchain conflicts fail rather than rewrite',()=>{
+test('effective-pom Maven target is independent of JDK; source/test/preview/toolchain guards retained',()=>{
  for(const r of [11,17,21,27]) assert.equal(inspectEffectivePom(pom(String(r)),r,false).release,r);
- assert.throws(()=>inspectEffectivePom(pom('17'),21,false),/CONFLICT/);
+ for(const actualJDK of [11,17,21,27]) for(const target of [11,17,21,27]) {
+  const model=inspectEffectivePom(pom(String(target)),actualJDK,false);
+  assert.equal(model.actualJDK,actualJDK);assert.equal(model.targetRelease,target);
+ } // even newer target on older JDK reaches the real compiler, not an artificial profile veto
+ for(const target of ['', '21oops', '${java.version}', '0']) assert.throws(()=>inspectEffectivePom(pom(target),21,false),/CONFLICT/);
  for(const c of ['<release>17</release>','<source>17</source>','<target>17</target>','<testRelease>17</testRelease>','<enablePreview>true</enablePreview>','<fork>true</fork>','<jdkToolchain><version>17</version></jdkToolchain>','<compilerId>eclipse</compilerId>','<compilerArgs><arg>--release</arg></compilerArgs>']) assert.throws(()=>inspectEffectivePom(pom('21',c),21,false),c);
  assert.throws(()=>inspectEffectivePom('<!DOCTYPE a>'+pom(),21,false));assert.throws(()=>inspectEffectivePom(pom().replace('<maven.compiler.release>21</maven.compiler.release>',''),21,false),/absent/);
 });
@@ -129,7 +134,7 @@ test('dependency identity changes on manifests/config, not ordinary source edits
  assert.equal(dependencyHash(files),dependencyHash([files[0],{path:'src/App.java',sha256:'b'.repeat(64)}]));
  assert.notEqual(dependencyHash(files),dependencyHash([{path:'pom.xml',sha256:'b'.repeat(64)},files[1]]));
  const p=profile('java-maven',21),r=run('java-maven'),c=context(p,r),a=new JavaMavenAdapter(javaDeps(17));
- await assert.rejects(a.buildPlan(c,r),/TARGET_PROFILE_CONFLICT/);
+ const allowed=await a.buildPlan(c,r);assert.equal(decode(allowed).release,21); // target17 retained in prepared POM, actual JDK21 in dispatcher spec
  const changed=structuredClone(c);changed.input.files=changed.input.files.map(f=>f.path==='pom.xml'?{...f,sha256:'c'.repeat(64)}:f);
  await assert.rejects(new JavaMavenAdapter(javaDeps(21)).buildPlan(changed,r),/identity changed/);
 });
@@ -164,4 +169,12 @@ test('portable artifact identity: absent O_NOFOLLOW still rejects final/parent s
  assert.equal(Buffer.from(await readRegularArtifact(file,4096,0)).toString(),xmls[0]);
  await symlink(file,path.join(root,'alias.xml'));await assert.rejects(readRegularArtifact(path.join(root,'alias.xml'),4096,0),/regular/);
  await symlink(dir,path.join(root,'linked-parent'));await assert.rejects(readRegularArtifact(path.join(root,'linked-parent','fresh.xml'),4096,0),/parent/);
+});
+
+test('selected actual javac guard remains strict while Maven target is independent',()=>{
+ for(const jdk of [11,17,21,27]) {
+  assert.equal(verifySelectedJdk(`javac ${jdk}.0.1\n`,jdk),jdk);
+  assert.throws(()=>verifySelectedJdk(`javac ${jdk}.0.1\n`,jdk===21?27:21),/actual javac/);
+ }
+ for(const output of ['', 'javac 21spoof', 'java 21.0.1', 'ignored\njavac 21.0.1']) assert.throws(()=>verifySelectedJdk(output,21),/actual javac/);
 });

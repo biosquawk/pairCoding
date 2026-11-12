@@ -1,7 +1,7 @@
 const keys = (o, names) => o && typeof o === 'object' && !Array.isArray(o) && Object.keys(o).sort().join(',') === [...names].sort().join(',');
 export const literalPath = s => typeof s === 'string' && s.length > 0 && s.length <= 512 && !s.startsWith('/') && !/[\x00-\x1f\x7f\\:*?![\]{}<>|"$`;&]/u.test(s) && s.split('/').every(p => p && p !== '.' && p !== '..' && !p.startsWith('-'));
 const name = s => typeof s === 'string' && s.length <= 256 && /^[A-Za-z_$][A-Za-z0-9_$]*(?:\.[A-Za-z_$][A-Za-z0-9_$]*)*(?:#[A-Za-z_$][A-Za-z0-9_$]*)?$/.test(s);
-/** Independent container guard; data only, no executable/env/Docker flag slots. */
+/** Java release field is selected JDK identity, never a POM rewrite. Independent container guard; data only, no executable/env/Docker flag slots. */
 export function validateSpec(s) {
   if (!keys(s,['schemaVersion','family','release','preview','runId','manifestSha256','mode','task','cache']) || s.schemaVersion !== 1 || !['node','typescript','python','java-maven'].includes(s.family) || !['RUN_MAIN','RUN_TESTS'].includes(s.mode) || !/^[A-Za-z0-9_-]{1,128}$/.test(s.runId) || !/^[a-f0-9]{64}$/.test(s.manifestSha256) || typeof s.preview !== 'boolean') throw new Error('Invalid runtime spec');
   if (s.cache !== '/cache/0') throw new Error('Invalid managed cache');

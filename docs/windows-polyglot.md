@@ -70,8 +70,11 @@ Korekta właściciela z 2026-11-12: profil runtime wybiera **rzeczywisty JDK**, 
 `maven.compiler.release` pochodzi z POM projektu. Nie zmieniaj POM ani `java.version`
 wyłącznie z powodu przejścia na nowszy kontener, np.21→27. Raport ma rozróżniać JDK
 oraz targetRelease. Pozostała walidacja i rzeczywiste błędy kompilatora pozostają.
-**Checkpoint B odłącza LSP; usunięcie historycznej równości release==JDK oraz osobny
-konfigurowalny timeout/log/cancel prepare są jeszcze do wdrożenia przed odbiorem C.**
+Równość release==JDK jest usunięta w source/effective-POM/adapter/prepare. Przykład
+java-pattern zachowuje target11 na JDK11/17/21/27, Spring target21 na JDK21/27.
+`runtime-input.json` zawiera osobne `actualJDK` (sprawdzone javac) i `targetRelease`
+(z effective-POM). Starszy JDK z nowszym targetem ma pokazać rzeczywisty błąd kompilatora.
+**Osobny konfigurowalny timeout/log/cancel prepare pozostaje do wdrożenia.**
 Spring nie jest oddzielnym profilem ani językiem i nie jest wspierany przez profile11/17.
 
 ## 1a. Pełne ustawienia projektu — PRZED prepare

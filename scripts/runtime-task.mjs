@@ -6,6 +6,12 @@ import { mkdirSync, cpSync, lstatSync, readdirSync, readFileSync, writeFileSync,
 import path from 'node:path';
 import { validateSpec, decodeSpec } from './runtime-spec.mjs';
 import { inspectEffectivePom } from './runtime-pom.mjs';
+/** Actual binary output is independent of Maven target; never silently adopt a different JDK. */
+export function verifySelectedJdk(output, selectedJdk) {
+  const measured = typeof output === 'string' ? output.match(/^javac ([1-9][0-9]*)(?:[. +\r\n]|$)/) : null;
+  if (!measured || Number(measured[1]) !== selectedJdk) throw new Error('TARGET_PROFILE_CONFLICT: actual javac');
+  return Number(measured[1]);
+}
 export function runTask(spec) {
   const s = validateSpec(spec), project = '/workspace', artifact = '/artifacts', state='/workspace/.paircoach/runtime';
   if (existsSync(state)) throw new Error('Build state must be fresh'); mkdirSync(artifact, { recursive: true });
@@ -15,7 +21,7 @@ export function runTask(spec) {
   mkdirSync(state,{recursive:true}); mkdirSync(state+'/home');
   const cwd = path.join(project,s.task.workingDirectory);
   if (!lstatSync(cwd).isDirectory()) throw new Error('Task directory absent');
-  const report = { runId: s.runId, manifestSha256: s.manifestSha256, effective: null };
+  const report = { runId: s.runId, manifestSha256: s.manifestSha256, actualJDK: null, targetRelease: null, effective: null };
   const env = buildChildEnvironment(s.family,cwd);
   const call = (exe,args,capture = false) => {
     const p = spawnSync(exe,args,{ cwd,env,shell:false,stdio:capture ? ['ignore','pipe','pipe'] : 'inherit',maxBuffer:4*1024*1024 });
@@ -47,8 +53,10 @@ export function runTask(spec) {
     call(mvn,[...options,'org.apache.maven.plugins:maven-help-plugin:3.5.1:effective-pom','-Doutput=/workspace/.paircoach/runtime/effective-pom.xml']);
     report.effective = inspectEffectivePom(readFileSync('/workspace/.paircoach/runtime/effective-pom.xml','utf8'),s.release,s.preview);
     const version = call('/opt/java/openjdk/bin/javac',['-version'],true);
-    if (!new RegExp(`^javac ${s.release}(?:[. +\\r\\n]|$)`).test(Buffer.concat([version.stdout,version.stderr]).toString())) throw new Error('TARGET_PROFILE_CONFLICT: actual javac');
-    // Compiles with selected javac, not ECJ/JDT. No release/preview rewrite; effective pom must already agree.
+    report.actualJDK = verifySelectedJdk(Buffer.concat([version.stdout,version.stderr]).toString(),s.release);
+    report.targetRelease = report.effective.targetRelease;
+    writeFileSync('/artifacts/runtime-input.json',JSON.stringify(report)); // preserve measured identity even when Maven compilation fails
+    // Selected javac compiles the unchanged Maven target; incompatibility is a real compiler error.
     if (s.mode === 'RUN_TESTS') {
       exe = mvn; args = [...options,'test'];
       if (s.task.tests.names.length) args.push('-Dtest='+s.task.tests.names.join(','));

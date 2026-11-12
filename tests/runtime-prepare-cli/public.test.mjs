@@ -108,11 +108,17 @@ test('profile/source conflict, different per-mode directories, unsafe/private se
   fs.symlinkSync(path.join(g.work, 'main.js'), path.join(g.work, 'link.js')); await assert.rejects(buildPublicPreparePlan(g.argv), /symlink/i);
 });
 
-test('actual selected Java source POM/release/preview conflicts refused without rewrite or network', async t => {
+test('selected Java JDK independent of source target; preview/unsafe guards retained without rewrite/network', async t => {
   const f = fixture(t, { profile: 'java-maven-11', example: 'java-pattern' });
   const good = await buildPublicPreparePlan(f.argv); assert.match(good.pom, /EFFECTIVE_POM_PENDING/);
   const pom = path.join(f.work, 'pom.xml'), original = fs.readFileSync(pom, 'utf8');
-  for (const text of [original.replace('<maven.compiler.release>11', '<maven.compiler.release>21'), original.replace('</properties>', '<maven.compiler.enablePreview>true</maven.compiler.enablePreview></properties>'), '<!DOCTYPE x><project/>']) {
+  for (const profile of ['java-maven-11','java-maven-17','java-maven-21','java-maven-27']) {
+    const plan = await buildPublicPreparePlan(f.argv.map(a => a === 'java-maven-11' ? profile : a));
+    assert.equal(plan.profile.id, profile);assert.equal(fs.readFileSync(pom,'utf8'),original);
+  }
+  const newerTarget=original.replace('<maven.compiler.release>11','<maven.compiler.release>21');
+  put(pom,newerTarget);await buildPublicPreparePlan(f.argv);assert.equal(fs.readFileSync(pom,'utf8'),newerTarget);
+  for (const text of [original.replace('<maven.compiler.release>11','<maven.compiler.release>bad'), original.replace('</properties>', '<maven.compiler.enablePreview>true</maven.compiler.enablePreview></properties>'), '<!DOCTYPE x><project/>']) {
     put(pom, text); await assert.rejects(buildPublicPreparePlan(f.argv)); assert.equal(fs.readFileSync(pom, 'utf8'), text);
   }
 });
