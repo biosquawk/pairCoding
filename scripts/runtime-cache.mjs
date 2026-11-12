@@ -46,7 +46,7 @@ if (family === 'node' || family === 'typescript') {
   if(plugins.length!==1 || !/^\d+\.\d+\.\d+$/.test(plugins[0].version??'')) throw new Error('Surefire must be pinned in effective POM');
   const plugin=plugins[0],configuration=plugin.configuration??{},state=cwd+'/.paircoach/runtime';
   // Do not silently probe a different provider for a custom plugin/classpath.
-  if(plugin.dependencies || plugin.extensions==='true' || ['parallel','threadCount','groups','excludedGroups'].some(k=>configuration[k]!==undefined)) throw new Error('Custom Surefire provider selection requires reviewed prepare support');
+  if(plugin.dependencies || plugin.extensions==='true' || ['parallel','threadCount','groups','excludedGroups'].some(k=>configuration[k]!==undefined)) throw new Error('NOTREADY: Custom Surefire provider selection requires reviewed prepare support');
   mkdirSync(state,{recursive:true});
   const probe=mkdtempSync(state+'/provider-probe-'),classes=probe+'/classes',tests=probe+'/test-classes';
   mkdirSync(classes); mkdirSync(tests);

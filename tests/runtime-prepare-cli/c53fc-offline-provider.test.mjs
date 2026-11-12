@@ -34,6 +34,7 @@ async function scenario(mode) {
           configuration:{testClassesDirectory:'/workspace/target/test-classes',dependenciesToScan:{dependency:'student:code'},suiteXmlFiles:{suiteXmlFile:'pupil-suite.xml'},argLine:'-Dstudent=true'},
           executions:{execution:{id:'pupil-lifecycle'}}}]}}}};
   let xml = new XMLBuilder({ignoreAttributes:false}).build(effective);
+  if(mode === 'unrelated-plugin-overrides') { effective.project.build.plugins.plugin.push({groupId:'org.example',artifactId:'unrelated-site-plugin',version:'1.0',extensions:'true',dependencies:{dependency:{groupId:'org.example',artifactId:'site-support',version:'1.0'}}}); xml=new XMLBuilder().build(effective); }
   if(mode === 'plugin-dependencies') { effective.project.build.plugins.plugin[1].dependencies={dependency:{groupId:'org.example',artifactId:'provider-extension',version:'1.0'}}; xml=new XMLBuilder().build(effective); }
   if(mode === 'parallel-provider') { effective.project.build.plugins.plugin[1].configuration.parallel='classes'; xml=new XMLBuilder().build(effective); }
   if(mode === 'missing-plugin') { effective.project.build.plugins.plugin.pop(); xml=new XMLBuilder().build(effective); }
@@ -155,7 +156,7 @@ async function scenario(mode) {
 if(process.argv[2]==='--worker') {
   await scenario(process.argv[3]);
 } else {
-  for(const mode of ['complete','different-versions','online-provider-refused','offline-provider-missing','offline-launcher-missing','unsafe-xml','duplicate-plugin','unresolved-version','plugin-dependencies','parallel-provider','missing-plugin','online-no-provider','offline-no-provider','offline-other-provider','node-control']) {
+  for(const mode of ['complete','different-versions','unrelated-plugin-overrides','online-provider-refused','offline-provider-missing','offline-launcher-missing','unsafe-xml','duplicate-plugin','unresolved-version','plugin-dependencies','parallel-provider','missing-plugin','online-no-provider','offline-no-provider','offline-other-provider','node-control']) {
     test('C53fc actual cache dispatcher / controlled tool processes: '+mode,()=>{
       const result=childProcess.spawnSync(process.execPath,[fileURLToPath(import.meta.url),'--worker',mode],{env:process.env,encoding:'utf8',timeout:15000,maxBuffer:1024*1024});
       assert.equal(result.error,undefined);assert.equal(result.status,0,result.stdout+result.stderr);
