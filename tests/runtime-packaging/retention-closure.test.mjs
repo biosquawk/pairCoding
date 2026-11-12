@@ -50,11 +50,15 @@ test('retention: both finite policies select the accepted helper, not operator r
   assert.ok(plan.sourceVerification.requiredFiles.includes(helper));
   assert.ok(plan.commands.find(c => c.name === 'runtime:prepare').requiredFiles.includes(helper));
   assert.equal(plan.files.find(file => file.path === helper)?.sha256, acceptedHash);
-  for (const excluded of ['scripts/runtime-operator-remainder.mjs', 'scripts/runtime-operator-image-recovery.mjs', 'scripts/runtime-unreviewed.mjs']) {
-    // HUMAN625/628: real remainder is private test-support, never a public required input.
-    assert.equal(allowedSource(excluded), excluded === 'scripts/runtime-operator-remainder.mjs');
-    assert.equal(requiredFiles.includes(excluded), false);
-    assert.equal(plan.commands.find(c => c.name === 'runtime:prepare').requiredFiles.includes(excluded), false);
+  // HUMAN625/628 + K: real remainder is private test-support, not denied recovery.
+  const testSupport = 'scripts/runtime-operator-remainder.mjs';
+  assert.equal(allowedSource(testSupport), true);
+  assert.equal(requiredFiles.includes(testSupport), false);
+  assert.equal(plan.commands.find(c => c.name === 'runtime:prepare').requiredFiles.includes(testSupport), false);
+  // This fixture has neither a dependent importer nor the module: keep it absent.
+  assert.equal(plan.files.some(file => file.path === testSupport), false);
+  for (const excluded of ['scripts/runtime-operator-image-recovery.mjs', 'scripts/runtime-unreviewed.mjs']) {
+    assert.equal(allowedSource(excluded), false); assert.equal(requiredFiles.includes(excluded), false);
     assert.equal(plan.files.some(file => file.path === excluded), false);
   }
 });
