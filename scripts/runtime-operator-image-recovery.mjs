@@ -4,7 +4,7 @@
 import * as fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { isDeepStrictEqual as equal } from 'node:util';
 const self = fileURLToPath(import.meta.url);
@@ -158,6 +158,7 @@ export async function buildRecoveryPlan(options) {
     historical:{proposal:fileProof(options.proposalFile),cacheSnapshot:fileProof(options.cacheSnapshotFile),evidence:[...evidence.values()],cacheInventories,protectedInventories},
     engine:p.engine,initialRequiredPins:p.initialRequiredPins,previousContainerIds:[...new Set(previousContainerIds)],jobs,limits:{...LIMITS},
     guardPolicy:{maxAgeMs:60000,minFreeBytes:15*1024**3,requiredMeasurements:['vm','physical','host'],storagePaths:{vm:'/',physical:'D:\\',host:path.dirname(options.outputRoot)},schema:['schemaVersion','operator','observedAtMs','planSha256','controllerSha256','closureSha256','base','engine','measurements','singleHeavyLane'],authority:'EXTERNAL_ROOT_MEASUREMENTS_ONLY_NOT_SELF_ADMISSION'},
+    checkpointPolicy:{protocol:'ROOT_FRESH_GUARD_V1',phase:'READONLY_PREFLIGHT_ALL9_COMPLETE_BEFORE_FIRST_MUTATION',maxWaitMs:120000,maxReplyBytes:65536,channel:'PRIVATE_ROOT_STDIN_PIPE_ONE_LF_FRAME_THEN_EOF'},
     readiness:'PREPARE_ONLY; separate K consumer binding and all offline/LSP/GUI/native checks still required'};
 }
 function assertProtected(plan) {
@@ -174,6 +175,80 @@ function validateGuards(plan,planHash,bytes,expected,now) {
   for(const [key,v] of Object.entries(g.measurements)) {check(v.storagePath===plan.guardPolicy.storagePaths[key], 'guard measured storage path differs');check(digest(read(v.evidenceFile))===v.evidenceSha256, 'guard raw measurement binding');}
   return g;
 }
+/** Same production checkpoint + first-mutation fence used by executeRecoveryPlan.
+ * No injected validator/clock/channel: only trusted inherited stdin/stdout. The ROOT parent
+ * must hold the actual OS lane; strings/JSON cannot authenticate a hostile same-UID parent.
+ * Exported solely so scoped child-process UNITs can exercise this barrier without 2 prepares. */
+export function freshGuardBarrier(plan, planHash, deadline, audit, publish) {
+  let requested=false, accepted=null;
+  const scope={protocol:'ROOT_FRESH_GUARD_V1',phase:'READONLY_PREFLIGHT_ALL9_COMPLETE_BEFORE_FIRST_MUTATION',
+    planSha256:planHash,controllerSha256:plan.controller.sha256,closureSha256:digest(JSON.stringify(plan.sourceInventory)),
+    base:plan.base,engine:plan.engine,outputRoot:plan.options.outputRoot};
+  return {
+    async checkpoint() {
+      check(!requested,'one fresh guard checkpoint only'); requested=true;
+      const ready={...scope,nonce:randomBytes(32).toString('hex'),readyAtMs:Date.now()};
+      const waitMs=Math.min(120000,deadline-Date.now());
+      const monotonicEnd=process.hrtime.bigint()+BigInt(Math.max(0,Math.floor(waitMs)))*1000000n;
+      audit.status='WAITING_EXTERNAL_ROOT';audit.ready=ready;audit.maxWaitMs=waitMs;publish();
+      try {
+        check(Number.isSafeInteger(waitMs) && waitMs>0,'fresh guard remaining global deadline');
+        const fd=fs.fstatSync(0);
+        check((fd.isFIFO() || fd.isSocket()) && !process.stdin.isTTY,'private inherited ROOT stdin pipe required');
+        const bytes=await new Promise((resolve,reject)=>{
+          const input=process.stdin, output=process.stdout;let parts=[],size=0,settled=false;
+          const cleanup=()=>{clearTimeout(timer);input.pause();input.off('data',data);input.off('end',end);input.off('error',error);output.off('error',error);};
+          const finish=(err,value)=>{if(settled)return;settled=true;cleanup();err?reject(err):resolve(value);};
+          const error=e=>finish(e);
+          const inTime=()=>process.hrtime.bigint()<monotonicEnd && Date.now()<deadline;
+          const data=chunk=>{
+            if(!inTime())return finish(new Error('NOTREADY: fresh guard absolute timeout'));
+            const b=Buffer.from(chunk);size+=b.length;
+            if(size>65536)return finish(new Error('NOTREADY: fresh guard reply exceeds 64KiB'));
+            parts.push(b);
+          };
+          const end=()=>{
+            if(!inTime())return finish(new Error('NOTREADY: fresh guard absolute timeout'));
+            const all=Buffer.concat(parts);
+            // Exactly one UTF-8 JSON line terminated by LF AND EOF. EOF without LF is incomplete.
+            if(!all.length || all.at(-1)!==10 || all.subarray(0,-1).includes(10))return finish(new Error('NOTREADY: incomplete/multiple fresh guard response'));
+            finish(null,all.subarray(0,-1));
+          };
+          // Publication/setup time consumes the SAME absolute wait, never starts another TTL.
+          const remaining=Math.min(Number(monotonicEnd-process.hrtime.bigint())/1e6,deadline-Date.now());
+          const timer=setTimeout(()=>finish(new Error('NOTREADY: fresh guard absolute timeout')),Math.max(1,Math.ceil(remaining)));
+          if(remaining<=0)return finish(new Error('NOTREADY: fresh guard absolute timeout'));
+          input.on('data',data);input.once('end',end);input.once('error',error);output.once('error',error);
+          if(input.readableEnded || input.destroyed)return finish(new Error('NOTREADY: fresh guard EOF before reply'));
+          output.write(JSON.stringify({type:'ROOT_FRESH_GUARD_READY',checkpoint:ready})+'\n',err=>{if(err)finish(err);});
+          input.resume();
+        });
+        check(Buffer.from(bytes.toString('utf8'),'utf8').equals(bytes),'fresh guard UTF-8 frame');
+        const reply=JSON.parse(bytes);
+        check(exact(reply,['type','checkpoint','guardUtf8','guardSha256']) && reply.type==='ROOT_FRESH_GUARD_REPLY' && equal(reply.checkpoint,ready) && typeof reply.guardUtf8==='string','exact fresh guard nonce/scope reply');
+        const raw=Buffer.from(reply.guardUtf8,'utf8'), now=Date.now();
+        const guard=validateGuards(plan,planHash,raw,reply.guardSha256,now);
+        check(guard.observedAtMs>=ready.readyAtMs && now>=ready.readyAtMs && now<deadline && process.hrtime.bigint()<monotonicEnd,'fresh measurement must follow READY within deadline');
+        accepted={raw,hash:reply.guardSha256,readyAtMs:ready.readyAtMs};
+        audit.status='ACCEPTED_EXTERNAL_ROOT';audit.receivedAtMs=now;audit.guardSha256=reply.guardSha256;audit.guardUtf8=reply.guardUtf8;
+        publish();
+      } catch(e) {accepted=null;audit.status='FAILED_RETAIN_AND_RECONCILE';audit.error=e.message;publish();throw e;}
+    },
+    beforeFirstMutation() {
+      check(accepted && audit.status==='ACCEPTED_EXTERNAL_ROOT','fresh ROOT checkpoint required before first mutation');
+      // Re-read all three raw evidence files at the real effect fence. No stale/future/hash drift
+      // may hide between the reply and the first actual Docker mutation. No expensive ALL9 replay.
+      const now=Date.now(), guard=validateGuards(plan,planHash,accepted.raw,accepted.hash,now);
+      check(now>=accepted.readyAtMs && guard.observedAtMs>=accepted.readyAtMs && now<deadline,'fresh guard first mutation deadline');
+      audit.firstMutationFenceAtMs=Date.now();publish();
+    },
+    assertDispatchFreshness() {
+      check(accepted && audit.status==='ACCEPTED_EXTERNAL_ROOT','fresh ROOT checkpoint required at dispatch');
+      const now=Date.now(), observed=JSON.parse(accepted.raw).observedAtMs;
+      check(now>=observed && now>=accepted.readyAtMs && now-observed<=plan.guardPolicy.maxAgeMs && now<deadline,'fresh guard expired/future before mutation dispatch');
+    },
+  };
+}
 /** Programmatic injection is ONLY a Docker transport for modeled tests, never planner/prepare/guard
  * replacement. CLI has no env/argv module overrides. Real prepare and retention always execute. */
 export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHash,dependencies={}) {
@@ -181,7 +256,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
   check(Buffer.isBuffer(bytes) && /^[a-f0-9]{64}$/.test(expectedHash??'') && digest(bytes)===expectedHash, 'exact reviewed plan bytes hash required');
   const plan=JSON.parse(bytes);
   check(equal(plan,await buildRecoveryPlan(plan.options)), 'closed frozen recovery plan/source/scope changed');
-  const guard=validateGuards(plan,expectedHash,guardBytes,guardHash,Date.now());
+  validateGuards(plan,expectedHash,guardBytes,guardHash,Date.now()); // initial guard still precedes FS/config writes
   const m=await modules(plan.options.producerRoot), root=plan.options.outputRoot, start=Date.now(), deadline=start+plan.limits.maxElapsedMs;
   // No effects before all schema/hash/source/output/guard validation above.
   const publish=m.receiptWriter(root), receipt={schemaVersion:1,status:'STARTED_NOT_READY',phase:plan.phase,planSha256:expectedHash,guardSha256:guardHash,engine:plan.engine,commands:[],jobs:[]};
@@ -190,6 +265,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
   const endpoint=process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock';
   const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const knownPins=new Map(plan.initialRequiredPins.map(pin=>[pin.observedImage.Id,pin])), completedBuilds=new Set(), measuredJobs=new Map();
+  const checkpoint=freshGuardBarrier(plan,expectedHash,deadline,receipt.freshGuardCheckpoint={},save);
   let engineChecked=false,lastEngine=null;
   const wrappedSpawn=(exe,argv,options)=>{
     check(!stopped,'transport stopped; no later dispatch'); assertCommandBudget(receipt.commands.length,deadline);
@@ -203,7 +279,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
       check(lastEngine && equal(lastEngine,plan.engine), 'same-engine mutation fence');
       check(identity(fs.lstatSync(path.dirname(root),{bigint:true}))===plan.parentIdentity, 'output parent identity changed');
       // Guard age is required before first mutation; whole run is bounded by the reviewed deadline.
-      if(!receipt.firstMutationAtMs) {check(Date.now()-guard.observedAtMs<=plan.guardPolicy.maxAgeMs,'guard expired before mutation');receipt.firstMutationAtMs=Date.now();}
+      if(!receipt.firstMutationAtMs) checkpoint.beforeFirstMutation();
     }
     if (command==='tag') {
       check(args.length===3 && knownPins.has(args[1]) && args[2]===m.retentionReference(knownPins.get(args[1])), 'exact declared retention reference/ID ceiling');
@@ -225,6 +301,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
     const entry={argv:['docker',...argv],status:'INTENT',startedAtMs:Date.now()}; receipt.commands.push(entry); save(); // durable even if dispatch/reply UNKNOWN
     let raw;
     try {
+      if(mutating && !receipt.firstMutationAtMs) {checkpoint.assertDispatchFreshness();receipt.firstMutationAtMs=Date.now();}
       raw=(dependencies.spawnSync??spawnSync)(exe,argv,options);
       check(raw && Buffer.byteLength(raw.stdout??'')+Buffer.byteLength(raw.stderr??'')<=plan.limits.perCommandOutputBytes,'per-command output ceiling');
       Object.assign(entry,{status:raw.error||raw.signal||raw.status===null?'UNKNOWN_RETAIN_AND_RECONCILE':'RETURNED',exit:raw.status,signal:raw.signal??null,error:raw.error?.message??null,stdout:raw.stdout??'',stderr:raw.stderr??'',finishedAtMs:Date.now()}); save();
@@ -277,6 +354,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
       m.assertImagePin(job.currentTagPin,oneImage(job.request.imageTag));
     }
     assertProtected(plan); // full ALL9 inventories fresh before FIRST mutation
+    await checkpoint.checkpoint(); // second EXTERNAL ROOT measurement, same inherited OS lane
     const retention=m.createImageRetention({engine:plan.engine,requiredPins:plan.initialRequiredPins,run,receipt,save});retention.retainRequired();
     fs.mkdirSync(path.join(root,'jobs'),{mode:0o700});
     for (const job of plan.jobs) {
