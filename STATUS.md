@@ -234,6 +234,37 @@ Wykonano 5 skupionych testów natywnych JUnit/SQLite, bez skip/abort, oraz packa
 
 Dokładny patch i potwierdzenie są zachowane w `docs/checkpoint-20261112/evidence/native-watchdog-focused-check/`. Nie włączono klas Javy Thalamusa do aktywnego backendu TypeScript PairCoach. Aktualne polecenie STOP następnie spauzowało role niezależnie od tej poprawki.
 
+<a id="sqlite-port-adapter"></a>
+
+### 5.5. Zadanie THALAMUS-SQLITE-PORT-01 — wydzielenie SQLite przez port i adapter
+
+**Wymaganie właściciela:** dostęp do SQLite miał zostać wydzielony zgodnie z Ports & Adapters. Niniejszy zapis uzupełnia zakres po raporcie nocnego incydentu. **Status realizacji refaktoryzacji: NOT_STARTED; odbiór: NOT_RUN.** Wdrożony hotfix zapytania nie realizuje tego wymagania architektonicznego. Zadanie dotyczy kodu platformy **Thalamus** w repozytorium `codex_synapse_new`; jest zapisane tutaj jako zależność platformowa kampanii PairCoach. Nie zmienia historycznego wyniku odbioru zadań 1–9. Aktualizacja dokumentu nie wznawia zatrzymanych ról ani implementacji.
+
+#### Raport incydentu będącego uzasadnieniem zadania
+
+- **Objaw:** opóźnienie przyjęcia wiadomości 121,523 s i timeouty HTTP 45 s. Stos wykonania wskazywał kosztowny odczyt Watchdoga trzymający monitor `ProjectStore`, z blokowaniem dostępu przez `SessionRuntime`.
+- **Mechanizm:** `WatchdogAndVenetianJudge.scopedCommands()` używał skorelowanego `EXISTS` nad `events` dla wierszy `commands`. W obserwowanym planie prowadziło to do powtarzanego przeglądania danych; koszt mógł rosnąć jak iloczyn liczby komend i zdarzeń. Jest to charakterystyka badanego planu, nie twierdzenie o każdym możliwym planie SQLite.
+- **Naprawa doraźna, wdrożona:** commit `b235eea413a1df84e4be4cea813a25ac8a5de984`, gałąź `rebirth/stage1`. Zastosowano `IN (SELECT ...)`, eliminując skorelowany skan w ścieżce prawidłowego JSON. Zachowano dotychczasową semantykę zakresu, porządku i limitu oraz bezpieczny fallback do oryginalnego `EXISTS` przy nieprawidłowym JSON. Nie zmieniono silnika SQLite, WAL, schematu ani indeksów.
+- **Dowód testowy hotfixu:** 5 natywnych testów `NativeScopedCommandsTest`, bez błędów i pominięć. W próbie syntetycznej 1600 komend / 1200 zdarzeń: 261,794 ms → 3,603 ms; plan przestał używać skorelowanego podzapytania. Ten wynik dotyczy zapytania i konkretnej próby.
+- **Dowód wdrożenia:** [post-deployment-identity.json](docs/checkpoint-20261112/evidence/native-watchdog-focused-check/post-deployment-identity.json), status `PASS_DEPLOYED_IDENTITIES_PRESERVED_K_RESUMED`, historyczny PID nowego procesu `2977980`, UI HTTP 200. W `software_dev_2` zachowano 14 ról i 851 tożsamości sesji. Późniejsza pojedyncza obserwacja przyjęcia wejścia wyniosła 79,4 ms; nie jest to p95 ani gwarancja wydajności całej platformy.
+- **Granice wniosku:** konkretny incydent został naprawiony, przetestowany i wdrożony. Nie wykonano pełnego audytu wszystkich przyczyn przestojów. Późniejsze polecenie STOP spauzowało wszystkie 14 ról. Wąskie gardła integracji K/ROOT i rozproszenie kopii roboczych opisane wyżej pozostają oddzielnymi problemami organizacji pracy.
+
+#### Oczekiwany projekt refaktoryzacji
+
+1. **Port w warstwie aplikacyjnej/domenowej.** Zdefiniować interfejsy operacji persystencji według potrzeb przypadków użycia, zaczynając od odczytu komend/dowodów Watchdoga. Port przyjmuje kryteria domenowe i zwraca typowane rekordy/projekcje. Nie ujawnia SQL, JDBC, `Connection`, `ResultSet` ani uchwytów SQLite. Nazwy portów mają opisywać operacje, np. odczyt dowodów Watchdoga; nie budować uniwersalnego frameworka repozytoriów.
+2. **Adapter SQLite.** Umieścić SQL, JDBC, mapowanie rekordów, obsługę JSON i granice transakcji w adapterze implementującym port. Zachować istniejący plik bazy, SQLite WAL, dane i tożsamości. Zakres nie obejmuje zastąpienia SQLite plikami, zmiany silnika ani nieuzasadnionej migracji schematu.
+3. **Jawne składanie zależności.** `WatchdogAndVenetianJudge` oraz objęte refaktoryzacją przypadki użycia mają korzystać z portu. Produkcyjny composition root wstrzykuje adapter SQLite. `ProjectStore` należy zinwentaryzować i adaptować etapowo, z zachowaniem istniejących kontraktów oraz jawnie opisanej listy pozostałych bezpośrednich zależności od SQL/JDBC.
+4. **Osobny kontrakt współbieżności.** Samo dodanie interfejsu nie usuwa blokady. Ustalić i przetestować kolejność blokad, granice transakcji oraz czas trzymania monitorów. Kosztowny odczyt Watchdoga nie może niepotrzebnie trzymać wspólnego monitora obsługi wejść/sesji. Zwolnienie blokady musi zachować wymagany spójny widok danych; nie usuwać synchronizacji bez wykazania poprawności.
+5. **Diagnostyka.** Rozdzielić pomiar oczekiwania na blokadę od czasu zapytania i mapowania wyniku. Zapewnić ograniczone, pozbawione sekretów dowody dla wolnych operacji. Sposób anulowania/timeoutu i zachowanie błędu określić jawnie; nie zamieniać nieudanego odczytu w pozornie poprawny pusty wynik.
+
+#### Kryteria akceptacji dla późniejszej implementacji
+
+- Test granic architektury potwierdza brak SQL/JDBC/typów SQLite w wyodrębnionych przypadkach użycia i wskazuje wszystkie pozostające wyjątki. Testy samego portu nie zastępują testów rzeczywistego adaptera.
+- Testy kontraktowe na natywnym SQLite zachowują zakres, kolejność, limit i przypadki JSON dotychczasowego `scopedCommands()`, w tym fallback. Zachować istniejące asercje 5 testów hotfixu; nie osłabiać ich dla refaktoryzacji.
+- Powtarzalny test równoległy odtwarza wolny odczyt Watchdoga i mierzy reakcję na niezależne wejście. Dowód zawiera SHA, dane wejściowe, czasy oczekiwania/wykonania i plan zapytania. Kryterium czasu uzgodnić przed wykonaniem na podstawie istniejących kontraktów; pojedyncze 79,4 ms nie jest automatycznie nowym progiem.
+- Restart i odczyt istniejącej bazy zachowują projekty, role, sesje, wiadomości oraz poprawność transakcji/WAL. Bez ręcznego przepisywania bazy produkcyjnej dla uzyskania zielonego testu.
+- Raport końcowy rozdziela: naprawę konkretnego zapytania, wydzielenie adaptera i poprawę współbieżności. Wynik każdego testu to PASS, FAIL, BLOCKED lub NOT_RUN z dokładną rewizją i artefaktem. Nie deklarować pełnej odporności platformy na podstawie jednego testu zapytania.
+
 ## 6. Materiał do niezależnego code review
 
 **Pytania wymagające odpowiedzi w kodzie, nie deklaracji wykonawcy:**
