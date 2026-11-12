@@ -46,12 +46,17 @@ export interface DurableTerminalReceipt {
 }
 declare const durableUnstartedCancellation: unique symbol;
 /** No process was dispatched. Distinct from exit/terminal/test-success authority. */
-export interface DurableUnstartedCancellationReceipt {
+interface DurableUnstartedCancellationBase {
   readonly [durableUnstartedCancellation]: true;
   readonly handle: ExecutionHandle; readonly ownership: ExecutionOwnership;
-  readonly containerId: string; readonly inputManifestSha256: string; readonly planSha256: string;
+  readonly inputManifestSha256: string; readonly planSha256: string;
   readonly evidenceSha256: string; readonly journalSha256: string; readonly confirmedAt: string;
 }
+/** Legacy CREATED receipt stays compatible; absent original INTENT has no invented container ID. */
+export type DurableUnstartedCancellationReceipt = DurableUnstartedCancellationBase & (
+  { readonly kind?:'CREATED'; readonly containerId:string } |
+  { readonly kind:'ABSENT_INTENT'; readonly containerId:null }
+);
 export type UnstartedRecoveryConfirmation =
   { confirmed: true; receipt: DurableUnstartedCancellationReceipt } |
   { confirmed: false; handle: ExecutionHandle; problem: RuntimeProblem };

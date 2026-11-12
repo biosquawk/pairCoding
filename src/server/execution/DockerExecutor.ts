@@ -28,6 +28,13 @@ import {
 const problem=(code:string,message:string,retryable=true):RuntimeProblem=>({
   code,message,recovery:code==='PREPARE_REQUIRED'?'Run explicit approved runtime prepare for this profile, then refresh readiness; editing stays available.':code==='DAEMON_UNAVAILABLE'?'Reconnect the configured Docker engine; retry the SAME retained run when applicable.':code==='IMAGE_MISSING'?'Prepare the exact pinned image; Run never pulls or falls back to a host executable.':code==='RUNTIME_CONFIG_INVALID'?'Correct the runtime configuration; editing and recovery stay available.':'Retry/reconcile the SAME retained run; do not delete resources or admit another run before collecting evidence.',retryable
 });
+/** Docker 29 emits [] on named absence. No partial JSON, opaque errors or generic exit1. */
+function namedAbsence(reply:DockerReply,target:string):boolean {
+  if(reply.exitCode!==1 || ![`Error: No such container: ${target}`,`Error response from daemon: No such container: ${target}`].includes(reply.stderr.trim()))return false;
+  if(reply.stdout.trim()==='')return true;
+  try {const value:unknown=JSON.parse(reply.stdout);return Array.isArray(value)&&value.length===0;}
+  catch {return false;}
+}
 export const EXECUTOR_LIMITS=Object.freeze({
   inspectBytes:1024*1024,logBytes:10*1024*1024,artifactFiles:128,artifactFileBytes:4*1024*1024,artifactTotalBytes:16*1024*1024,pollMs:200,stopSeconds:2,stopDeadlineMs:10000,httpProbeMs:500
 });
@@ -186,7 +193,7 @@ export class DockerExecutor implements ExecutionPort {
     const reply=await this.command(['container','inspect',r.ownership.containerName]);
     if(reply.exitCode!==0){
       // Absence is accepted ONLY when the daemon explicitly names this exact missing object.
-      requireThat(reply.exitCode===1 && reply.stdout.trim()==='' && (reply.stderr.trim()===`Error: No such container: ${r.ownership.containerName}` || reply.stderr.trim()===`Error response from daemon: No such container: ${r.ownership.containerName}`),'Container state UNKNOWN');
+      requireThat(namedAbsence(reply,r.ownership.containerName),'Container state UNKNOWN');
       return null;
     }
     const data=JSON.parse(reply.stdout);
@@ -499,8 +506,7 @@ export class DockerExecutor implements ExecutionPort {
   private async unstartedAbsent(r:JournalRecord) {
     await this.engine();
     const reply=await this.command(['container','inspect',r.containerId!]);
-    requireThat(reply.exitCode===1 && reply.stdout.trim()==='' &&
-      [`Error: No such container: ${r.containerId}`,`Error response from daemon: No such container: ${r.containerId}`].includes(reply.stderr.trim()),'Exact container ID absence unconfirmed');
+    requireThat(namedAbsence(reply,r.containerId!),'Exact container ID absence unconfirmed');
     requireThat(await this.inspect(r)===null,'Ownership name absence unconfirmed');
     await this.unchanged(r);
   }
@@ -546,13 +552,46 @@ export class DockerExecutor implements ExecutionPort {
     await durableWrite(evidencePath,bytes);
     return {evidencePath,evidenceSha256:sha256(bytes),confirmedAt:null};
   }
+  /** Only a null-ID original INTENT, positively revoked under the native create/start lease.
+   * No rm, logs, fabricated container, exit or test artifacts on this variant.
+   */
+  private requireAbsentIntent(r:JournalRecord) {
+    requireThat(['INTENT','REMOVED'].includes(r.phase) && r.containerId===null && r.startDispatch==='REVOKED' &&
+      !r.exit && !r.collection && !r.outcome,'Not an original absent revoked intent');
+    requireThat(r.ownership.engineId===this.policy.engineId && r.ownership.installationId===this.policy.installationId,
+      'Recovery engine/installation differs from original owner');
+  }
+  private async collectAbsentIntent(r:JournalRecord) {
+    this.requireAbsentIntent(r);
+    await verifyAcknowledgedInput(r.plan.input);
+    await this.engine();
+    const target=r.ownership.containerName,reply=await this.command(['container','inspect',target]);
+    requireThat(namedAbsence(reply,target),'Named intent absence unconfirmed');await this.unchanged(r);
+    const directory=path.join(this.policy.runRoot,r.handle.runId,'unstarted-'+randomUUID());
+    await fs.mkdir(directory,{mode:0o700});await canonicalDirectory(directory);
+    const evidence={version:1,kind:'NO_PROCESS_ABSENT_INTENT',handle:r.handle,ownership:r.ownership,
+      planSha256:sha256(canonicalJson(r.plan)),inputManifestSha256:r.plan.input.identity.manifestSha256,
+      startDispatch:'REVOKED',containerId:null,engineId:this.policy.engineId,target,reply};
+    const evidencePath=path.join(directory,'evidence.json'),bytes=canonicalJson(evidence);
+    await durableWrite(evidencePath,bytes);await fsyncDirectory(directory);await fsyncDirectory(path.dirname(directory));
+    return {kind:'ABSENT_INTENT' as const,evidencePath,evidenceSha256:sha256(bytes),confirmedAt:null};
+  }
   private async verifyUnstartedEvidence(r:JournalRecord) {
     const c=r.unstartedCancellation,runRoot=path.join(this.policy.runRoot,r.handle.runId);
     requireThat(r.ownership.engineId===this.policy.engineId && r.ownership.installationId===this.policy.installationId,'Recovery engine/installation differs from original owner');
-    requireThat(c && r.startDispatch==='REVOKED' && r.containerId && !r.exit && !r.collection && !r.outcome,'Missing no-process evidence');
+    requireThat(c && r.startDispatch==='REVOKED' && (c.kind==='ABSENT_INTENT' ? r.containerId===null : !!r.containerId) && !r.exit && !r.collection && !r.outcome,'Missing no-process evidence');
     const dir=path.dirname(c.evidencePath);
     requireThat(path.dirname(dir)===runRoot && /^unstarted-[a-f0-9-]{36}$/.test(path.basename(dir)) && path.basename(c.evidencePath)==='evidence.json','No-process evidence containment');
     const bytes=await readRegular(c.evidencePath,EXECUTOR_LIMITS.inspectBytes),e=JSON.parse(bytes.toString());
+    if(c.kind==='ABSENT_INTENT') {
+      this.requireAbsentIntent(r);
+      requireThat(sha256(bytes)===c.evidenceSha256 && e.version===1 && e.kind==='NO_PROCESS_ABSENT_INTENT' && e.startDispatch==='REVOKED' &&
+        e.containerId===null && e.engineId===r.ownership.engineId && e.target===r.ownership.containerName &&
+        canonicalJson(e.handle)===canonicalJson(r.handle) && canonicalJson(e.ownership)===canonicalJson(r.ownership) &&
+        e.planSha256===sha256(canonicalJson(r.plan)) && e.inputManifestSha256===r.plan.input.identity.manifestSha256 &&
+        e.reply && namedAbsence(e.reply,e.target),'Absent intent evidence mismatch');
+      await this.unchanged(r);return;
+    }
     requireThat(sha256(bytes)===c.evidenceSha256 && e.version===1 && e.kind==='NO_PROCESS_CANCELLATION' && e.startDispatch==='REVOKED' && e.artifactEncoding==='base64' &&
       canonicalJson(e.handle)===canonicalJson(r.handle) && canonicalJson(e.ownership)===canonicalJson(r.ownership) && e.planSha256===sha256(canonicalJson(r.plan)) &&
       e.inputManifestSha256===r.plan.input.identity.manifestSha256 && e.container?.Id===r.containerId && e.container.Name==='/'+r.ownership.containerName &&
@@ -579,10 +618,24 @@ export class DockerExecutor implements ExecutionPort {
     return this.exclusive(async()=>{
       try {
         const r=await this.record(handle);
+        requireThat(r.ownership.engineId===this.policy.engineId && r.ownership.installationId===this.policy.installationId,
+          'Recovery engine/installation differs from original owner');
         if(r.phase==='REMOVED')return {confirmed:true,receipt:await this.readUnstartedCancellation(handle)};
         return await this.journal.withUnstartedRecovery(r,async save=>{
           // MAY/legacy was rejected under native exclusion BEFORE any evidence/mutation.
           let v=await this.inspect(r);await this.unchanged(r);
+          if(!v && r.containerId===null && (!r.unstartedCancellation || r.unstartedCancellation.kind==='ABSENT_INTENT')) {
+            requireThat(r.phase==='INTENT' && !r.exit && !r.collection && !r.outcome,'Absent recovery requires original INTENT');
+            if(r.startDispatch==='NOT_DISPATCHED'){r.startDispatch='REVOKED';await save();}
+            this.requireAbsentIntent(r);
+            if(!r.unstartedCancellation){r.unstartedCancellation=await this.collectAbsentIntent(r);await save();}
+            await this.verifyUnstartedEvidence(r);
+            requireThat(await this.inspect(r)===null,'Named container appeared after revocation');await this.unchanged(r);
+            r.unstartedCancellation!.confirmedAt=new Date(this.now()).toISOString();r.phase='REMOVED';await save();
+            await this.verifyUnstartedEvidence(r);
+            return {confirmed:true as const,receipt:await this.journal.cancellationReceipt(r)};
+          }
+          requireThat(r.unstartedCancellation?.kind!=='ABSENT_INTENT','Container appeared after absent intent revocation');
           if(!r.unstartedCancellation || v) {
             this.requireUnstarted(r,v);
             if(r.containerId)requireThat(r.containerId===v.Id,'Unstarted container ID changed');

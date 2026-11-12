@@ -1,0 +1,11 @@
+{
+  "source": "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/deliveries/_drafts/P4/paircoach-lightweight-public-prepare-package/host-fc7f376e/java21-3cbbbd6-container-inspect-ro.json",
+  "sha256": "30f0310c76e460211ab14c96994aa2c1f1c313796d9799cdd43d6cc1f70d6a8d",
+  "revision": "3cbbbd664f6cca46112baf7eb07c8687279440fb",
+  "target": "paircoach-e9b85ec2-da9f-43fb-885d-44e6763613ea-java-maven-21-59cfe0b9-4f09-4056-93cb-618099c21760",
+  "reply": {
+    "exitCode": 1,
+    "stdout": "[]\n",
+    "stderr": "Error response from daemon: No such container: paircoach-e9b85ec2-da9f-43fb-885d-44e6763613ea-java-maven-21-59cfe0b9-4f09-4056-93cb-618099c21760\n"
+  }
+}

@@ -82,7 +82,8 @@ for(const defect of ['legacy','contradictory-phase','foreign-image','foreign-lab
     if(defect==='started')f.fake.v.State.StartedAt='2026-11-12T02:00:00Z';
     if(defect==='missing-started')delete f.fake.v.State.StartedAt;
     if(defect==='running')f.fake.v.State.Running=true;
-    if(defect==='absent')f.fake.v=null;
+    // HUMAN610e explicitly adds null-ID INTENT recovery; keep this negative about a KNOWN created ID without prior evidence.
+    if(defect==='absent'){const r=await f.journal.read('run1');r.containerId=f.fake.v.Id;await f.journal.update(r);f.fake.v=null;}
     if(defect==='inspect-timeout')f.fake.daemon=false;
     if(defect==='artifact-link')await fs.symlink(path.join(f.workspace,'main.js'),path.join(f.input.artifactsDirectory,'link.xml'));
     if(defect==='logs-fail')f.fake.logsFail=true;

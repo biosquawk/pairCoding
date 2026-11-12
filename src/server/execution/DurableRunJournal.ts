@@ -101,11 +101,16 @@ export interface JournalRecord {
   phase:'INTENT'|'CREATED'|'RUNNING'|'STOP_UNCONFIRMED'|'EXITED'|'COLLECTED'|'TERMINAL'|'REMOVED';
   /** Missing on legacy records means UNKNOWN, never implicitly NOT_DISPATCHED. */
   startDispatch?: 'NOT_DISPATCHED'|'MAY_HAVE_BEEN_DISPATCHED'|'REVOKED';
-  unstartedCancellation?: { evidencePath:string; evidenceSha256:string; confirmedAt:string|null };
+  unstartedCancellation?: { kind?:'CREATED'|'ABSENT_INTENT'; evidencePath:string; evidenceSha256:string; confirmedAt:string|null };
   containerId:string|null;
   exit:ExecutionExit|null;
   collection:CollectedArtifacts|null;
   outcome:AdapterOutcome|null;
+}
+function cancellationIdentity(r:JournalRecord):boolean {
+  const kind=r.unstartedCancellation?.kind;
+  return kind==='ABSENT_INTENT' ? r.containerId===null && ['INTENT','REMOVED'].includes(r.phase) :
+    (kind===undefined || kind==='CREATED') && typeof r.containerId==='string' && /^[a-f0-9]{64}$/.test(r.containerId);
 }
 export class DurableRunJournal {
   constructor(readonly directory:string, readonly installationId:string) {
@@ -142,7 +147,7 @@ export class DurableRunJournal {
     const r=JSON.parse((await readRegular(this.filename(runId),4*1024*1024)).toString()) as JournalRecord;
     requireThat(r.version===1 && Number.isFinite(r.createdAt) && Number.isSafeInteger(r.revision) && r.revision>=0 && r.handle.runId===runId && r.ownership.installationId===this.installationId && r.ownership.runId===runId && canonicalJson(r.plan.ownership)===canonicalJson(r.ownership) && r.plan.input.identity.runId===runId && ['INTENT','CREATED','RUNNING','STOP_UNCONFIRMED','EXITED','COLLECTED','TERMINAL','REMOVED'].includes(r.phase),'Corrupt/foreign journal');
     requireThat(r.startDispatch===undefined || ['NOT_DISPATCHED','MAY_HAVE_BEEN_DISPATCHED','REVOKED'].includes(r.startDispatch),'Unknown dispatch fence');
-    if(r.unstartedCancellation)requireThat(r.startDispatch==='REVOKED' && r.containerId && !r.exit && !r.collection && !r.outcome &&
+    if(r.unstartedCancellation)requireThat(r.startDispatch==='REVOKED' && cancellationIdentity(r) && !r.exit && !r.collection && !r.outcome &&
       typeof r.unstartedCancellation.evidencePath==='string' && /^[a-f0-9]{64}$/.test(r.unstartedCancellation.evidenceSha256) &&
       (r.phase==='REMOVED' ? typeof r.unstartedCancellation.confirmedAt==='string' && Number.isFinite(Date.parse(r.unstartedCancellation.confirmedAt)) && Date.parse(r.unstartedCancellation.confirmedAt)>0 : r.unstartedCancellation.confirmedAt===null),'Invalid cancellation journal');
     if(r.startDispatch==='REVOKED' && r.phase==='REMOVED')requireThat(r.unstartedCancellation,'Revoked removal lacks cancellation proof');
@@ -174,9 +179,9 @@ export class DurableRunJournal {
     requireThat(fenceUnchanged || (old.startDispatch==='NOT_DISPATCHED' &&
       (claim && record.startDispatch==='MAY_HAVE_BEEN_DISPATCHED' || recovery && record.startDispatch==='REVOKED')),'Start dispatch fence cannot regress/change without native CAS');
     requireThat(recovery || canonicalJson(old.unstartedCancellation??null)===canonicalJson(record.unstartedCancellation??null),'Cancellation requires native recovery exclusion');
-    if(record.unstartedCancellation)requireThat(record.startDispatch==='REVOKED' && record.containerId && !record.exit && !record.collection && !record.outcome,'Cancellation contradicts process evidence');
+    if(record.unstartedCancellation)requireThat(record.startDispatch==='REVOKED' && cancellationIdentity(record) && !record.exit && !record.collection && !record.outcome,'Cancellation contradicts process evidence');
     if(old.unstartedCancellation)requireThat(record.unstartedCancellation &&
-      old.unstartedCancellation.evidencePath===record.unstartedCancellation.evidencePath && old.unstartedCancellation.evidenceSha256===record.unstartedCancellation.evidenceSha256 &&
+      old.unstartedCancellation.kind===record.unstartedCancellation.kind && old.unstartedCancellation.evidencePath===record.unstartedCancellation.evidencePath && old.unstartedCancellation.evidenceSha256===record.unstartedCancellation.evidenceSha256 &&
       (!old.unstartedCancellation.confirmedAt || old.unstartedCancellation.confirmedAt===record.unstartedCancellation.confirmedAt),'Cancellation intent immutable');
     if(old.phase==='REMOVED')requireThat(canonicalJson(old)===canonicalJson(record),'Removed journal immutable');
     const next={...record,revision:record.revision+1};
@@ -214,9 +219,9 @@ export class DurableRunJournal {
     // may have failed. A read alone must not upgrade that uncertainty to durability.
     await fsyncDirectory(this.directory);
     const bytes=await readRegular(this.filename(record.handle.runId),4*1024*1024),r=await this.read(record.handle.runId),c=r.unstartedCancellation;
-    requireThat(canonicalJson(r)===canonicalJson(record) && r.phase==='REMOVED' && r.startDispatch==='REVOKED' && c && r.containerId &&
+    requireThat(canonicalJson(r)===canonicalJson(record) && r.phase==='REMOVED' && r.startDispatch==='REVOKED' && c && cancellationIdentity(r) &&
       !r.exit && !r.collection && !r.outcome && typeof c.confirmedAt==='string' && Number.isFinite(Date.parse(c.confirmedAt)) && Date.parse(c.confirmedAt)>0 && /^[a-f0-9]{64}$/.test(c.evidenceSha256),'No durable unstarted cancellation');
-    return Object.freeze({handle:Object.freeze({...r.handle}),ownership:Object.freeze({...r.ownership}),containerId:r.containerId,
+    return Object.freeze({handle:Object.freeze({...r.handle}),ownership:Object.freeze({...r.ownership}),containerId:r.containerId,...(c.kind==='ABSENT_INTENT'?{kind:'ABSENT_INTENT' as const}:{}),
       inputManifestSha256:r.plan.input.identity.manifestSha256,planSha256:sha256(canonicalJson(r.plan)),
       evidenceSha256:c.evidenceSha256,journalSha256:sha256(bytes),confirmedAt:c.confirmedAt}) as DurableUnstartedCancellationReceipt;
   }

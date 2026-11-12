@@ -265,7 +265,7 @@ export class RuntimeRunner {
   private applyCancellation(job:Job,receipt:DurableUnstartedCancellationReceipt):void {
     requireThat(job.handle && job.plan && sameHandle(job.handle,receipt.handle) && same(job.plan.ownership,receipt.ownership) &&
       receipt.inputManifestSha256===job.plan.input.identity.manifestSha256 && job.run.startedAt===null && !job.exit && !job.collection && !job.outcome &&
-      /^[a-f0-9]{64}$/.test(receipt.containerId) && receipt.planSha256===sha256(canonicalJson(job.plan)) && /^[a-f0-9]{64}$/.test(receipt.evidenceSha256) &&
+      (receipt.kind==='ABSENT_INTENT' ? receipt.containerId===null : /^[a-f0-9]{64}$/.test(receipt.containerId)) && receipt.planSha256===sha256(canonicalJson(job.plan)) && /^[a-f0-9]{64}$/.test(receipt.evidenceSha256) &&
       /^[a-f0-9]{64}$/.test(receipt.journalSha256) && Number.isFinite(Date.parse(receipt.confirmedAt)),
     'Cancellation receipt differs from original no-process Run');
     if(job.run.finishedAt)requireThat(job.run.status==='CANCELLED' && job.run.finishedAt===receipt.confirmedAt && job.run.exitCode===null &&
@@ -273,7 +273,9 @@ export class RuntimeRunner {
     'Retained cancellation differs from durable receipt');
     job.run.status='CANCELLED';job.run.startedAt=null;job.run.exitCode=null;job.run.finishedAt=receipt.confirmedAt;
     job.run.testOutcome=job.run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE';job.run.testCount=null;job.run.serviceReadiness=null;
-    job.run.processProblem=problem('RUN_CANCELLED_UNSTARTED','Original Run cancelled before process dispatch; exact owned container removal durably confirmed.');
+    job.run.processProblem=problem('RUN_CANCELLED_UNSTARTED',receipt.kind==='ABSENT_INTENT' ?
+      'Original Run cancelled before process dispatch; original intent revoked and exact owned name absence durably confirmed.' :
+      'Original Run cancelled before process dispatch; exact owned container removal durably confirmed.');
     this.options.retainState?.(snapshot(job.plan),snapshot(job.run),job.requested);
   }
   private async settle(job: Job): Promise<void> {
