@@ -15,7 +15,7 @@ test('native async stage has max4 overlap, all file fsync/close/readback and bot
  release.resolve();const token=await staging;assert.equal(f.fds.size,0);assert.equal(f.max,4);assert.equal(fs.existsSync(join(root,'manifest.json')),false);
  const shadow=f.store.consumeStage(token,'diagnostics');assert.equal(shadow.manifest.phase,'diagnostics');
  assert.equal(f.events.filter(e=>e.op==='sync').length,10);assert.equal(f.events.filter(e=>e.op==='write').length,10);assert.equal(f.events.filter(e=>e.op==='close').length,10);
- const firstDir=f.events.findIndex(e=>e.op==='directory'),lastClose=f.events.findLastIndex(e=>e.op==='close');assert.ok(firstDir>lastClose);
+ const firstDir=f.events.findIndex(e=>e.op==='directory'),lastClose=f.events.reduce((last,e,i)=>e.op==='close'?i:last,-1);assert.ok(firstDir>lastClose);
  const dirs=f.events.filter(e=>e.op==='directory').map(e=>relative(root,e.path));
  assert.ok(dirs.indexOf('workspace/nested/empty')<dirs.indexOf('workspace/nested'));assert.ok(dirs.indexOf('workspace/nested')<dirs.indexOf('workspace'));
  assert.ok(f.events.findIndex(e=>e.op==='manifest-file')>firstDir);f.store.assertIntegrity(shadow);
@@ -78,4 +78,12 @@ test('legacy direct materialize and active refresh keep their original per-file 
  const next=f.store.refreshCompletion(shadow,f.authority);assert.equal(f.events.filter(e=>e.op==='sync').length,0);
  assert.equal(f.events.filter(e=>e.op==='manifest-file').length,next.manifest.files.length+1);
  assert.equal(f.events.filter(e=>e.op==='directory').length,next.manifest.files.length+1);
+});
+
+test('uncertain close with descriptor reused by another file never closes the foreign descriptor',async t=>{
+ const f=fixture(t,1),internal=f.store as unknown as {asyncIO:import('../../src/server/language/LanguageShadowStore').LanguageShadowAsyncIO},native=internal.asyncIO;
+ let foreign:number|undefined,applied=false;
+ internal.asyncIO={...native,async close(fd){await native.close(fd);if(!applied){applied=true;foreign=fs.openSync(join(f.root,'foreign-control'),'w+');assert.equal(foreign,fd,'native lowest free descriptor reused in controlled schedule');throw Error('close callback uncertain after success');}}};
+ await assert.rejects(f.store.stage(f.authority));assert.ok(applied);assert.ok(foreign!==undefined);assert.equal(fs.fstatSync(foreign).isFile(),true);
+ fs.writeFileSync(foreign,'still open');fs.closeSync(foreign);assert.equal(fs.readFileSync(join(f.root,'foreign-control'),'utf8'),'still open');assert.deepEqual(fs.readdirSync(f.owned),[]);
 });

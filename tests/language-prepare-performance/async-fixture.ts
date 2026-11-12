@@ -10,13 +10,13 @@ import { NodeLanguageJournalDurability } from '../../src/server/language/Languag
 import { assertRealDirectory, sha256 } from '../../src/server/language/LanguageProcessJournal';
 import * as codec from '../../src/language/uriCodec';
 export function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return {promise,resolve}; }
-export function fixture(t: TestContext) {
+export function fixture(t: TestContext, count = 10) {
  const root=fs.mkdtempSync(join(process.env.TMPDIR ?? tmpdir(),'async-stage-'));
  const clear=(p:string):void=>{for(const e of fs.readdirSync(p,{withFileTypes:true})){const f=join(p,e.name);if(e.isDirectory())clear(f);else if(e.isFile())fs.chmodSync(f,0o600);}};
  t.after(()=>{clear(root);fs.rmSync(root,{recursive:true,force:true});});
  const project=join(root,'project'),owned=join(root,'owned');for(const p of [project,owned])fs.mkdirSync(p,{mode:0o700});
  fs.mkdirSync(join(project,'nested'));fs.mkdirSync(join(project,'nested/empty'));
- for(let i=0;i<10;i++)fs.writeFileSync(join(project,i<5?`a${i}.py`:`nested/a${i}.py`),'print("original")\n');
+ for(let i=0;i<count;i++)fs.writeFileSync(join(project,i<5?`a${i}.py`:`nested/a${i}.py`),'print("original")\n');
  const events:{op:string;path:string;fd?:number}[]=[],fds=new Map<number,string>();let max=0;
  let hook:(op:string,fd:number,path:string)=>void|Promise<void>=()=>{};
  const io:LanguageShadowAsyncIO={
@@ -29,7 +29,7 @@ export function fixture(t: TestContext) {
  const native=new NodeLanguageJournalDurability(assertRealDirectory);
  const store=new LanguageShadowStore(owned,codec,{policy:native.policy,file(fd){native.file(fd);events.push({op:'manifest-file',path:''});},directory(path){native.directory(path);events.push({op:'directory',path});}},io);
  const disk=store.captureSource(project),identity={projectId:'p',sessionId:'s',profileId:'python-3.13',configurationGeneration:'cfg',providerGeneration:'provider',shadowGeneration:'shadow',connectionGeneration:'conn',provider:'pylsp' as const,imageId:'sha256:'+'a'.repeat(64),toolchainSha256:'b'.repeat(64),dependencyManifestSha256:'c'.repeat(64),analysisSettingsSha256:'d'.repeat(64)};
- const overlays=['a0.py','a1.py'].map(path=>({stamp:{...identity,path,modelLifetime:path,localModelVersion:1,requestGeneration:1,controlEpoch:0,baseDocumentVersion:1,documentVersion:null,contentSha256:codec.contentSha256('draft\n')},content:'draft\n'}));
+ const overlays=(count>1?['a0.py','a1.py']:['a0.py']).map(path=>({stamp:{...identity,path,modelLifetime:path,localModelVersion:1,requestGeneration:1,controlEpoch:0,baseDocumentVersion:1,documentVersion:null,contentSha256:codec.contentSha256('draft\n')},content:'draft\n'}));
  const snapshot:TrustedLanguageSnapshot={leaseId:'held-lease',identity,projectRoot:project,files:disk.files,overlays,dependencies:null};
  const expected=structuredClone(snapshot);let held=true,current=true;
  const authority={capture:()=>snapshot,isCurrent(s:TrustedLanguageSnapshot){assert.ok(held,'held FIFO required');disk.assertCurrent();return current&&same(snapshot,expected)&&same(s,snapshot);}};

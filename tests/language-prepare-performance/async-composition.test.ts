@@ -6,7 +6,7 @@ import { fixture, callbacks } from './selected-async-fixture';
 const createHint=Object.freeze({kind:'CREATE' as const,phase:'diagnostics' as const});
 import type { LanguageShadowStore, LanguageShadowAsyncIO } from '../../src/server/language/LanguageShadowStore';
 function instrument(f: Awaited<ReturnType<typeof fixture>>) {
- const internal=f.factory as unknown as {store:LanguageShadowStore&{asyncIO:LanguageShadowAsyncIO}},store=internal.store,native=store.asyncIO;
+ const internal=f.factory as unknown as {store:Pick<LanguageShadowStore,'stage'|'materialize'>&{asyncIO:LanguageShadowAsyncIO}},store=internal.store,native=store.asyncIO;
  let open=0,max=0,stages=0,fallback=0;const originalStage=store.stage.bind(store);
  store.stage=async a=>{stages++;return originalStage(a);};
  store.materialize=()=>{fallback++;throw Error('Forbidden sync fallback in selected async path');};

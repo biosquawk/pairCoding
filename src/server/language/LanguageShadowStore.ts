@@ -285,13 +285,18 @@ export class LanguageShadowStore {
         if (written.size !== BigInt(bytes.length)) throw new Error('Invalid async copy output');
       } catch (error) { operationFailed = true; operationError = error; } finally {
         // All native operations on this descriptor have settled before close; pool awaits this too.
-        const closing = fd;
+        const closing = fd, closingIdentity = written ?? fstatSync(fd, { bigint: true });
         try { await this.asyncIO.close(closing); }
         catch (error) {
           // Reconcile an uncertain close by READ first; retry only a descriptor proven still open.
           // All IO on it has settled, so a direct final close cannot race a write/fsync callback.
           let closed = false;
-          try { fstatSync(closing); } catch (readback) {
+          try {
+            const actual = fstatSync(closing, { bigint: true });
+            // A close may have completed even if its callback reports an error. An already reused
+            // descriptor is NOT ours to close. Reconcile actual identity, not just integer presence.
+            closed = actual.dev !== closingIdentity.dev || actual.ino !== closingIdentity.ino;
+          } catch (readback) {
             if ((readback as NodeJS.ErrnoException).code !== 'EBADF') throw new AggregateError([error, readback], 'Cannot reconcile async close');
             closed = true;
           }
