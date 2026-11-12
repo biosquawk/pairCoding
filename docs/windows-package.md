@@ -83,6 +83,14 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run runtime:prepare -- …` | `node scripts/runtime-prepare-cli.mjs`; jawny projekt/profil i NOWY prywatny output według [przewodnika](windows-polyglot.md#2-jawne-prepare-bez-domyślnego-wykonania). Domyślnie `PLAN_ONLY`, nie gotowość; osobne `--execute` wymaga przyjętej spójnej rewizji i pinów/Docker. Nie uruchamia go pakieter. |
 | `npm.cmd test` | Źródła obu rodzin są w ZIP; `tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"`. Teraz tylko izolowany dowód selekcji; pełne wykonanie na spójnej rewizji po implementacji9, nie podczas smoke. |
 
+Paczka zachowuje wszystkie wybrane testy i ich zależności. Obok15skryptów runtime
+publicznego przepływu skończona allowlista dopuszcza pojedynczy prywatny test-support
+`scripts/runtime-operator-remainder.mjs`: wymagany przy wybranych regresjach remainder
+lub retention (również dynamiczny import fixture). To źródło, nie dodatkowa komenda
+npm/HTTP ani publiczna instrukcja acquisition; pakowanie go nie wykonuje. Brak modułu
+odrzuca plan/weryfikację zamiast pomijać asercje. ROOT recovery controller i prywatne
+proof fixtures pozostają poza paczką. Szczegóły: [przewodnik](windows-polyglot.md).
+
 Manifest.sourceVerification opisuje dodatkowe skończone komendy operatora (PowerShell/portable Node),
 wymagane docs/config/helper i zaufanie do zewnętrznego manifestu; te wejścia są obowiązkowe
 w list/dry-run/output. Helper nie poszerza selekcji do wszystkich scripts ani raw QA.
