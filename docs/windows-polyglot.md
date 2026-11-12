@@ -199,7 +199,8 @@ odczytaj log/receipts; samo zabicie CLI nie dowodzi wycofania operacji daemona.
 Zatrzymanie kontenera cache jest dopuszczane tylko po odczycie jego dokładnego
 owned ID, engine, obrazu, labels i mountów; zasoby pozostają zachowane, bez `rm`.
 Jeśli wynik lub tożsamość są nieznane, nie zatrzymuj kontenera po samej nazwie.
-Po komunikacie `publish` okno anulowania jest już zamknięte: poczekaj na wynik
+Po dokładnym komunikacie `Cancellation window closed; publishing measured runtime config`
+okno anulowania jest już zamknięte. Samo `phase=publish` nie zamyka tego okna. Poczekaj na wynik
 publikacji konfiguracji, zamiast ponawiać prepare. Status
 `CANCELLED_RETAIN_AND_RECONCILE` wymaga odczytu istniejącego wyniku i zasobów.
 Przerwanie nie daje automatycznej ponownej próby ani READY. Natywne Windows
