@@ -6,7 +6,8 @@ import {fileURLToPath} from 'node:url';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {createRequire} from 'node:module';
-import {prepare,validatePrepareRequest,validateProductionRequest,resolvePreparedToolchainIdentity} from './runtime-prepare.mjs';
+import {prepare,validatePrepareRequest,validateProductionRequest,resolvePreparedToolchainIdentity,createDockerClientState,beginDockerCommand,finishDockerCommand} from './runtime-prepare.mjs';
+import {createImageRetention,imagePin,imageCommandOutput} from './runtime-image-retention.mjs';
 import {canonicalDirectory,readPrivate,receiptWriter} from './runtime-files.mjs';
 import {dependencyHash} from './runtime-dependencies.mjs';
 import {encodeSpec} from './runtime-spec.mjs';
@@ -59,8 +60,8 @@ export function buildOperatorPlan(operatorRoot,phase='PREPARE_ONLY') {
  });
  return {schemaVersion:1,phase,offlineFixtureContainers:phase==='PREPARE_ONLY'?0:18,operatorEngine:lock.operatorLane,language:lock.language,scope:phase==='PREPARE_ONLY'?'PREPARE_ONLY_NOT_OFFLINE_OR_PRODUCT_ACCEPTANCE':'FINAL_QA_OFFLINE_FIXTURE_CHECKS_NOT_GUI_OR_ACK_ACCEPTANCE',operatorRoot:root,maxHeavyConcurrency:1,maxElapsedMs:2700000,maxCommandMs:480000,sourceInventory:sourcePaths().map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)})),jobs};
 }
-function validateFrozen(plan) {
- if(JSON.stringify(plan)!==JSON.stringify(buildOperatorPlan(plan.operatorRoot,plan.phase))) throw new Error('Frozen plan/source/pins/assets differ; do not execute');
+function validateFrozen(plan,buildPlan=buildOperatorPlan) {
+ if(JSON.stringify(plan)!==JSON.stringify(buildPlan(plan.operatorRoot,plan.phase))) throw new Error('Frozen plan/source/pins/assets differ; do not execute');
 }
 export function junitSmoke(xmls,expectFailure) {
  if(!xmls.length) throw new Error('Missing fresh JUnit XML');
@@ -85,27 +86,30 @@ export function cleanupOfflineFixture(state,imageId,run) {
  if(inspected.length!==1 || !owned(inspected[0]) || inspected[0].Id!==state.Id || inspected[0].State.ExitCode!==state.State.ExitCode)throw new Error('Cleanup identity changed');
  const final=inspected[0];run(['rm',final.Id]);
 }
-export function executeOperatorPlan(plan) {
- validateFrozen(plan);const root=canonicalDirectory(plan.operatorRoot),start=Date.now();
+export function executeOperatorPlan(plan,dependencies={}) {
+ validateFrozen(plan,dependencies.buildPlan);const root=canonicalDirectory(plan.operatorRoot),start=Date.now();
  const actualTools=walk(path.join(root,'stage/tools')).map(({path,sha256})=>({path,sha256})).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
  if(JSON.stringify(actualTools)!==JSON.stringify(plan.jobs[0].request.tools.files))throw new Error('Staged tool inventory differs');
  // Published staging receipt is necessary but never sufficient for readiness.
  if(json(path.join(root,'download-journal/receipt.json')).status!=='STAGED_NOT_PREPARED')throw new Error('Assets not staged');
  const session=path.join(root,plan.phase==='PREPARE_ONLY'?'session':'final-qa-session');
  const publish=receiptWriter(session),receipt={phase:plan.phase,scope:plan.scope,status:'STARTED',startedAt:new Date().toISOString(),planSha256:hash(JSON.stringify(plan,null,2)+'\n'),jobs:[],commands:[]};
- let publicationFailed=false;
+ let publicationFailed=false;let clientState;
+ const endpoint=process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock',configDirectory=path.join(session,'docker-config');
  const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}};save();
- const checkBudget=()=>{if(Date.now()-start>plan.maxElapsedMs) throw new Error('Global preparation budget reached; retain/reconcile, no retry');validateFrozen(plan);};
- const invoke=(args,allowNonzero=false)=>{
-  checkBudget();const began=new Date().toISOString(),r=spawnSync('docker',args,{shell:false,env:{PATH:process.env.PATH,HOME:path.join(session,'docker-home')},encoding:'utf8',timeout:Math.min(plan.maxCommandMs,plan.maxElapsedMs-(Date.now()-start)),maxBuffer:4*1024*1024});
-  receipt.commands.push({argv:['docker',...args],startedAt:began,finishedAt:new Date().toISOString(),exit:r.status,signal:r.signal,error:r.error?.message??null,stdout:r.stdout,stderr:r.stderr});save();
-  if(r.error || r.signal || !allowNonzero && r.status!==0)throw new Error('Unknown/failed Docker operation; retain exact receipts/resources; inspect before any retry');
+ const checkBudget=()=>{if(Date.now()-start>plan.maxElapsedMs) throw new Error('Global preparation budget reached; retain/reconcile, no retry');validateFrozen(plan,dependencies.buildPlan);};
+ const invoke=(args,allowNonzero=false,allowMissing=false)=>{
+  checkBudget();const began=new Date().toISOString(),issued=beginDockerCommand(clientState),actualArgs=['--host',endpoint,'--config',issued.configDirectory,...args],r=(dependencies.spawnSync??spawnSync)('docker',actualArgs,{shell:false,env:issued.env,encoding:'utf8',timeout:Math.min(plan.maxCommandMs,plan.maxElapsedMs-(Date.now()-start)),maxBuffer:4*1024*1024});
+  receipt.commands.push({argv:['docker',...actualArgs],startedAt:began,finishedAt:new Date().toISOString(),exit:r.status,signal:r.signal,error:r.error?.message??null,stdout:r.stdout,stderr:r.stderr});save();
+  finishDockerCommand(clientState,issued);
+  if(allowMissing)imageCommandOutput(args,r,true);
+  else if(r.error || r.signal || !allowNonzero && r.status!==0)throw new Error('Unknown/failed Docker operation; retain exact receipts/resources; inspect before any retry');
   return r;
  };
  const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
- const run=(args,allowNonzero=false)=>{
+ const run=(args,allowNonzero=false,allowMissing=false)=>{
   if(args[0]!=='info') {const actual=JSON.parse(invoke(engineArgs).stdout);if(JSON.stringify(actual)!==JSON.stringify(plan.operatorEngine))throw new Error('Reviewed operator engine changed; retain/reconcile');}
-  return invoke(args,allowNonzero);
+  return invoke(args,allowNonzero,allowMissing);
  };
  const make=(d,mode=0o700)=>{canonicalDirectory(path.dirname(d));fs.mkdirSync(d,{mode});canonicalDirectory(d);};
  const put=(p,bytes,mode=0o600)=>{canonicalDirectory(path.dirname(p));const fd=fs.openSync(p,'wx',mode);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}};
@@ -115,10 +119,11 @@ export function executeOperatorPlan(plan) {
   }
  };
  try {
-  make(path.join(session,'docker-home'));
+  clientState=createDockerClientState(session);receipt.clientState=clientState;save();
   const engine=JSON.parse(run(['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}']).stdout);
   if(JSON.stringify(engine)!==JSON.stringify(plan.operatorEngine))throw new Error('Reviewed operator engine changed; no mutations allowed');
   receipt.engine=engine;save();
+  const retention=createImageRetention({engine,run:(args,missing)=>run(args,false,missing),receipt,save});retention.retainRequired();
   if(plan.phase==='PREPARE_ONLY')for(const d of ['projects','jobs','requests'])make(path.join(root,d));
   else {
    const previous=json(path.join(root,'session/receipt.json'));
@@ -129,8 +134,10 @@ export function executeOperatorPlan(plan) {
   for(const job of plan.jobs) {
    checkBudget();if(plan.phase==='PREPARE_ONLY') {materialize(job.request.project.root,job.assets,0o644);put(path.join(root,'requests',job.id+'.json'),Buffer.from(JSON.stringify(job.request,null,2)+'\n'));}
    const item={id:job.id,status:'PREPARE_INTENT',offline:[]};receipt.jobs.push(item);save();
-   const prepared=plan.phase==='PREPARE_ONLY'?prepare(job.request,true,start+plan.maxElapsedMs,engine):json(path.join(job.request.outputRoot,'receipt.json'));
+   const prepared=plan.phase==='PREPARE_ONLY'?(dependencies.prepare??prepare)(job.request,true,start+plan.maxElapsedMs,engine,{endpoint,configDirectory,clientState,...(dependencies.spawnSync?{spawnSync:dependencies.spawnSync}:{})},retention.pins()):json(path.join(job.request.outputRoot,'receipt.json'));
    if(JSON.stringify(prepared.engine)!==JSON.stringify(engine) || JSON.stringify(prepared.request)!==JSON.stringify(job.request) || prepared.toolchainHash!==resolvePreparedToolchainIdentity(job.request).toolchainHash || prepared.status!=='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION')throw new Error('Prepared receipt/request/engine/installed-source correlation differs');
+   retention.add(imagePin(engine,prepared.imageInspect,path.join(job.request.outputRoot,'receipt.json')));
+   if(plan.phase==='PREPARE_ONLY') {if(!Array.isArray(prepared.imageRetention?.pins))throw new Error('Producer retained prior-pin set missing');for(const entry of prepared.imageRetention.pins)retention.add(entry.pin);}
    checkBudget();item.imageId=prepared.imageId;item.prepareReceipt=path.join(job.request.outputRoot,'receipt.json');
    const image=JSON.parse(run(['image','inspect',prepared.imageId]).stdout)[0];item.observedImage={Id:image.Id,RepoDigests:image.RepoDigests??[],Descriptor:image.Descriptor??null};
    if(image.Id!==prepared.imageId)throw new Error('Prepared image changed');
@@ -158,7 +165,11 @@ export function executeOperatorPlan(plan) {
    }
    item.status='PREPARED_OFFLINE_SMOKE_REQUIRES_K_REVIEW';save();
   }
-  if(plan.phase==='PREPARE_ONLY')prepareLanguageImages(root,json(path.join(repo,'runtimes/production-inputs.lock.json')),{run,save,receipt});
+  if(plan.phase==='PREPARE_ONLY')(dependencies.prepareLanguageImages??prepareLanguageImages)(root,json(path.join(repo,'runtimes/production-inputs.lock.json')),{run:(args,...rest)=>{
+   if(args[0]!=='build')return run(args,...rest);
+   const tag=args[args.indexOf('--tag')+1];retention.beforeBuild(tag);const result=run(args);retention.afterBuild(tag);return result;
+  },save,receipt});
+  retention.verifyAll();
   receipt.status=plan.phase==='PREPARE_ONLY'?'PREPARE_ONLY_COMPLETE_OFFLINE_DEFERRED_NOT_PRODUCT_ACCEPTANCE':'FINAL_OFFLINE_FIXTURES_COMPLETE_NOT_GUI_OR_PRODUCT_ACCEPTANCE';save();return receipt;
  }catch(e){receipt.status='FAILED_RETAIN_AND_RECONCILE';receipt.error=e.message;if(!publicationFailed)save();throw e;}
 }

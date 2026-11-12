@@ -8,6 +8,8 @@ import path from 'node:path';
 import { dependencyHash } from './runtime-dependencies.mjs';
 import { literalPath } from './runtime-spec.mjs';
 import { fileURLToPath } from 'node:url';
+import { createImageRetention, imageCommandOutput } from './runtime-image-retention.mjs';
+import { isDeepStrictEqual } from 'node:util';
 import { receiptWriter, canonicalDirectory, readPrivate, stamp } from './runtime-files.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const mavenImage='maven@sha256:be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f';
@@ -166,7 +168,7 @@ export function finishDockerCommand(client, issued) {
 
 // Optional explicit transport retains endpoint/config fields; an in-process owned client capability
 // is required for shared outer/nested state. No arbitrary existing home/state path is accepted.
-export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null,transport=null) {
+export function prepare(request,execute=false,deadline=Infinity,expectedEngine=null,transport=null,requiredPins=[]) {
   if(transport!==null) {
     if(!transport || !['unix:///var/run/docker.sock','npipe:////./pipe/docker_engine'].includes(transport.endpoint) || !path.isAbsolute(transport.configDirectory) || Object.keys(transport).some(k=>!['endpoint','configDirectory','clientState','spawnSync'].includes(k)) || transport.spawnSync!==undefined && typeof transport.spawnSync!=='function') throw new Error('Explicit local Docker transport required');
     dockerClientEnvironment(transport.clientState);
@@ -181,28 +183,32 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
   let client=transport?.clientState;
   let publicationFailed=false;
   const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}}; save();
-  const invoke=(args)=>{
+  const invoke=(args,allowMissing=false)=>{
     if(Date.now()>=deadline) throw new Error('Preparation global budget reached; retain/reconcile');
     const endpoint=transport?.endpoint??(process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock');
     const issued=beginDockerCommand(client),actualArgs=['--host',endpoint,'--config',issued.configDirectory,...args],env=issued.env;
     const startedAt=new Date().toISOString(),res=(transport?.spawnSync??spawnSync)('docker',actualArgs,{env,shell:false,encoding:'utf8',timeout:Math.max(1,Math.min(480000,deadline-Date.now())),maxBuffer:4*1024*1024});
     receipt.commands.push({argv:['docker',...actualArgs],...(transport?{endpoint:transport.endpoint,configDirectory:transport.configDirectory}:{}),startedAt,finishedAt:new Date().toISOString(),exit:res.status,signal:res.signal,error:res.error?.message??null,stdout:res.stdout,stderr:res.stderr}); save();
     finishDockerCommand(client,issued); // including final/unknown operations, retain never reused config
-    if(res.error || res.status!==0) throw new Error('Preparation operation failed; retain receipt/resources, reconcile by exact inspection before retry.'); return res.stdout;
+    if(allowMissing) imageCommandOutput(args,res,true);
+    else if(res.error || res.signal || res.status!==0) throw new Error('Preparation operation failed; retain receipt/resources, reconcile by exact inspection before retry.'); return res;
   };
   const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
   const observeEngine=()=>{
-    const engine=JSON.parse(invoke(engineArgs));
+    const engine=JSON.parse(invoke(engineArgs).stdout);
     if(!exact(engine,['ID','ServerVersion','OSType','Architecture']) || Object.values(engine).some(v=>typeof v!=='string' || !v || v.length>256) || engine.OSType!=='linux' || !['x86_64','amd64'].includes(engine.Architecture)) throw new Error('Actual engine identity missing/unsupported');
     return engine;
   };
-  const checkEngine=()=>{const actual=observeEngine();if(JSON.stringify(actual)!==JSON.stringify(receipt.engine))throw new Error('Preparation engine changed; retain/reconcile');};
-  const run=args=>{checkEngine();return invoke(args);};
+  const checkEngine=()=>{const actual=observeEngine();if(!isDeepStrictEqual(actual,receipt.engine))throw new Error('Preparation engine changed; retain/reconcile');};
+  const runRaw=(args,allowMissing=false)=>{checkEngine();return invoke(args,allowMissing);};
+  const run=args=>runRaw(args).stdout;
   try {
     if(!execute) return receipt;
     client??=createDockerClientState(out);
     receipt.clientState=client; receipt.engine=observeEngine();save();
-    if(expectedEngine && JSON.stringify(receipt.engine)!==JSON.stringify(expectedEngine))throw new Error('Reviewed preparation engine differs');
+    if(expectedEngine && !isDeepStrictEqual(receipt.engine,expectedEngine))throw new Error('Reviewed preparation engine differs');
+    const retention=createImageRetention({engine:receipt.engine,requiredPins,run:runRaw,receipt,save});
+    retention.retainRequired();
     const context=path.join(out,'context'); mkdirSync(context); mkdirSync(path.join(context,'tools')); mkdirSync(path.join(context,'scripts'));
     for(const f of r.tools.files) { const dest=path.join(context,'tools',f.path); ownedParents(path.join(context,'tools'),path.dirname(f.path)); copyFileSync(path.join(r.tools.root,f.path),dest); }
     for(const f of ['runtime-task.mjs','runtime-pom.mjs','runtime-spec.mjs','runtime-cache.mjs','runtime-tools.mjs','runtime-dependencies.mjs','runtime-artifacts.mjs']) copyFileSync(path.join(repo,'scripts',f),path.join(context,'scripts',f));
@@ -211,8 +217,12 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     // Explicit pulls only here, NEVER in Run. Build uses local images/pull=false.
     run(['pull','--platform=linux/amd64',r.baseImage]); if(r.baseImage!==r.nodeImage) run(['pull','--platform=linux/amd64',r.nodeImage]);
     run(['pull','--platform=linux/amd64',mavenImage]);
+    retention.beforeBuild(r.imageTag);
+    receipt.status='BUILD_INTENT';save();
     run(['build','--pull=false','--network=none','--build-arg',`BASE_IMAGE=${r.baseImage}`,'--build-arg',`NODE_IMAGE=${r.nodeImage}`,'--tag',r.imageTag,context]);
-    const image=JSON.parse(run(['image','inspect',r.imageTag]));
+    const retained=retention.afterBuild(r.imageTag);
+    const image=JSON.parse(run(['image','inspect',retained.observedImage.Id]));
+    if(!isDeepStrictEqual({Id:image[0]?.Id,Descriptor:image[0]?.Descriptor??null,RepoDigests:image[0]?.RepoDigests??[],Config:image[0]?.Config},retained.observedImage))throw new Error('Retained built image changed');
     if(image.length!==1 || !/^sha256:[a-f0-9]{64}$/.test(image[0].Id) || image[0].Config.User!=='10001:10001' || image[0].Config.Entrypoint?.length) throw new Error('Image inspect identity missing');
     receipt.imageId=image[0].Id; receipt.imageInspect=image[0];
     receipt.observedImage={Id:image[0].Id,RepoDigests:image[0].RepoDigests??[],Descriptor:image[0].Descriptor??null}; // never substitute config/image ID for manifest identity
@@ -233,7 +243,7 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     receipt.status='COLLECTED_DURABLE'; save();
     // Operators publish production images.lock only after separate exact tools/offline check. Local imageId is NOT invented registry digest.
     if(!/^sha256:[a-f0-9]{64}$/.test('sha256:'+state[0].Id)) throw new Error('Terminal container ID malformed');
-    run(['rm',state[0].Id]); checkEngine(); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
+    run(['rm',state[0].Id]); checkEngine(); retention.verifyAll(); receipt.status='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION'; save(); return receipt;
   } catch(err) { receipt.status='FAILED_RETAIN_AND_RECONCILE'; receipt.error=err.message; if(!publicationFailed)save(); throw err; }
 }
 if (process.argv[1] && fileURLToPath(import.meta.url)===path.resolve(process.argv[1])) {

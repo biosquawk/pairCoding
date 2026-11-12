@@ -10,6 +10,7 @@ import { canonicalDirectory, readPrivate, receiptWriter, syncDirectory } from '.
 import { buildOperatorPlan } from './runtime-operator.mjs';
 import { prepare, validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
 import { prepareLanguageImages } from './runtime-language-prepare.mjs';
+import { createImageRetention, imagePin, imageCommandOutput } from './runtime-image-retention.mjs';
 import { measuredImageEntry } from './runtime-prepare-cli.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hash = b => createHash('sha256').update(b).digest('hex');
@@ -54,7 +55,7 @@ export function verifyPreparedReuse(job, engine) {
   const lockedImage = measuredImageEntry(job.profile.imageLockKey, r.imageTag, receipt.observedImage, receipt.imageId, actual);
   const container = receipt.container;
   check(container && /^[a-f0-9]{64}$/.test(container.Id) && container.State?.Running === false && container.State.ExitCode === 0 && container.Config?.Image === receipt.imageId && container.Config.Labels?.['paircoach.installation'] === r.installationId && container.Config.Labels?.['paircoach.role'] === 'prepare', 'Reuse collected terminal ownership mismatch');
-  check(receipt.commands.some(c => c.exit === 0 && equal(c.argv, ['docker', 'rm', container.Id])), 'Reuse exact-ID cleanup evidence missing');
+  check(receipt.commands.some(c => c.exit === 0 && (equal(c.argv, ['docker', 'rm', container.Id]) || receipt.clientState && c.argv.length === 7 && c.argv[0] === 'docker' && c.argv[1] === '--host' && ['unix:///var/run/docker.sock', 'npipe:////./pipe/docker_engine'].includes(c.argv[2]) && c.argv[3] === '--config' && path.dirname(c.argv[4]) === receipt.clientState.configDirectory && /^command-[0-9]{6}$/.test(path.basename(c.argv[4])) && c.argv[5] === 'rm' && c.argv[6] === container.Id)), 'Reuse exact-ID cleanup evidence missing');
   return { id: job.id, receipt: digestFile(file), request: r, engine: receipt.engine, toolchainHash: identity.toolchainHash, imageId: receipt.imageId, observedImage: receipt.observedImage,
     lockedImage, collectedContainerId: container.Id, cacheRoot: cache, cacheInventory: artifactInventory(cache) };
 }
@@ -122,7 +123,7 @@ export function executeRemainderPlan(plan, dependencies = {}) {
   let publicationFailed = false;
   const save = () => { try { publish(receipt); } catch (e) { publicationFailed = true; throw e; } }; save();
   const endpoint = process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock', configDirectory = path.join(root, 'docker-config');
-  const invoke = (args, absent = false) => {
+  const invoke = (args, absent = false, missingImage = false) => {
     check(Date.now() < deadline, 'Remainder budget exceeded; retain/reconcile');
     check(plan.sourceInventory.every(f => hash(readPrivate(path.join(repo, f.path), 4 * 1024 * 1024).bytes) === f.sha256), 'Frozen remainder source changed; retain/reconcile');
     const issued = beginDockerCommand(clientState), env = issued.env;
@@ -130,10 +131,11 @@ export function executeRemainderPlan(plan, dependencies = {}) {
     const raw = (dependencies.spawnSync ?? spawnSync)('docker', argv, { shell: false, env, encoding: 'utf8', timeout: Math.max(1, Math.min(plan.maxCommandMs, deadline - Date.now())), maxBuffer: 4 * 1024 * 1024 });
     receipt.commands.push({ argv: ['docker', ...argv], startedAt: start, finishedAt: new Date().toISOString(), exit: raw.status, signal: raw.signal, error: raw.error?.message ?? null, stdout: raw.stdout, stderr: raw.stderr }); save();
     finishDockerCommand(clientState, issued);
-    check(!raw.error && !raw.signal && (absent ? raw.status === 1 && /No such (?:object|container)/i.test(raw.stderr) : raw.status === 0), 'Docker operation unknown/failed or old failed resource still exists; retain/reconcile'); return raw;
+    if (missingImage) imageCommandOutput(args, raw, true);
+    else check(!raw.error && !raw.signal && (absent ? raw.status === 1 && /No such (?:object|container)/i.test(raw.stderr) : raw.status === 0), 'Docker operation unknown/failed or old failed resource still exists; retain/reconcile'); return raw;
   };
   const engineArgs = ['info', '--format', '{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
-  const run = args => { check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed'); return invoke(args); };
+  const run = (args, missingImage = false) => { check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed'); return invoke(args, false, missingImage); };
   try {
     clientState = createDockerClientState(root); receipt.clientState = clientState; save();
     check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed before mutation');
@@ -144,6 +146,13 @@ export function executeRemainderPlan(plan, dependencies = {}) {
       const values = JSON.parse(run(['image', 'inspect', reused.imageId]).stdout);
       check(values.length === 1 && values[0].Id === reused.imageId && values[0].Config?.User === '10001:10001' && !values[0].Config.Entrypoint?.length && isDeepStrictEqual({ Id: values[0].Id, Descriptor: values[0].Descriptor ?? null, RepoDigests: values[0].RepoDigests ?? [] }, reused.observedImage), 'Reused image identity/manifest changed');
     }
+    const requiredPins = plan.reuse.map(reused => {
+      const leaf = json(reused.receipt.file);
+      check(leaf.imageInspect?.Id === reused.imageId && isDeepStrictEqual({ Id: leaf.imageInspect.Id, Descriptor: leaf.imageInspect.Descriptor ?? null, RepoDigests: leaf.imageInspect.RepoDigests ?? [] }, reused.observedImage), 'Prior full inspect proof differs');
+      return imagePin(plan.engine, leaf.imageInspect, reused.receipt.file);
+    });
+    const retention = createImageRetention({ engine: plan.engine, requiredPins, run, receipt, save });
+    retention.retainRequired();
     make(path.join(root, 'stage'));
     // Reuse frozen public downloaded bytes, not a second network acquisition.
     for (const file of plan.staging.files) {
@@ -156,16 +165,24 @@ export function executeRemainderPlan(plan, dependencies = {}) {
       materialize(job.request.project.root, job.assets);
       put(path.join(root, 'requests', job.id + '.json'), Buffer.from(JSON.stringify(job.request, null, 2) + '\n'));
       const item = { id: job.id, status: 'PREPARE_INTENT' }; receipt.jobs.push(item); save();
-      const prepared = (dependencies.prepare ?? prepare)(job.request, true, deadline, plan.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) });
+      const prepared = (dependencies.prepare ?? prepare)(job.request, true, deadline, plan.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) }, retention.pins());
       check(prepared.status === 'PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION' && equal(prepared.request, job.request) && equal(prepared.engine, plan.engine) && prepared.toolchainHash === resolvePreparedToolchainIdentity(job.request).toolchainHash, 'Remainder prepared correlation differs');
       check(equal(json(path.join(job.request.outputRoot, 'receipt.json')), prepared), 'New durable prepared receipt differs');
+      retention.add(imagePin(plan.engine, prepared.imageInspect, path.join(job.request.outputRoot, 'receipt.json')));
+      check(Array.isArray(prepared.imageRetention?.pins), 'Producer retained prior-pin set missing');
+      for (const entry of prepared.imageRetention.pins) retention.add(entry.pin);
       item.prepareReceipt = path.join(job.request.outputRoot, 'receipt.json'); item.status = 'PREPARED_TOOLS_CHECKED_OFFLINE_DEFERRED'; save();
     }
-    (dependencies.prepareLanguageImages ?? prepareLanguageImages)(root, json(path.join(repo, 'runtimes/production-inputs.lock.json')), { run, save, receipt }, plan.languageKinds);
+    (dependencies.prepareLanguageImages ?? prepareLanguageImages)(root, json(path.join(repo, 'runtimes/production-inputs.lock.json')), { run: (args, ...rest) => {
+      if (args[0] !== 'build') return run(args, ...rest);
+      const tag = args[args.indexOf('--tag') + 1]; retention.beforeBuild(tag);
+      const result = run(args); retention.afterBuild(tag); return result;
+    }, save, receipt }, plan.languageKinds);
     // Every prior receipt/cache byte is re-proven after new preparation; never rewrite old evidence.
     const old = json(plan.options.previousPlanFile);
     const reusedAfter = previousIds.map(id => verifyPreparedReuse(old.jobs.find(j => j.id === id), plan.engine));
     check(equal(reusedAfter, plan.reuse), 'Prior reuse evidence/cache bytes changed during remainder');
+    retention.verifyAll();
     receipt.status = 'REMAINDER_PREPARE_ONLY_COMPLETE_OFFLINE_DEFERRED_NOT_PRODUCT_ACCEPTANCE'; save(); return receipt;
   } catch (e) { receipt.status = 'FAILED_RETAIN_AND_RECONCILE'; receipt.error = e.message; if (!publicationFailed) save(); throw e; }
 }

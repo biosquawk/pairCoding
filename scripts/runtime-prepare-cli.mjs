@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { canonicalDirectory, readPrivate, receiptWriter, stamp, syncDirectory } from './runtime-files.mjs';
 import { dependencyHash } from './runtime-dependencies.mjs';
 import { validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, prepare, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
+import { createImageRetention, imagePin, imageCommandOutput } from './runtime-image-retention.mjs';
 import { stageInputs } from './runtime-stage-inputs.mjs';
 import { prepareLanguageImages } from './runtime-language-prepare.mjs';
 
@@ -285,7 +286,7 @@ async function artifacts(plan, prepared, language, run, api, lock) {
 }
 /** Injection is a developer seam, not an argv/env option. Production always uses the real bounded
  * producers and child transport. Callers must never present injected UNIT results as live proof. */
-export async function executePublicPreparePlan(plan, dependencies = {}) {
+export async function executePublicPreparePlan(plan, dependencies = {}, requiredPins = []) {
   const api = await accepted();
   const rebuilt = await buildPublicPreparePlan(['--project', plan.project, '--profile', plan.profile.id, '--output', plan.output]);
   check(equal(rebuilt, plan), 'Preparation plan/source changed before execution');
@@ -299,25 +300,28 @@ export async function executePublicPreparePlan(plan, dependencies = {}) {
   const save = () => { try { publish(receipt); } catch (e) { publicationFailed = true; throw e; } }; save();
   const budget = () => check(Date.now() < deadline, 'Public preparation time budget exceeded; retain/reconcile');
   const engineArgs = ['info', '--format', '{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
-  const invoke = args => {
+  const invoke = (args, allowMissing = false) => {
     budget(); const issued = beginDockerCommand(clientState), env = issued.env;
     const argv = ['--host', endpoint, '--config', issued.configDirectory, ...args], began = new Date().toISOString();
     const raw = (dependencies.spawnSync ?? spawnSync)('docker', argv, { shell: false, env, encoding: 'utf8', timeout: Math.max(1, Math.min(plan.limits.maxCommandMs, deadline - Date.now())), maxBuffer: 4 * 1024 * 1024 });
     receipt.commands.push({ argv: ['docker', ...argv], endpoint, startedAt: began, finishedAt: new Date().toISOString(), exit: raw.status, signal: raw.signal, error: raw.error?.message ?? null, stdout: raw.stdout, stderr: raw.stderr }); save();
     finishDockerCommand(clientState, issued); // never reuse command credential config
-    check(!raw.error && !raw.signal && raw.status === 0, 'Unknown/failed Docker operation; retain exact receipts/resources and reconcile before retry'); return raw;
+    if (allowMissing) imageCommandOutput(args, raw, true);
+    else check(!raw.error && !raw.signal && raw.status === 0, 'Unknown/failed Docker operation; retain exact receipts/resources and reconcile before retry'); return raw;
   };
   const observeEngine = () => {
     const e = JSON.parse(invoke(engineArgs).stdout);
     check(e && Object.keys(e).sort().join(',') === 'Architecture,ID,OSType,ServerVersion' && Object.values(e).every(v => typeof v === 'string' && v.length > 0 && v.length <= 256) && e.OSType === 'linux' && ['amd64', 'x86_64'].includes(e.Architecture), 'Unsupported/unconfirmed actual engine identity'); return e;
   };
-  const run = args => {
-    check(equal(observeEngine(), receipt.engine), 'Docker engine changed; retain/reconcile'); return invoke(args);
+  const run = (args, allowMissing = false) => {
+    check(equal(observeEngine(), receipt.engine), 'Docker engine changed; retain/reconcile'); return invoke(args, allowMissing);
   };
   try {
     clientState = createDockerClientState(plan.output); receipt.clientState = clientState; save();
     make(path.join(plan.output, 'jobs'));
     receipt.engine = observeEngine(); run.engine = receipt.engine; save();
+    const retention = createImageRetention({ engine: receipt.engine, requiredPins, run, receipt, save });
+    retention.retainRequired();
     await assertOriginal(plan, api);
     copySource(plan);
     await assertOriginal(plan, api); // complete source/settings identity fences around capture
@@ -326,20 +330,29 @@ export async function executePublicPreparePlan(plan, dependencies = {}) {
     receipt.status = 'CAPTURED_RAW_NOT_ACK'; save(); budget();
     await (dependencies.stageInputs ?? stageInputs)(path.join(plan.output, 'assets'));
     budget(); check(equal(observeEngine(), receipt.engine), 'Docker engine changed during acquisition');
-    const produced = (dependencies.prepare ?? prepare)(plan.request, true, deadline, receipt.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) });
+    const produced = (dependencies.prepare ?? prepare)(plan.request, true, deadline, receipt.engine, { endpoint, configDirectory, clientState, ...(dependencies.spawnSync ? { spawnSync: dependencies.spawnSync } : {}) }, retention.pins());
     receipt.prepareReceipt = path.join(plan.preparedRuntime, 'receipt.json'); save();
     const prepared = json(receipt.prepareReceipt);
     check(equal(prepared, produced), 'Actual durable prepared receipt differs from producer result');
+    check(equal(prepared.engine, receipt.engine) && prepared.imageInspect?.Id === prepared.imageId, 'Actual prepared image/engine correlation differs');
+    retention.add(imagePin(receipt.engine, prepared.imageInspect, receipt.prepareReceipt));
+    check(Array.isArray(prepared.imageRetention?.pins), 'Producer retained prior-pin set missing');
+    for (const entry of prepared.imageRetention.pins) retention.add(entry.pin);
     const lock = json(path.join(installed, 'runtimes/production-inputs.lock.json'));
     if (plan.languageRequired !== null) {
       const kinds = plan.profile.language.provider === 'jdt' ? ['java'] : ['python'];
-      (dependencies.prepareLanguageImages ?? prepareLanguageImages)(path.join(plan.output, 'assets'), lock, { run, save, receipt }, kinds);
+      (dependencies.prepareLanguageImages ?? prepareLanguageImages)(path.join(plan.output, 'assets'), lock, { run: (args, ...rest) => {
+        if (args[0] !== 'build') return run(args, ...rest);
+        const tag = args[args.indexOf('--tag') + 1]; retention.beforeBuild(tag);
+        const result = run(args); retention.afterBuild(tag); return result;
+      }, save, receipt }, kinds);
     }
     budget(); await assertOriginal(plan, api);
     // Missing OCI/evidence is an explicit NOTREADY, never a synthetic digest or usable config.
     let generated;
     try { generated = await artifacts(plan, prepared, receipt.language, run, api, lock); }
     catch (e) { receipt.status = 'NOTREADY'; receipt.problem = e.message; save(); return { schemaVersion: 1, status: receipt.status, output: plan.output, receipt: path.join(plan.output, 'receipt.json'), preparedRuntime: plan.preparedRuntime, runtimeConfig: null, problem: e.message }; }
+    retention.verifyAll();
     receipt.measuredArtifacts = generated; receipt.status = 'MEASURED_ARTIFACTS_PENDING_PUBLICATION'; save();
     const bytes = value => Buffer.from(JSON.stringify(value, null, 2) + '\n');
     put(path.join(plan.output, 'catalog.json'), bytes(generated.catalog));
