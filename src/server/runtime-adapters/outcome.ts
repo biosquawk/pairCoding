@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { decodeSpec } from '../../../scripts/runtime-spec.mjs';
 import { constants } from 'node:fs';
 import { open, lstat, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
@@ -39,6 +40,24 @@ function collectedFilesRoot(plan: ExecutionPlan): string | null {
   if (path.basename(run) !== runId || input.immutableDirectory !== path.join(run, 'input') || input.buildDirectory !== path.join(run, 'build') || input.artifactsDirectory !== path.join(run, 'artifacts')) return null;
   return path.join(run, 'collected', 'files');
 }
+/** Opt-in belongs to the immutable adapter plan, never XML shape, paths, or tool claims
+ * from the collection. Keep the strict parser for all other families/invalid pins. */
+function usesNodeJUnit(plan: ExecutionPlan): boolean {
+  const { profile, ownership, input, lockedImage, command } = plan;
+  if (profile.adapterFamily !== 'node' && profile.adapterFamily !== 'typescript') return false;
+  try {
+    if (ownership.profileId !== profile.id || input.identity.profileId !== profile.id ||
+        lockedImage.key !== profile.imageLockKey || lockedImage.imageId !== ownership.imageId ||
+        !/^sha256:[a-f0-9]{64}$/.test(lockedImage.imageId) || !/^sha256:[a-f0-9]{64}$/.test(lockedImage.digest)) return false;
+    const required = profile.adapterFamily === 'typescript' ? ['node', 'typescript'] : ['node'];
+    if (required.some(name => !profile.expectedTools.some(t => t.name === name)) ||
+        profile.expectedTools.some(t => !lockedImage.tools.some(actual => actual.name === t.name && actual.version === t.version))) return false;
+    if (command.executable !== '/opt/paircoach/node/bin/node' || command.args.length !== 2 || command.args[0] !== '/opt/paircoach/runtime-task.mjs') return false;
+    const spec = decodeSpec(command.args[1]);
+    return spec.family === profile.adapterFamily && spec.runId === ownership.runId &&
+      spec.manifestSha256 === input.identity.manifestSha256 && spec.mode === plan.mode;
+  } catch { return false; }
+}
 export async function interpretOutcome(plan: ExecutionPlan, exit: ExecutionExit, artifacts: CollectedArtifacts, read: ArtifactReader = readArtifact): Promise<AdapterOutcome> {
   const result = base();
   const sameHandle = exit.handle.runId === plan.ownership.runId && artifacts.handle.runId === exit.handle.runId && artifacts.handle.opaqueId === exit.handle.opaqueId;
@@ -51,6 +70,7 @@ export async function interpretOutcome(plan: ExecutionPlan, exit: ExecutionExit,
   const files = artifacts.files.filter(f => f.kind === 'JUNIT_XML');
   if (!files.length) return result; // exit0 is NOT test proof
   if (files.length > 64 || new Set(files.map(f => f.path)).size !== files.length) return result;
+  const dialect = usesNodeJUnit(plan) ? 'node' : 'strict';
   const sum: JUnitCounts = { count: 0, failures: 0, errors: 0, skipped: 0 }; let total = 0;
   try {
     for (const file of files) {
@@ -59,7 +79,7 @@ export async function interpretOutcome(plan: ExecutionPlan, exit: ExecutionExit,
       if (!file.freshForRun || !/\.xml$/i.test(file.path) || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || file.bytes > REPORT_LIMIT || (total += file.bytes) > 16*1024*1024) return result;
       const bytes = await read(file.path, REPORT_LIMIT);
       if (bytes.length !== file.bytes || createHash('sha256').update(bytes).digest('hex') !== file.sha256) return result;
-      const parsed = parseJUnit(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+      const parsed = parseJUnit(new TextDecoder('utf-8', { fatal: true }).decode(bytes), dialect);
       if (!parsed) return result;
       for (const key of Object.keys(sum) as (keyof JUnitCounts)[]) { sum[key] += parsed[key]; if (!Number.isSafeInteger(sum[key])) return result; }
     }
