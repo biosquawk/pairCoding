@@ -12,12 +12,13 @@ function engineIdentity(e) {
   check(exact(e, ['ID', 'ServerVersion', 'OSType', 'Architecture']) && Object.values(e).every(v => typeof v === 'string' && v.length > 0 && v.length <= 256) && e.OSType === 'linux' && ['amd64', 'x86_64'].includes(e.Architecture), 'retention engine identity required');
   return e;
 }
-function observed(image) {
+function observed(image, expectedDigest = null) {
   check(image && sha.test(image.Id) && Array.isArray(image.RepoDigests) && image.RepoDigests.length <= 64 && image.RepoDigests.every(s => typeof s === 'string' && /^[a-z0-9][a-z0-9._/:+-]*@sha256:[a-f0-9]{64}$/.test(s)), 'retention actual immutable image/RepoDigest required');
   const descriptor = image.Descriptor ?? null;
   if (descriptor !== null) check(descriptor && !Array.isArray(descriptor) && sha.test(descriptor.digest) && Number.isSafeInteger(descriptor.size) && descriptor.size > 0 && media.includes(descriptor.mediaType), 'retention genuine Descriptor malformed');
-  const digest = descriptor?.digest ?? image.RepoDigests[0]?.split('@')[1];
-  check(digest && (!image.RepoDigests.length || image.RepoDigests.some(s => s.endsWith('@' + digest))), 'retention genuine manifest/index evidence required; Id is not a digest inference');
+  const repoDigests = [...new Set(image.RepoDigests.map(s => s.split('@')[1]))];
+  const digest = descriptor?.digest ?? (repoDigests.length === 1 ? repoDigests[0] : null);
+  check(digest && (!expectedDigest || digest === expectedDigest) && image.RepoDigests.every(s => s.endsWith('@' + digest)), 'retention genuine manifest/index evidence required; Id is not a digest inference');
   check(image.Config && !Array.isArray(image.Config) && image.Config.User === '10001:10001' && (image.Config.Entrypoint === null || image.Config.Entrypoint === undefined || Array.isArray(image.Config.Entrypoint) && image.Config.Entrypoint.length === 0), 'retention nonroot/config identity required');
   const projection = { Id: image.Id, Descriptor: descriptor, RepoDigests: image.RepoDigests, Config: image.Config };
   check(Buffer.byteLength(JSON.stringify(projection)) <= 65536, 'retention image proof byte bound');
@@ -26,16 +27,24 @@ function observed(image) {
 export function imagePin(engine, image, source) {
   engineIdentity(engine);
   check(typeof source === 'string' && source.length > 0 && source.length <= 512 && !/[\x00-\x1f\x7f]/.test(source), 'retention bounded explicit provenance required');
-  return clone({ engine, observedImage: observed(image).projection, source });
+  const actual = observed(image);
+  return clone({ engine, observedImage: actual.projection, manifestDigest: actual.digest, source });
 }
 function validatePin(pin, engine) {
-  check(exact(pin, ['engine', 'observedImage', 'source']) && exact(pin.observedImage, ['Id', 'Descriptor', 'RepoDigests', 'Config']), 'retention exact pin fields required');
+  check(exact(pin, ['engine', 'observedImage', 'manifestDigest', 'source']) && exact(pin.observedImage, ['Id', 'Descriptor', 'RepoDigests', 'Config']), 'retention exact pin fields required');
   const p = imagePin(pin.engine, pin.observedImage, pin.source);
+  check(p.manifestDigest === pin.manifestDigest, 'retention original genuine manifest proof changed');
   check(isDeepStrictEqual(p.engine, engine), 'retention prior pin belongs to another engine');
   return p;
 }
+export function assertImagePin(pin, actual) {
+  const p = validatePin(pin, engineIdentity(pin.engine)), current = observed(actual, p.manifestDigest).projection;
+  const immutable = image => ({ Id: image.Id, Descriptor: image.Descriptor, Config: image.Config });
+  check(isDeepStrictEqual(immutable(current), immutable(p.observedImage)), 'retention exact manifest/config identity changed');
+  return true;
+}
 export function retentionReference(pin) {
-  const p = validatePin(pin, engineIdentity(pin.engine)), digest = observed(p.observedImage).digest;
+  const p = validatePin(pin, engineIdentity(pin.engine)), digest = p.manifestDigest;
   // Explicit field order, not JSON source key order; full length in every identity component.
   const namespace = createHash('sha256').update(JSON.stringify(['ID','ServerVersion','OSType','Architecture'].map(k => p.engine[k]))).digest('hex');
   return `paircoach/retained-${namespace}/${p.observedImage.Id.slice(7)}:${digest.slice(7)}`;
@@ -67,7 +76,7 @@ export function createImageRetention({ engine, requiredPins = [], run, receipt, 
     check(Array.isArray(values) && values.length === 1, 'retention inspect must contain exactly one image');
     return observed(values[0]).projection;
   };
-  const same = (actual, expected) => check(isDeepStrictEqual(actual, expected), 'retention exact manifest/config identity changed');
+  const same = (actual, expected) => assertImagePin(imagePin(engine, expected, 'retained immutable identity'), actual);
   const add = pin => {
     const p = validatePin(pin, engine), prior = pins.find(v => v.pin.observedImage.Id === p.observedImage.Id);
     if (prior) { same(p.observedImage, prior.pin.observedImage); return prior; }

@@ -47,14 +47,16 @@ export function dockerModel(actualEngine=engine) {
  const resolve=ref=>images.get(ref)??images.get(refs.get(ref));
  const ok=stdout=>({status:0,signal:null,stdout:typeof stdout==='string'?stdout:JSON.stringify(stdout),stderr:''});
  const missing=ref=>({status:1,signal:null,stdout:'[]\n',stderr:`Error response from daemon: No such image: ${ref}\n`});
- const model={images,refs,containers,calls,builds,removed,events,resolve,actualEngine,
+ const model={images,refs,containers,calls,builds,removed,events,resolve,actualEngine,nameDerived:false,aliasReverse:false,
   seed:(tag,value)=>{images.set(value.Id,copy(value));refs.set(tag,value.Id);return value;},
   set hook(fn){hook=fn;},
   command(args){
    calls.push(copy(args));events.push(args.join(' '));const intercepted=hook(args,model);if(intercepted)return intercepted;
    if(args[0]==='info')return ok(actualEngine);
    if(args[0]==='pull')return ok('UNIT local model only');
-   if(args[0]==='image'&&args[1]==='inspect'){const v=resolve(args[2]);return v?ok([copy(v)]):missing(args[2]);}
+   if(args[0]==='image'&&args[1]==='inspect'){const v=resolve(args[2]);if(!v)return missing(args[2]);const actual=copy(v);
+    if(model.nameDerived){actual.RepoDigests=[...new Set([...refs].filter(([,id])=>id===v.Id).map(([ref])=>ref.slice(0,ref.lastIndexOf(':'))+'@'+v.Descriptor.digest))];if(model.aliasReverse)actual.RepoDigests.reverse();}
+    return ok([actual]);}
    if(args[0]==='tag'){const value=resolve(args[1]);if(!value)return missing(args[1]);assert.equal(refs.has(args[2]),false,'never overwrite existing tag');refs.set(args[2],value.Id);return ok('');}
    if(args[0]==='build'){
     const tag=args[args.indexOf('--tag')+1],prior=refs.get(tag),next=image(++counter);

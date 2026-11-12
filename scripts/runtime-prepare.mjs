@@ -8,7 +8,7 @@ import path from 'node:path';
 import { dependencyHash } from './runtime-dependencies.mjs';
 import { literalPath } from './runtime-spec.mjs';
 import { fileURLToPath } from 'node:url';
-import { createImageRetention, imageCommandOutput } from './runtime-image-retention.mjs';
+import { createImageRetention, imageCommandOutput, assertImagePin } from './runtime-image-retention.mjs';
 import { isDeepStrictEqual } from 'node:util';
 import { receiptWriter, canonicalDirectory, readPrivate, stamp } from './runtime-files.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
@@ -222,7 +222,7 @@ export function prepare(request,execute=false,deadline=Infinity,expectedEngine=n
     run(['build','--pull=false','--network=none','--build-arg',`BASE_IMAGE=${r.baseImage}`,'--build-arg',`NODE_IMAGE=${r.nodeImage}`,'--tag',r.imageTag,context]);
     const retained=retention.afterBuild(r.imageTag);
     const image=JSON.parse(run(['image','inspect',retained.observedImage.Id]));
-    if(!isDeepStrictEqual({Id:image[0]?.Id,Descriptor:image[0]?.Descriptor??null,RepoDigests:image[0]?.RepoDigests??[],Config:image[0]?.Config},retained.observedImage))throw new Error('Retained built image changed');
+    assertImagePin(retained,image[0]);
     if(image.length!==1 || !/^sha256:[a-f0-9]{64}$/.test(image[0].Id) || image[0].Config.User!=='10001:10001' || image[0].Config.Entrypoint?.length) throw new Error('Image inspect identity missing');
     receipt.imageId=image[0].Id; receipt.imageInspect=image[0];
     receipt.observedImage={Id:image[0].Id,RepoDigests:image[0].RepoDigests??[],Descriptor:image[0].Descriptor??null}; // never substitute config/image ID for manifest identity

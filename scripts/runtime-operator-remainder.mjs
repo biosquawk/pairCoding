@@ -10,7 +10,7 @@ import { canonicalDirectory, readPrivate, receiptWriter, syncDirectory } from '.
 import { buildOperatorPlan } from './runtime-operator.mjs';
 import { prepare, validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
 import { prepareLanguageImages } from './runtime-language-prepare.mjs';
-import { createImageRetention, imagePin, imageCommandOutput } from './runtime-image-retention.mjs';
+import { createImageRetention, imagePin, imageCommandOutput, assertImagePin } from './runtime-image-retention.mjs';
 import { measuredImageEntry } from './runtime-prepare-cli.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hash = b => createHash('sha256').update(b).digest('hex');
@@ -140,17 +140,17 @@ export function executeRemainderPlan(plan, dependencies = {}) {
     clientState = createDockerClientState(root); receipt.clientState = clientState; save();
     check(equal(JSON.parse(invoke(engineArgs).stdout), plan.engine), 'Remainder engine changed before mutation');
     invoke(['container', 'inspect', plan.failure.exactContainerId], true); // NO rm/force/prune/cleanup authority here.
-    // Reused image existence/config AND manifest proof are re-inspected; cache bytes stay read-only.
-    // JSON object key order is not identity; exact fields/types and array order still are.
-    for (const reused of plan.reuse) {
-      const values = JSON.parse(run(['image', 'inspect', reused.imageId]).stdout);
-      check(values.length === 1 && values[0].Id === reused.imageId && values[0].Config?.User === '10001:10001' && !values[0].Config.Entrypoint?.length && isDeepStrictEqual({ Id: values[0].Id, Descriptor: values[0].Descriptor ?? null, RepoDigests: values[0].RepoDigests ?? [] }, reused.observedImage), 'Reused image identity/manifest changed');
-    }
+    // Original receipt/config/manifest snapshot remains byte-bound; local RepoDigest names
+    // can grow/reorder/disappear on our own tags. Fresh digest proof and immutable fields cannot.
     const requiredPins = plan.reuse.map(reused => {
       const leaf = json(reused.receipt.file);
       check(leaf.imageInspect?.Id === reused.imageId && isDeepStrictEqual({ Id: leaf.imageInspect.Id, Descriptor: leaf.imageInspect.Descriptor ?? null, RepoDigests: leaf.imageInspect.RepoDigests ?? [] }, reused.observedImage), 'Prior full inspect proof differs');
       return imagePin(plan.engine, leaf.imageInspect, reused.receipt.file);
     });
+    for (const pin of requiredPins) {
+      const values = JSON.parse(run(['image', 'inspect', pin.observedImage.Id]).stdout);
+      check(Array.isArray(values) && values.length === 1 && assertImagePin(pin, values[0]), 'Reused image identity/manifest changed');
+    }
     const retention = createImageRetention({ engine: plan.engine, requiredPins, run, receipt, save });
     retention.retainRequired();
     make(path.join(root, 'stage'));

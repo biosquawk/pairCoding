@@ -4,7 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import path from 'node:path';
-import { fixture, dockerModel, put, json, hash } from './fixture.mjs';
+import { fixture, dockerModel as baseDockerModel, put, json, hash } from './fixture.mjs';
+const dockerModel = (...args) => { const model = baseDockerModel(...args); model.nameDerived = true; return model; };
 const configAbsent = p => assert.equal(fs.existsSync(p.runtimeConfig),false);
 async function publicPlan(f,name) {
  const project=f.project(name),output=path.join(f.root,name+'-output');

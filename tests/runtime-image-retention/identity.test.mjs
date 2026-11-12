@@ -27,7 +27,7 @@ test('UNIT lifetime model: explicit prior pins retained BEFORE mutable retarget 
 });
 test('UNIT foreign/conflicting deterministic retention ref never overwritten or followed by build',t=>{
  const a=image('old'),p=imagePin(engine,a,'UNIT actual leaf'),f=context(t,[p]);f.m.seed(tag,a);f.m.seed(retentionReference(p),image('foreign'));
- assert.throws(()=>f.c.retainRequired(),/identity changed/);assert.equal(f.m.calls.some(a=>['tag','build','create'].includes(a[0])),false);
+ assert.throws(()=>f.c.retainRequired(),/retention genuine manifest/);assert.equal(f.m.calls.some(a=>['tag','build','create'].includes(a[0])),false);
  assert.throws(()=>f.c.beforeBuild(tag),/stopped/);
 });
 test('UNIT unknown tag may have happened: durable intent retained, no read retry or later mutation',t=>{
@@ -46,7 +46,7 @@ const mutations=[
  ['descriptor lost field',a=>{delete a.Descriptor.annotations;}],
  ['descriptor nested array order',a=>{a.Descriptor.annotations.b.reverse();}],
  ['descriptor no proof',a=>{a.Descriptor=null;}],
- ['RepoDigests array change',a=>{a.RepoDigests=['repo@'+a.Descriptor.digest];}],
+ ['RepoDigests wrong manifest digest',a=>{a.RepoDigests=['repo@sha256:'+'f'.repeat(64)];}],
  ['RepoDigests object not array',a=>{a.RepoDigests={};}],
  ['Config exact nested field',a=>{a.Config.Labels.kind='foreign';}],
  ['Config added field',a=>{a.Config.WorkingDir='/other';}],
@@ -59,9 +59,9 @@ for(const [name,mutate] of mutations)test('UNIT reject changed exact identity: '
  const a=image('one'),f=context(t),p=imagePin(engine,a,'UNIT old exact leaf');f.m.seed(tag,a);f.c.add(p);mutate(f.m.images.get(a.Id));
  const count=f.m.calls.filter(a=>a[0]==='tag').length;assert.throws(()=>f.c.verifyAll());assert.equal(f.m.calls.filter(a=>a[0]==='tag').length,count);assert.equal(f.m.builds.length,0);
 });
-test('UNIT RepoDigest-only proof allowed; order/type/field changes are not normalized',t=>{
- const a=image('repo');a.Descriptor=null;a.RepoDigests=['repo@sha256:'+'d'.repeat(64),'another@sha256:'+'e'.repeat(64)];
- const f=context(t);f.m.seed(tag,a);f.c.add(imagePin(engine,a,'UNIT genuine RepoDigest'));f.m.images.get(a.Id).RepoDigests.reverse();assert.throws(()=>f.c.verifyAll(),/identity changed/);
+test('UNIT RepoDigest-only proof anchored to original genuine digest; alias order allowed, arbitrary new digest denied',t=>{
+ const a=image('repo');a.Descriptor=null;a.RepoDigests=['repo@sha256:'+'d'.repeat(64),'another@sha256:'+'d'.repeat(64)];
+ const f=context(t);f.m.seed(tag,a);f.c.add(imagePin(engine,a,'UNIT genuine RepoDigest'));f.m.images.get(a.Id).RepoDigests.reverse();f.c.verifyAll();f.m.images.get(a.Id).RepoDigests[0]='foreign@sha256:'+'e'.repeat(64);assert.throws(()=>f.c.verifyAll(),/manifest/);
 });
 test('UNIT all explicit pins/engine/count validated BEFORE any command or state publication',t=>{
  const a=image('pin'),p=imagePin(engine,a,'UNIT leaf'),root=privateRoot(t);let writes=0,calls=0;
@@ -79,4 +79,17 @@ test('UNIT known missing prior ID is fatal, never rebuilt or substituted from cu
  const old=image('missing'),f=context(t,[imagePin(engine,old,'UNIT known missing leaf')]);f.m.seed(tag,image('present-spring'));
  assert.throws(()=>f.c.retainRequired(),/failed\/unknown/);assert.equal(f.m.calls.some(a=>['tag','build','create','pull'].includes(a[0])),false);
  assert.throws(()=>f.c.beforeBuild(tag),/stopped/);
+});
+test('UNIT own alias growth/order and old mutable repository removal preserve exact Id/Descriptor/Config',t=>{
+ const a=image('aliases'),f=context(t);f.m.nameDerived=true;f.m.seed(tag,a);f.c.beforeBuild(tag);
+ const before=f.c.pins()[0];assert.equal(before.manifestDigest,a.Descriptor.digest);assert.equal(before.observedImage.RepoDigests.length,1);
+ f.m.aliasReverse=true;build(f);f.c.verifyAll();const actual=JSON.parse(f.m.command(['image','inspect',a.Id]).stdout)[0];
+ assert.equal(actual.RepoDigests.length,1,'old mutable repository disappeared, retained alias remains');assert.ok(actual.RepoDigests[0].startsWith('paircoach/retained-'));
+ assert.equal(actual.Id,a.Id);assert.deepEqual(actual.Descriptor,a.Descriptor);assert.deepEqual(actual.Config,a.Config);
+});
+test('UNIT no Descriptor: stable genuine digest through own alias growth/removal; empty/ambiguous/different digests rejected',t=>{
+ const a=image('no-descriptor');a.Descriptor=null;a.RepoDigests=['original@sha256:'+'a'.repeat(64)];const f=context(t),p=imagePin(engine,a,'UNIT captured genuine RepoDigest');
+ f.m.seed(tag,a);f.c.add(p);const live=f.m.images.get(a.Id);live.RepoDigests=['retained@'+p.manifestDigest,'other@'+p.manifestDigest];f.c.verifyAll();
+ live.RepoDigests=['retained@'+p.manifestDigest];f.c.verifyAll();live.RepoDigests=[];assert.throws(()=>f.c.verifyAll(),/manifest/);
+ for(const digests of [[],['a@sha256:'+'a'.repeat(64),'b@sha256:'+'b'.repeat(64)]])assert.throws(()=>imagePin(engine,{...a,RepoDigests:digests},'UNIT ambiguous'),/manifest/);
 });
