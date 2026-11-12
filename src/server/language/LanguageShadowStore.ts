@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DocumentStamp } from '../../shared/language-v2';
 import { LANGUAGE_LIMITS } from '../../shared/language-v2';
 import { assertPrivateLanguageDirectory, assertRealDirectory, readRegular, sha256 } from './LanguageProcessJournal';
+import { readLanguageFilesBounded } from './LanguageBoundedRead';
 import { planLanguageShadowDelta, type LanguageShadowDeltaPlan } from './LanguageShadowDeltaPlan';
 import { NodeLanguageJournalDurability, type LanguageJournalDurability } from './LanguageJournalDurability';
 
@@ -62,6 +63,8 @@ export interface LanguageShadow {
 type Tree = { files: ShadowFile[]; directories: string[]; contents: Map<string, Buffer> };
 /** Backend-only unforgeable capability; no paths/readiness/phase are exposed before consumption. */
 export interface UnlaunchedLanguageStage { readonly kind: 'UNLAUNCHED_LANGUAGE_STAGE' }
+/** Store-local one-use captured bytes only, never a freshness/owner/readiness proof. */
+export interface UnlaunchedLanguageReadStage { readonly kind: 'UNLAUNCHED_LANGUAGE_READ_STAGE' }
 /** Trusted developer IO seam; production uses real asynchronous native write AND file fsync. */
 export interface LanguageShadowAsyncIO {
   open(path: string, flags: number, mode: number): Promise<number>;
@@ -98,6 +101,7 @@ const byPath = (a: ShadowFile, b: ShadowFile): number => a.path < b.path ? -1 : 
  * Caller serializes Workspace/overlay transactions and retires on failure. No original writes, no autosave.
  */
 export class LanguageShadowStore {
+  private readStages = new WeakMap<UnlaunchedLanguageReadStage, { authority: LanguageSnapshotAuthority; captured: ReturnType<LanguageShadowStore['capture']> }>();
   private stages = new WeakMap<UnlaunchedLanguageStage, StagedTree>();
   private records = new Map<string, RecordState>();
   constructor(readonly ownedRoot: string, private readonly codec: LanguageShadowCodec,
@@ -116,32 +120,72 @@ export class LanguageShadowStore {
     finally { stream.closeSync(); }
     return names.sort();
   }
-  private scan(root: string, dependencies = false, privateCopy = false): Tree {
+  /** One enumeration policy for sync proofs and initial staged READ discovery. The visitor
+   * changes byte acquisition only; every path/type/collision/exclusion/global bound stays here. */
+  private inventory(root: string, dependencies: boolean, privateCopy: boolean,
+    file: (path: string, full: string, stat: import('node:fs').Stats) => void,
+    directory: (path: string) => void = () => {}): string[] {
     assertRealDirectory(root); const rootIdentity = lstatSync(root, { bigint: true });
-    const files: ShadowFile[] = [], directories: string[] = [], contents = new Map<string, Buffer>();
-    let entries = 0, total = 0; const seen = new Set<string>();
+    const directories: string[] = []; let entries = 0; const seen = new Set<string>();
+    directory(root);
     const walk = (dir: string, prefix: string, depth: number): void => {
       if (depth > 32) throw new Error('Language inventory depth limit');
       for (const name of this.list(dir, 16000 - entries)) {
         if (++entries > 16000) throw new Error('Language inventory entry limit');
         const path = prefix ? `${prefix}/${name}` : name; this.path(path);
-        const stat = lstatSync(join(dir, name));
+        const full = join(dir, name), stat = lstatSync(full);
         if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) throw new Error('Unsafe language inventory link/type');
         const folded = path.normalize('NFC').toLowerCase(); if (seen.has(folded)) throw new Error('Language inventory case/Unicode collision'); seen.add(folded);
         if (!privateCopy && !dependencies && !this.included(path)) continue;
         if (dependencies && secret(name)) throw new Error('Secret/unsafe dependency artifact');
-        if (stat.isDirectory()) { directories.push(path); walk(join(dir, name), path, depth + 1); }
-        else {
-          const bytes = readRegular(join(dir, name), dependencies || privateCopy ? 64 * 1024 * 1024 : 4 * 1024 * 1024);
-          total += bytes.length; if (total > (dependencies || privateCopy ? 256 : 64) * 1024 * 1024) throw new Error('Language inventory byte limit');
-          files.push({ path, bytes: bytes.length, sha256: sha256(bytes) }); contents.set(path, bytes);
-        }
+        if (stat.isDirectory()) { directories.push(path); directory(full); walk(full, path, depth + 1); }
+        else file(path, full, stat);
       }
     };
     walk(root, '', 0);
     const after = lstatSync(root, { bigint: true });
     if (!after.isDirectory() || after.isSymbolicLink() || after.ino !== rootIdentity.ino || after.dev !== rootIdentity.dev) throw new Error('Language source root changed');
-    return { files: files.sort(byPath), directories: directories.sort(), contents };
+    return directories.sort();
+  }
+  private scan(root: string, dependencies = false, privateCopy = false): Tree {
+    const files: ShadowFile[] = [], contents = new Map<string, Buffer>(); let total = 0;
+    const directories = this.inventory(root, dependencies, privateCopy, (path, full) => {
+      const bytes = readRegular(full, dependencies || privateCopy ? 64 * 1024 * 1024 : 4 * 1024 * 1024);
+      total += bytes.length; if (total > (dependencies || privateCopy ? 256 : 64) * 1024 * 1024) throw new Error('Language inventory byte limit');
+      files.push({ path, bytes: bytes.length, sha256: sha256(bytes) }); contents.set(path, bytes);
+    });
+    return { files: files.sort(byPath), directories, contents };
+  }
+  /** Metadata is a request admission inventory, NEVER freshness authority or a receipt.
+   * Discovery runs twice around a drained batch; hashes come only from guarded native reads.
+   * Final synchronous revalidate/consume proofs remain independent and unchanged. */
+  private discoverRead(root: string, dependencies: boolean): {
+    files: { path: string; bytes: number }[]; directories: string[]; identities: string[];
+  } {
+    const files: { path: string; bytes: number }[] = [], identities: string[] = []; let total = 0;
+    const directories = this.inventory(root, dependencies, false, (path, full, stat) => {
+      if (!Number.isSafeInteger(stat.size) || stat.size < 0 || stat.size > (dependencies ? 64 : 4) * 1024 * 1024 || stat.nlink !== 1)
+        throw new Error('Invalid staged read size/hardlink');
+      total += stat.size; if (total > (dependencies ? 256 : 64) * 1024 * 1024) throw new Error('Language inventory byte limit');
+      files.push({ path, bytes: stat.size });
+    }, full => {
+      assertRealDirectory(full); const stat = lstatSync(full, { bigint: true });
+      identities.push(json([relative(root, full), String(stat.dev), String(stat.ino)]));
+    });
+    return { files: files.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0), directories, identities };
+  }
+  private finishRead(root: string, dependencies: boolean, before: ReturnType<LanguageShadowStore['discoverRead']>,
+    expected: readonly ShadowFile[], output: readonly Buffer[]): Tree {
+    if (!isDeepStrictEqual(this.discoverRead(root, dependencies), before)) throw new Error('Staged read discovery changed');
+    if (output.length !== before.files.length) throw new Error('Incomplete staged read inventory');
+    const contents = new Map<string, Buffer>(), files: ShadowFile[] = [];
+    for (let i = 0; i < before.files.length; i++) {
+      const file = before.files[i], bytes = output[i];
+      if (bytes.length !== file.bytes) throw new Error('Staged read size changed');
+      contents.set(file.path, bytes); files.push({ ...file, sha256: sha256(bytes) });
+    }
+    this.validateExpected(expected, files);
+    return { files, directories: before.directories, contents };
   }
   /** Read-only coordinator preparation seam. Reuses this exact scanner (never Run-source policy),
    * including source exclusions/limits. It does not hold WriteGate or attest overlays/settings itself.
@@ -168,7 +212,7 @@ export class LanguageShadowStore {
   private current(authority: LanguageSnapshotAuthority, lease: TrustedLanguageSnapshot): void {
     if (authority.isCurrent(lease) !== true) throw new Error('Stale language snapshot/overlay authority');
   }
-  private capture(authority: LanguageSnapshotAuthority): { lease: TrustedLanguageSnapshot; snapshot: TrustedLanguageSnapshot; source: Tree; deps: Tree | null } {
+  private captureScope(authority: LanguageSnapshotAuthority): { lease: TrustedLanguageSnapshot; snapshot: TrustedLanguageSnapshot } {
     const lease = authority.capture(), snapshot = freeze(copy(lease)); this.current(authority, lease);
     if (!snapshot.leaseId || snapshot.leaseId.length > 200 || !snapshot.identity || !['jdt', 'pylsp'].includes(snapshot.identity.provider) ||
       !/^sha256:[a-f0-9]{64}$/.test(snapshot.identity.imageId)) throw new Error('Invalid trusted shadow identity');
@@ -179,6 +223,58 @@ export class LanguageShadowStore {
     const roots = [snapshot.projectRoot, ...(snapshot.dependencies ? [snapshot.dependencies.root] : [])];
     for (const root of roots) { assertRealDirectory(root); if (contains(root, this.ownedRoot) || contains(this.ownedRoot, root)) throw new Error('Language copies must be isolated from sources/dependencies'); }
     if (roots.length === 2 && (contains(roots[0], roots[1]) || contains(roots[1], roots[0]))) throw new Error('Dependencies must be separate prepared immutable artifacts');
+    return { lease, snapshot };
+  }
+  private async captureStage(authority: LanguageSnapshotAuthority): Promise<ReturnType<LanguageShadowStore['capture']>> {
+    const { lease, snapshot } = this.captureScope(authority);
+    // Admit BOTH complete trees before dispatch. A malformed dependency/source inventory starts
+    // zero workers; never trust client paths or defer scope/ALL-overlay snapshotting until await.
+    const sourceInventory = this.discoverRead(snapshot.projectRoot, false);
+    const depsInventory = snapshot.dependencies ? this.discoverRead(snapshot.dependencies.root, true) : null;
+    const admit = (expected: readonly ShadowFile[], discovered: ReturnType<LanguageShadowStore['discoverRead']>): void => {
+      if (!Array.isArray(expected) || expected.length > 16000) throw new Error('Invalid trusted inventory');
+      const hashes = new Map(expected.map(file => [file.path, file.sha256]));
+      this.validateExpected(expected, discovered.files.map(file => ({ ...file, sha256: hashes.get(file.path) ?? '' })));
+    };
+    admit(snapshot.files, sourceInventory);
+    if (depsInventory) admit(snapshot.dependencies!.files, depsInventory);
+    // A combined pool has ONE <=256MiB reservation and <=4 workers, not two concurrent
+    // source/dependency pools. The final private tree's entry bound is also admitted early.
+    if (sourceInventory.files.length + sourceInventory.directories.length +
+      (depsInventory ? 1 + depsInventory.files.length + depsInventory.directories.length : 0) > 16000)
+      throw new Error('Language inventory entry limit');
+    const requests = (root: string, inventory: ReturnType<LanguageShadowStore['discoverRead']>) =>
+      inventory.files.map(file => ({ path: join(root, ...file.path.split('/')), limit: file.bytes }));
+    const jobs = [...requests(snapshot.projectRoot, sourceInventory),
+      ...(depsInventory ? requests(snapshot.dependencies!.root, depsInventory) : [])];
+    this.current(authority, lease);
+    let output: readonly Buffer[];
+    try { output = await readLanguageFilesBounded(jobs, { workers: 4, maxTotalBytes: 256 * 1024 * 1024 }); }
+    finally { this.current(authority, lease); }
+    // Settlement includes ALL worker exits/FD finally-close even on error; no stage tree or
+    // token exists during read. This inventory vector is NOT a cached freshness assertion.
+    const source = this.finishRead(snapshot.projectRoot, false, sourceInventory, snapshot.files, output.slice(0, sourceInventory.files.length));
+    const deps = depsInventory && snapshot.dependencies ? this.finishRead(snapshot.dependencies.root, true, depsInventory,
+      snapshot.dependencies.files, output.slice(sourceInventory.files.length)) : null;
+    if (!isDeepStrictEqual(authority.capture(), snapshot)) throw new Error('Changed staged capture/lease');
+    return { lease, snapshot, source, deps };
+  }
+  async stageRead(authority: LanguageSnapshotAuthority): Promise<UnlaunchedLanguageReadStage> {
+    const captured = await this.captureStage(authority);
+    this.current(authority, captured.lease);
+    const token: UnlaunchedLanguageReadStage = Object.freeze({ kind: 'UNLAUNCHED_LANGUAGE_READ_STAGE' });
+    this.readStages.set(token, { authority, captured }); return token;
+  }
+  discardReadStage(token: UnlaunchedLanguageReadStage): void { this.readStages.delete(token); }
+  private consumeReadStage(token: UnlaunchedLanguageReadStage, authority: LanguageSnapshotAuthority): ReturnType<LanguageShadowStore['capture']> {
+    const staged = this.readStages.get(token); this.readStages.delete(token);
+    if (!staged || staged.authority !== authority) throw new Error('Foreign/used language read stage');
+    this.current(authority, staged.captured.lease);
+    if (!isDeepStrictEqual(authority.capture(), staged.captured.snapshot)) throw new Error('Mismatched language read stage');
+    return staged.captured; // Existing sync refresh revalidate/ALL-private/manifest fences still run.
+  }
+  private capture(authority: LanguageSnapshotAuthority): { lease: TrustedLanguageSnapshot; snapshot: TrustedLanguageSnapshot; source: Tree; deps: Tree | null } {
+    const { lease, snapshot } = this.captureScope(authority);
     const source = this.scan(snapshot.projectRoot); this.validateExpected(snapshot.files, source.files);
     const deps = snapshot.dependencies ? this.scan(snapshot.dependencies.root, true) : null;
     if (deps) this.validateExpected(snapshot.dependencies!.files, deps.files);
@@ -318,7 +414,8 @@ export class LanguageShadowStore {
     }
   }
   async stage(authority: LanguageSnapshotAuthority): Promise<UnlaunchedLanguageStage> {
-    const captured = this.capture(authority), launchId = randomUUID(), root = join(this.ownedRoot, launchId);
+    const captured = await this.captureStage(authority), launchId = randomUUID(), root = join(this.ownedRoot, launchId);
+    this.current(authority, captured.lease);
     // The generic in-memory plan has no authority as a phase/manifest; consumeStage selects the phase.
     const { manifest, contents } = this.plan(captured.snapshot, captured.source, captured.deps, launchId, 'completion');
     mkdirSync(root, { mode: 0o700 }); assertPrivateLanguageDirectory(root);
@@ -540,10 +637,11 @@ export class LanguageShadowStore {
     guard(); return guard;
   }
   /** No didChange/save here. Registry sends ordered didChange only AFTER successful replacement. Failure => retire. */
-  refreshCompletion(shadow: LanguageShadow, authority: LanguageSnapshotAuthority): LanguageShadow {
+  refreshCompletion(shadow: LanguageShadow, authority: LanguageSnapshotAuthority, readStage?: UnlaunchedLanguageReadStage): LanguageShadow {
+    const prepared = readStage === undefined ? null : this.consumeReadStage(readStage, authority);
     this.record(shadow); if (shadow.phase !== 'completion') throw new Error('Immutable diagnostic shadow cannot change');
     this.assertIntegrity(shadow);
-    const captured = this.capture(authority);
+    const captured = prepared ?? this.capture(authority);
     if (Object.keys(shadow.manifest.identity).some(key => captured.snapshot.identity[key as keyof ShadowIdentity] !== shadow.manifest.identity[key as keyof ShadowIdentity])) throw new Error('Language scope/dependency changed; retire process before new shadow');
     const { manifest, contents } = this.plan(captured.snapshot, captured.source, captured.deps, shadow.launchId, 'completion');
     if (manifest.dependencyInventorySha256 !== shadow.manifest.dependencyInventorySha256) throw new Error('Language dependency bytes changed; retire process before new shadow');
