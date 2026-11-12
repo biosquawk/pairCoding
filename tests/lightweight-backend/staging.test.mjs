@@ -26,7 +26,6 @@ test('LIGHT public cold prepare plans all seven profiles with no LSP assets, wri
   const profiles=[['javascript-node','javascript-counter'],['typescript-node','typescript-counter'],['python-3.13','python-calculator'],...[11,17,21,27].map(n=>['java-maven-'+n,'java-pattern'])];
   for(const [profile,example] of profiles){
     const project=path.join(root,profile);fs.cpSync(path.resolve('examples',example),project,{recursive:true});
-    if(profile.startsWith('java-')){const pom=path.join(project,'pom.xml');fs.writeFileSync(pom,fs.readFileSync(pom,'utf8').replace(/<maven.compiler.release>\d+<\/maven.compiler.release>/g,`<maven.compiler.release>${profile.slice(11)}</maven.compiler.release>`));}
     fs.mkdirSync(path.join(project,'.paircoach'),{mode:0o700});
     fs.writeFileSync(path.join(project,'.paircoach/settings.json'),JSON.stringify({schemaVersion:2,taskFilePath:null,taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',contextPatterns:[],aiConsent:false,runProfiles:JSON.parse(fs.readFileSync(path.join(project,'task.v2.json'))).runProfiles}));
     const output=path.join(root,profile+'-out'),argv=['--project',project,'--profile',profile,'--output',output];

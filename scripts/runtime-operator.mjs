@@ -49,9 +49,8 @@ export function buildOperatorPlan(operatorRoot,phase='PREPARE_ONLY') {
  const tools=lock.artifacts.filter(a=>a.kind==='npm').flatMap(a=>a.files.map(f=>({path:'node_modules/'+a.name+'/'+f.path,sha256:f.sha256}))).sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
  const jobs=combinations.map(([key,example])=>{
   const profile=catalog.profiles.find(p=>p.id===key),id=key+'--'+example;
-  const assets=walk(path.join(repo,'examples',example)).map(f=>{
-   if(f.path==='pom.xml') {let text=Buffer.from(f.bytes,'base64').toString();text=text.replace(/<maven.compiler.release>\d+<\/maven.compiler.release>/g,`<maven.compiler.release>${profile.compilerRelease}</maven.compiler.release>`).replace(/<java.version>\d+<\/java.version>/g,`<java.version>${profile.compilerRelease}</java.version>`);const bytes=Buffer.from(text);return {...f,sha256:hash(bytes),bytes:bytes.toString('base64')};}return f;
-  });
+  // JDK selection must never rewrite the user's Maven target or any example POM.
+  const assets=walk(path.join(repo,'examples',example));
   const files=assets.map(({path,sha256})=>({path,sha256})),baseKey=profile.compilerRelease?'java'+profile.compilerRelease:profile.adapterFamily==='python'?'python':'node';
   const request={schemaVersion:1,workingDirectory:'.',installationId:'stage09-runtime-assets',family:profile.adapterFamily,key,imageTag:`paircoach/runtime-${key}:stage09`,baseImage:lock.images[baseKey].reference,nodeImage:lock.images.node.reference,tools:{root:path.join(root,'stage/tools'),files:tools},project:{root:path.join(root,'projects',id),files},expectedTools:profile.expectedTools,dependencySha256:dependencyHash(files),outputRoot:path.join(root,'jobs',id)};
   validatePrepareRequest(request);validateProductionRequest(request);

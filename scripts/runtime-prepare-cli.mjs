@@ -126,9 +126,10 @@ function validateSourcePom(bytes, profile, api) {
   const compiler = plugins.filter(v => v.artifactId === 'maven-compiler-plugin');
   const configs = compiler.flatMap(v => [v.configuration ?? {}, ...list(v.executions?.execution).map(e => e.configuration ?? {})]);
   const releases = [props['maven.compiler.release'], props['maven.compiler.testRelease'], ...configs.flatMap(c => [c.release, c.testRelease])].filter(v => v !== undefined);
-  check(releases.length && releases.every(v => expand(v) === String(profile.compilerRelease)), 'TARGET_PROFILE_CONFLICT: explicit source POM release differs or is absent');
+  const targetRelease = releases.length ? expand(releases[0]) : '';
+  check(/^[1-9][0-9]{0,2}$/.test(targetRelease) && releases.every(v => expand(v) === targetRelease), 'TARGET_PROFILE_CONFLICT: explicit source POM release absent, invalid or inconsistent');
   for (const v of [props['java.version'], ...['source', 'target', 'testSource', 'testTarget'].flatMap(k => [props['maven.compiler.' + k], ...configs.map(c => c[k])])].filter(v => v !== undefined)) {
-    check(expand(v) === String(profile.compilerRelease), 'TARGET_PROFILE_CONFLICT: source POM source/target differs');
+    check(expand(v) === targetRelease, 'TARGET_PROFILE_CONFLICT: source POM source/target differs');
   }
   for (const c of [props, ...configs]) {
     check(!c.executable && !c.jdkToolchain && c.fork !== 'true' && !c['maven.compiler.executable'] && c['maven.compiler.fork'] !== 'true' && !c.compilerArgs && !c.compilerArgument && (!c.compilerId || c.compilerId === 'javac') && (!c['maven.compiler.compilerId'] || c['maven.compiler.compilerId'] === 'javac'), 'Unreviewed compiler/toolchain override');

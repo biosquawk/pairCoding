@@ -60,6 +60,7 @@ export abstract class BaseAdapter implements TaskRuntimeAdapter {
       catch (error) { throw new AdapterError('TARGET_PROFILE_CONFLICT',String(error)); }
     }
     const prefix = '/cache/0'; // cache[0]: exact approved family/toolchain/dependency identity remains on plan.caches[0]
+    // Legacy wire field release identifies the selected JDK; Maven alone supplies targetRelease.
     const payload = { schemaVersion: 1, family: this.family, release: profile.compilerRelease, preview: profile.analysis.preview,
       runId: ownership.runId, manifestSha256: input.identity.manifestSha256, mode: run.kind, task: run.task, cache: prefix };
     let encoded: string;
