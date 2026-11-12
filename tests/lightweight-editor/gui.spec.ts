@@ -69,7 +69,8 @@ test('integrated actual GUI: CtrlSpace local completion -> original CODE_CHANGED
     if(!page.isClosed()){
       await page.setViewportSize({width:1365,height:900});
       const input=page.getByRole('textbox',{name:`Edytor pliku ${path}`,exact:true});
-      if(await input.isVisible()){
+      if((await getDocument()).content===original.content)restored=true;
+      else if(await input.isVisible()){
         await input.focus();await page.keyboard.press('Control+a');await page.keyboard.insertText(original.content);await assertAck(original.content);restored=true;
       }
     }

@@ -1,4 +1,5 @@
 import type * as M from 'monaco-editor';
+import { normalizeContent } from '../language/uriCodec';
 import { createBuiltinCompletionProvider, type BuiltinWorkerFactory } from './editor-language/builtin';
 import { createCurrentDocumentWordsProvider } from './editor-language/currentDocumentWords';
 import type { LocalBuiltinProvider } from './monacoLspBridge';
@@ -23,7 +24,10 @@ export function createBuiltinLanguageRegistry(monaco:typeof M):LocalBuiltinProvi
   return Object.assign(((model,request,signal)=>providers[model.getLanguageId()]?.(model,request,signal)??null) as LocalBuiltinProvider,{
     ready:async(model:M.editor.ITextModel)=>{
       const worker=workers[model.getLanguageId()];
-      if(worker) { const proxy=await worker(model);await proxy.getSyntacticDiagnostics(model.uri.toString());return true; }
+      if(worker) {
+        const proxy=await worker(model),text=await proxy.getScriptText(model.uri.toString());
+        return typeof text==='string'&&normalizeContent(text)===normalizeContent(model.getValue());
+      }
       return !!providers[model.getLanguageId()];
     },
     hasDiagnostics:(model:M.editor.ITextModel)=>!!workers[model.getLanguageId()],

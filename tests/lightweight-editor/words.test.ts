@@ -39,3 +39,17 @@ test('registry routes Java/Python to current model, not TS worker or allDocument
     assert.deepEqual((await registry(m,request(content),new AbortController().signal))?.items.map(i=>i.label),['apricot']);
   }
 });
+test('JS/TS readiness checks real public worker mirror, never calls diagnostics when merely checking completion readiness',async()=>{
+  const mode={modeConfiguration:{diagnostics:true},setModeConfiguration(c:any){this.modeConfiguration=c;}};
+  const content='const apple = 1; app';let diagnostics=0,mirror:string|undefined=content;
+  const worker={getScriptText:async()=>mirror,getSyntacticDiagnostics:async()=>{diagnostics++;return [];},getSemanticDiagnostics:async()=>{diagnostics++;return [];},getCompletionsAtPosition:async()=>({entries:[{name:'apple'}]})};
+  const monaco:any={typescript:{typescriptDefaults:{...mode},javascriptDefaults:{...mode},getJavaScriptWorker:async()=>async()=>worker,getTypeScriptWorker:async()=>async()=>worker}};
+  const registry=createBuiltinLanguageRegistry(monaco);
+  for(const language of ['javascript','typescript']){
+    const m=model(content,language);assert.equal(await registry.ready!(m),true);assert.equal(diagnostics,0);
+    mirror='stale buffer';assert.equal(await registry.ready!(m),false);mirror=content;
+    assert.equal(registry.hasDiagnostics!(m),true);
+    assert.equal((await registry.diagnostics!(m))?.length,0);
+    diagnostics=0;
+  }
+});
