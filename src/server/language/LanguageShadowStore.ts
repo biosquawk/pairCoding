@@ -1,11 +1,12 @@
 import { isDeepStrictEqual } from 'node:util';
-import { constants, closeSync, chmodSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, chmodSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, renameSync, rmdirSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { open, writeFile, fchmod, fsync, close } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DocumentStamp } from '../../shared/language-v2';
 import { LANGUAGE_LIMITS } from '../../shared/language-v2';
 import { assertPrivateLanguageDirectory, assertRealDirectory, readRegular, sha256 } from './LanguageProcessJournal';
+import { planLanguageShadowDelta, type LanguageShadowDeltaPlan } from './LanguageShadowDeltaPlan';
 import { NodeLanguageJournalDurability, type LanguageJournalDurability } from './LanguageJournalDurability';
 
 /** Inject these SAME central src/language/uriCodec exports at composition; never supply a second mapper. */
@@ -216,17 +217,18 @@ export class LanguageShadowStore {
       dependencyInventorySha256: sha256(json(deps ? { files: deps.files, directories: deps.directories } : null)),
       files: files.sort(byPath), directories: [...directories].sort(), overlays: overlays.sort((a,b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) } };
   }
-  private atomicFile(path: string, bytes: Buffer, deferDirectoryFlush = false): void {
+  private atomicFile(path: string, bytes: Buffer, deferDirectoryFlush = false, guard: () => void = () => {}): void {
+    guard();
     assertRealDirectory(dirname(path)); const temporary = join(dirname(path), `.${randomUUID()}.tmp`);
     const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
     let written: import('node:fs').BigIntStats | undefined;
     try {
       try {
-        writeFileSync(fd, bytes); fchmodSync(fd, 0o444); this.durability.file(fd);
+        writeFileSync(fd, bytes); fchmodSync(fd, 0o444); this.durability.file(fd); guard();
         written = fstatSync(fd, { bigint: true });
         if (!written.isFile() || written.nlink !== 1n || written.size !== BigInt(bytes.length)) throw new Error('Invalid copy output');
       } finally { closeSync(fd); }
-      assertRealDirectory(dirname(path)); renameSync(temporary, path); if (!deferDirectoryFlush) this.durability.directory(dirname(path));
+      guard(); assertRealDirectory(dirname(path)); renameSync(temporary, path); if (!deferDirectoryFlush) this.durability.directory(dirname(path)); guard();
       const final = lstatSync(path, { bigint: true });
       if (!final.isFile() || final.isSymbolicLink() || final.dev !== written!.dev || final.ino !== written!.ino ||
         !readRegular(path, bytes.length).equals(bytes)) throw new Error('Language copy identity/readback mismatch');
@@ -471,6 +473,72 @@ export class LanguageShadowStore {
         json(actual.directories) !== json(shadow.manifest.directories)) throw new Error('Language shadow contents mismatch');
     } catch (error) { record.poisoned = true; throw error; }
   }
+  /** Active mounted tree: no recursive clear, no fresh-tree batching and no retained-file chmod.
+   * Directory identities are captured before the first mutation and checked at each affected
+   * prefix. Removed directory entries are flushed while their parents still exist; newly empty
+   * directories themselves AND their parent entries are durable before manifest publication.
+   */
+  private applyCompletionDelta(shadow: LanguageShadow, manifest: ShadowManifest, contents: Map<string, Buffer>,
+    delta: LanguageShadowDeltaPlan): () => void {
+    const workspace = shadow.workspaceDirectory, root = dirname(workspace);
+    const identities = new Map<string, import('node:fs').BigIntStats>();
+    const remember = (path: string): void => {
+      assertRealDirectory(path); identities.set(path, lstatSync(path, { bigint: true }));
+    };
+    for (const path of [this.ownedRoot, root, workspace, ...shadow.manifest.directories.map(dir => join(workspace, ...dir.split('/')))]) remember(path);
+    const check = (path: string): void => {
+      assertRealDirectory(path);
+      const before = identities.get(path), now = lstatSync(path, { bigint: true });
+      if (!before || now.dev !== before.dev || now.ino !== before.ino) throw new Error('Completion delta directory identity changed');
+    };
+    const guardParent = (path: string): void => {
+      if (!contains(workspace, path)) throw new Error('Completion delta outside workspace');
+      check(this.ownedRoot); check(root);
+      let parent = dirname(path);
+      while (true) {
+        check(parent); if (parent === workspace) break;
+        if (!contains(workspace, parent)) throw new Error('Completion delta parent outside workspace');
+        parent = dirname(parent);
+      }
+    };
+    const target = (path: string): string => { this.path(path); const full = join(workspace, ...path.split('/')); guardParent(full); return full; };
+    const absent = (path: string): void => {
+      try { lstatSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error; }
+      throw new Error('Unexpected completion delta entry');
+    };
+    const oldFiles = new Map(shadow.manifest.files.map(file => [file.path, file]));
+    const newFiles = new Map(manifest.files.map(file => [file.path, file]));
+    const regular = (path: string, full: string): void => {
+      const file = oldFiles.get(path);
+      if (!file || sha256(readRegular(full, file.bytes)) !== file.sha256) throw new Error('Completion delta original file changed');
+    };
+    const flushParent = (full: string): void => { guardParent(full); this.durability.directory(dirname(full)); guardParent(full); };
+    for (const path of delta.removeFiles) {
+      const full = target(path); regular(path, full);
+      if (process.platform === 'win32') chmodSync(full, 0o644);
+      guardParent(full); unlinkSync(full); flushParent(full);
+    }
+    for (const path of delta.removeDirectories) {
+      const full = target(path); check(full);
+      // rmdir, NOT recursive deletion: an unexpected/retained entry is a hard error.
+      rmdirSync(full); identities.delete(full); flushParent(full);
+    }
+    for (const path of delta.createDirectories) {
+      const full = target(path); absent(full); mkdirSync(full, { mode: 0o755 }); remember(full);
+      guardParent(full); check(full); this.durability.directory(full); check(full); flushParent(full);
+    }
+    for (const path of delta.writeFiles) {
+      const full = target(path);
+      if (oldFiles.has(path)) regular(path, full); else absent(full);
+      // Win32 cannot replace a read-only destination. Never touch a retained file, on ANY OS.
+      if (process.platform === 'win32' && oldFiles.has(path)) chmodSync(full, 0o644);
+      const bytes = contents.get(path), file = newFiles.get(path);
+      if (!bytes || !file || bytes.length !== file.bytes || sha256(bytes) !== file.sha256) throw new Error('Missing completion delta content');
+      this.atomicFile(full, bytes, false, () => guardParent(full));
+    }
+    const guard = (): void => { for (const path of identities.keys()) check(path); };
+    guard(); return guard;
+  }
   /** No didChange/save here. Registry sends ordered didChange only AFTER successful replacement. Failure => retire. */
   refreshCompletion(shadow: LanguageShadow, authority: LanguageSnapshotAuthority): LanguageShadow {
     this.record(shadow); if (shadow.phase !== 'completion') throw new Error('Immutable diagnostic shadow cannot change');
@@ -480,16 +548,20 @@ export class LanguageShadowStore {
     const { manifest, contents } = this.plan(captured.snapshot, captured.source, captured.deps, shadow.launchId, 'completion');
     if (manifest.dependencyInventorySha256 !== shadow.manifest.dependencyInventorySha256) throw new Error('Language dependency bytes changed; retire process before new shadow');
     this.revalidate(authority, captured);
+    // Physical classification is deliberately AFTER the full old/new integrity, scope and
+    // currentness proof. It grants no authority and never suppresses any later scan.
+    const delta = planLanguageShadowDelta(shadow.manifest, manifest);
     const record = this.record(shadow); record.poisoned = true;
-    // Keep the bind-mounted root inode stable. Intermediate mutable completion state is never diagnostic evidence.
+    // Keep the bind-mounted root and every unaffected entry stable. Any partial mutation poisons
+    // this SAME process/handle; there is no rollback, auto-retry, or didChange on this path.
     try {
-      for (const file of shadow.manifest.files) chmodSync(join(shadow.workspaceDirectory, ...file.path.split('/')), 0o644);
-      for (const name of this.list(shadow.workspaceDirectory, 16000)) rmSync(join(shadow.workspaceDirectory, name), { recursive: true, force: false });
-      this.writeTree(shadow.workspaceDirectory, manifest, contents); this.revalidate(authority, captured);
-      chmodSync(shadow.wholeProjectManifestPath, 0o644);
-      this.atomicFile(shadow.wholeProjectManifestPath, Buffer.from(json(manifest)));
+      const guard = this.applyCompletionDelta(shadow, manifest, contents, delta);
+      this.revalidate(authority, captured); guard();
+      if (process.platform === 'win32') chmodSync(shadow.wholeProjectManifestPath, 0o644);
+      this.atomicFile(shadow.wholeProjectManifestPath, Buffer.from(json(manifest)), false, guard);
+      guard();
       const next = freeze({ ...shadow, manifest: freeze(manifest), inputManifestSha256: sha256(json(manifest)) });
-      record.shadow = next; record.poisoned = false; this.assertIntegrity(next); this.current(authority, captured.lease); return next;
+      record.shadow = next; record.poisoned = false; this.assertIntegrity(next); guard(); this.current(authority, captured.lease); guard(); return next;
     } catch (error) { record.poisoned = true; throw error; }
   }
 }

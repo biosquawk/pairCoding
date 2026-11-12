@@ -66,8 +66,15 @@ test('post-publication same-byte replacement, content tamper and new empty direc
   }
 });
 test('active completion refresh retains per-file directory durability, not the new-tree batching path',t=>{
-  const f=fixture(t),shadow=f.store.materialize('completion',f.authority);f.events.length=0;
-  const next=f.store.refreshCompletion(shadow,f.authority);
-  assert.equal(f.events.filter(e=>e.kind==='file').length,next.manifest.files.length+1);
-  assert.equal(f.events.filter(e=>e.kind==='directory').length,next.manifest.files.length+1);
+  const f=fixture(t),shadow=f.store.materialize('completion',f.authority);
+  const retained=join(shadow.workspaceDirectory,'nested/a.py'),before=fs.statSync(retained,{bigint:true}),bytes=fs.readFileSync(retained);
+  const snapshot:TrustedLanguageSnapshot={...f.snapshot,overlays:[{stamp:{...f.snapshot.identity,path:'main.py',modelLifetime:'life',localModelVersion:1,requestGeneration:1,controlEpoch:0,baseDocumentVersion:1,documentVersion:null,contentSha256:sha256('draft')},content:'draft'}]};
+  const expected=JSON.stringify(snapshot);
+  const authority={capture:()=>snapshot,isCurrent:(s:TrustedLanguageSnapshot)=>f.authority.isCurrent(f.snapshot)&&JSON.stringify(s)===expected&&JSON.stringify(snapshot)===expected};
+  f.events.length=0;
+  const next=f.store.refreshCompletion(shadow,authority);
+  assert.equal(f.events.filter(e=>e.kind==='file').length,2,'changed file + authoritative manifest, NOT all retained files');
+  assert.equal(f.events.filter(e=>e.kind==='directory').length,2,'changed-file parent + manifest parent flushed');
+  assert.deepEqual(fs.statSync(retained,{bigint:true}),before,'retained inode/mode/mtime unchanged');
+  assert.deepEqual(fs.readFileSync(retained),bytes);f.store.assertIntegrity(next);
 });
