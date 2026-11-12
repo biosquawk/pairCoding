@@ -57,6 +57,9 @@ test('guide selects generated config and exact job receipt parent, never execute
   assert.match(guide,/Get-Content -LiteralPath \$prepareLog -Wait/);
   assert.match(guide,/tail -f "\$prepareLog"/);
   assert.match(guide,/samo zabicie CLI nie dowodzi wycofania operacji daemona/);
+  assert.ok(guide.includes('Po dokładnym komunikacie `Cancellation window closed; publishing measured runtime config`'));
+  assert.ok(guide.includes('Samo `phase=publish` nie zamyka tego okna.'));
+  assert.doesNotMatch(guide,/Po komunikacie `publish` okno anulowania jest już zamknięte/);
 
   for(const status of ['PLAN_ONLY','PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE','NOTREADY']) assert.ok(guide.includes(status));
   assert.match(guide,/Publiczne wykonanie prepare, Java21\/Spring21 GUI, native Windows i świeży ZIP[\s\S]*?NOT_RUN/);
