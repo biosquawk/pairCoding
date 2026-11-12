@@ -22,7 +22,7 @@ function fixture(t, families) {
   return { base, root, commit, revision: commit() };
 }
 function pack(f, mode) { return spawnSync(process.execPath, [path.join(f.root, 'scripts/package-windows.mjs'), '--commit', f.revision, ...mode], { cwd: f.root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }); }
-test('selection: frozen package/docs/closure use exact quoted TS+MJS command', () => {
+test('selection: frozen package/docs/closure use exact portable two-lane TS+MJS command', () => {
   assert.equal(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'))).scripts.test, testCommand);
   const row = fs.readFileSync(path.join(repo, 'docs/windows-package.md'), 'utf8').split('\n').find(line => line.startsWith('| `npm.cmd test`'));
   assert.ok(row.includes('`' + testCommand + '`'));

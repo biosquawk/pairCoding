@@ -17,6 +17,7 @@ const runtimeScripts = [
   'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
   'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
+  'runtime-test.mjs', 'runtime-test-policy.mjs',
 ].map(name => `scripts/${name}`);
 // Private inert test-support source, NOT a public prepare/npm/HTTP entry point.
 // Conditional: old source compositions without these regressions need no operator module.

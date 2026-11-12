@@ -35,5 +35,8 @@ for(const provider of ['builtin','off'] as const)test(`HTTP LANG ${provider} own
   const response=await fetch(`http://127.0.0.1:${port}/api/file`,{method:'POST',headers:{Authorization:'Bearer nonremote-unit-token','Content-Type':'application/json'},body:JSON.stringify({requestId:randomUUID(),clientId,sessionId,controlEpoch:0,operation:'CREATE',path:'b.js',content:'B closed\n',newPath:null,baseVersion:null})});
   assert.equal(response.status,200,JSON.stringify(await response.json()));
   assert.equal(fs.readFileSync(path.join(workspace,'a.js'),'utf8'),'ACTUAL ORDINARY SAVE\n');assert.equal(fs.readFileSync(path.join(workspace,'b.js'),'utf8'),'B closed\n');
+  assert.equal(fs.existsSync(path.join(root,'.paircoach-runtime')),false,'no owner-only runtime layout');
+  assert.deepEqual(first.payload.languageBootstrap.features,provider==='builtin'?{completion:true,diagnostics:true}:{completion:false,diagnostics:false});
+  assert.equal(first.payload.project.capabilities.language.state,'OFF','backend cannot attest browser readiness');
   assert.equal(calls,0);assert.equal(frames.some(m=>m.type==='COMPLETE_RESULT'||m.type==='DIAGNOSTICS'),false,'OFF/builtin never masquerades as a remote analysis');
 });

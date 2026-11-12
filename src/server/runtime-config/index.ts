@@ -12,8 +12,12 @@ export interface ResolvedRuntime {
   config: RuntimeConfigV1; catalog: RuntimeCatalog; imageLock: ImageLock;
   profile: RuntimeProfile; image: ImageLockEntry; languageImage: ImageLockEntry | null;
 }
-export type RuntimeConfiguration = { configurationGeneration: string; resolved: ResolvedRuntime; problem: null } |
-  { configurationGeneration: string; resolved: null; problem: RuntimeProblem };
+/** Valid local editor inputs do not prove execution image/cache readiness. */
+export interface LocalRuntimeConfiguration {
+  config: RuntimeConfigV1; profile: RuntimeProfile; workspaceRoot: string;
+}
+export type RuntimeConfiguration = ({ configurationGeneration: string; resolved: ResolvedRuntime; problem: null } |
+  { configurationGeneration: string; resolved: null; problem: RuntimeProblem }) & { local?: LocalRuntimeConfiguration };
 export const runtimeProblem = (code: string, message: string, recovery: string, retryable = false): RuntimeProblem => ({ code, message, recovery, retryable });
 const denied = (problem: RuntimeProblem): ModeReadiness => ({ canRun: false, problem });
 function freeze<T>(value: T): T {
@@ -47,28 +51,29 @@ function jsonFile(file: string): unknown {
 /** New generation on EVERY load, including failures. Env is explicitly injected, not forwarded to processes. */
 export function loadRuntimeConfiguration(options: { configPath: string; environment?: RuntimeEnvironment; explicitWorkspaceRoot?: string }): RuntimeConfiguration {
   const configurationGeneration = randomUUID();
+  let local:LocalRuntimeConfiguration|undefined;
   try {
     if (!path.isAbsolute(options.configPath)) throw Error('configPath must be absolute');
     const configPath = path.normalize(options.configPath), base = path.dirname(configPath);
     const config = jsonFile(configPath);
     if (!validateRuntimeConfigV1(config)) throw Error('Invalid runtime config schema');
     const catalog = jsonFile(path.resolve(base, config.runtimeCatalog));
-    const imageLock = jsonFile(path.resolve(base, config.imageLock));
-    if (!validateRuntimeCatalog(catalog) || !validateImageLock(imageLock) || !validateCatalogImageReferences(catalog, imageLock)) throw Error('Invalid catalog, tool versions or image lock references');
-    // Defence in depth until the centrally owned shared semantic correction is integrated.
-    if (catalog.profiles.some(p => p.language.provider === 'builtin' && !['node','typescript'].includes(p.adapterFamily))) throw Error('Builtin language worker is restricted to JS/TS');
+    if (!validateRuntimeCatalog(catalog)) throw Error('Invalid catalog');
     const profileId = options.environment?.PAIRCOACH_RUNTIME_PROFILE ?? config.activeProfile;
     const profile = catalog.profiles.find(p => p.id === profileId);
     if (!profile) return freeze({ configurationGeneration, resolved: null, problem: runtimeProblem('RUNTIME_PROFILE_UNKNOWN', 'Selected runtime profile is not in the approved catalog.', 'Select an existing profile in paircoach.runtime.json or PAIRCOACH_RUNTIME_PROFILE, then restart.') });
     const workspace = options.explicitWorkspaceRoot ?? options.environment?.PAIRCOACH_WORKSPACE_DIR ?? config.workspaceRoot;
     if (!workspace || /[\x00-\x1f\x7f]/.test(workspace)) throw Error('Invalid workspace root');
+    local={config,profile,workspaceRoot:path.resolve(base,workspace)};
+    const imageLock = jsonFile(path.resolve(base,config.imageLock));
+    if (!validateImageLock(imageLock) || !validateCatalogImageReferences(catalog,imageLock,profile.id)) throw Error('Selected image pins or supplied tool references are invalid');
     const resolved: ResolvedRuntime = { configurationGeneration, configPath, workspaceRoot: path.resolve(base, workspace), config, catalog, imageLock,
       profile, image: imageLock.images.find(i => i.key === profile.imageLockKey)!,
       languageImage: profile.language.imageLockKey === null ? null : imageLock.images.find(i => i.key === profile.language.imageLockKey)! };
-    return freeze({ configurationGeneration, resolved, problem: null });
+    return freeze({ configurationGeneration, resolved, problem: null, local });
   } catch {
     // Paths/config bytes may contain sensitive data. Never echo parser errors or environment values to UI.
-    return freeze({ configurationGeneration, resolved: null, problem: runtimeProblem('RUNTIME_CONFIG_INVALID', 'Runtime configuration, catalog or image lock is unavailable or invalid.', 'Repair paircoach.runtime.json and its config-relative catalog/image lock. Explicitly prepare approved images, then restart. Editing and recovery remain available.') });
+    return freeze({ configurationGeneration, resolved: null, ...(local?{local}:{}), problem: runtimeProblem('RUNTIME_CONFIG_INVALID', 'Runtime configuration, catalog or image lock is unavailable or invalid.', 'Repair paircoach.runtime.json and its config-relative catalog/image lock. Explicitly prepare approved images, then restart. Editing and recovery remain available.') });
   }
 }
 /** Inject adapter/dependency/cache validation; this must inspect the current project, never return stale prepared state. */
@@ -85,9 +90,10 @@ async function bounded<T>(operation: () => Promise<T>, timeoutMs: number): Promi
 }
 /** No execution/mutation. A false mode never disables the editor. Every invocation re-probes dependency readiness. */
 export async function aggregateRuntimeReadiness(configuration: RuntimeConfiguration, settings: unknown, dependencies: RuntimeReadinessDependencies): Promise<ExecutionView> {
-  const runtime = { profileId: configuration.resolved?.profile.id ?? null, label: configuration.resolved?.profile.label ?? '',
+  const selected=configuration.resolved??configuration.local;
+  const runtime = { profileId: selected?.profile.id ?? null, label: selected?.profile.label ?? '',
     configurationGeneration: configuration.configurationGeneration, state: 'READY' as ExecutionView['runtime']['state'], problem: null as RuntimeProblem | null,
-    taskFields: structuredClone(configuration.resolved?.profile.taskFields ?? []) };
+    taskFields: structuredClone(selected?.profile.taskFields ?? []) };
   const failBoth = (problem: RuntimeProblem, state: ExecutionView['runtime']['state']): ExecutionView => ({ runtime: { ...runtime, state, problem }, modes: { RUN_MAIN: denied(problem), RUN_TESTS: denied(problem) } });
   if (configuration.problem !== null) return failBoth(configuration.problem, 'CONFIG_ERROR');
   if (!validateSettingsV2(settings)) return failBoth(runtimeProblem('LEGACY_RUN_PROFILE_REQUIRES_MIGRATION', 'Execution requires explicitly saved V2 settings; original settings are preserved.', 'Review task selectors and explicitly save V2 settings. No commands are inferred. You can keep editing.'), 'CONFIG_ERROR');

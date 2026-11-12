@@ -90,9 +90,10 @@ export async function createRuntimeStartup(options: {
   const configuration = loadRuntimeConfiguration({ configPath: args.runtimeConfigPath, environment, explicitWorkspaceRoot });
   const prepared = createPreparedRuntimeResolver({ outputRoots: args.preparedRuntimeRoots }, options.transport);
   const rootSource = explicitWorkspaceRoot !== undefined ? 'EXPLICIT' :
-    validPath(environment.PAIRCOACH_WORKSPACE_DIR) ? 'ENVIRONMENT' : configuration.resolved ? 'CONFIGURATION' : 'UNBOUND';
+    validPath(environment.PAIRCOACH_WORKSPACE_DIR) ? 'ENVIRONMENT' : configuration.resolved || configuration.local ? 'CONFIGURATION' : 'UNBOUND';
   let rootPath: string | null;
   if (configuration.resolved) rootPath = configuration.resolved.workspaceRoot;
+  else if (configuration.local) rootPath = configuration.local.workspaceRoot;
   else if (explicitWorkspaceRoot !== undefined) rootPath = explicitWorkspaceRoot;
   else if (validPath(environment.PAIRCOACH_WORKSPACE_DIR))
     rootPath = path.resolve(path.dirname(args.runtimeConfigPath), environment.PAIRCOACH_WORKSPACE_DIR);

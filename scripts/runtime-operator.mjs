@@ -11,7 +11,6 @@ import {createImageRetention,imagePin,imageCommandOutput} from './runtime-image-
 import {canonicalDirectory,readPrivate,receiptWriter} from './runtime-files.mjs';
 import {dependencyHash} from './runtime-dependencies.mjs';
 import {encodeSpec} from './runtime-spec.mjs';
-import {prepareLanguageImages} from './runtime-language-prepare.mjs';
 const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const hash=b=>createHash('sha256').update(b).digest('hex');
 const json=p=>JSON.parse(readPrivate(p,4*1024*1024).bytes);
@@ -58,7 +57,7 @@ export function buildOperatorPlan(operatorRoot,phase='PREPARE_ONLY') {
   validatePrepareRequest(request);validateProductionRequest(request);
   return {id,profile,example,correction:repairs[example],assets,request};
  });
- return {schemaVersion:1,phase,offlineFixtureContainers:phase==='PREPARE_ONLY'?0:18,operatorEngine:lock.operatorLane,language:lock.language,scope:phase==='PREPARE_ONLY'?'PREPARE_ONLY_NOT_OFFLINE_OR_PRODUCT_ACCEPTANCE':'FINAL_QA_OFFLINE_FIXTURE_CHECKS_NOT_GUI_OR_ACK_ACCEPTANCE',operatorRoot:root,maxHeavyConcurrency:1,maxElapsedMs:2700000,maxCommandMs:480000,sourceInventory:sourcePaths().map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)})),jobs};
+ return {schemaVersion:1,phase,offlineFixtureContainers:phase==='PREPARE_ONLY'?0:18,operatorEngine:lock.operatorLane,language:[],scope:phase==='PREPARE_ONLY'?'PREPARE_ONLY_NOT_OFFLINE_OR_PRODUCT_ACCEPTANCE':'FINAL_QA_OFFLINE_FIXTURE_CHECKS_NOT_GUI_OR_ACK_ACCEPTANCE',operatorRoot:root,maxHeavyConcurrency:1,maxElapsedMs:2700000,maxCommandMs:480000,sourceInventory:sourcePaths().map(p=>({path:p,sha256:hash(readPrivate(path.join(repo,p),4*1024*1024).bytes)})),jobs};
 }
 function validateFrozen(plan,buildPlan=buildOperatorPlan) {
  if(JSON.stringify(plan)!==JSON.stringify(buildPlan(plan.operatorRoot,plan.phase))) throw new Error('Frozen plan/source/pins/assets differ; do not execute');
@@ -165,10 +164,6 @@ export function executeOperatorPlan(plan,dependencies={}) {
    }
    item.status='PREPARED_OFFLINE_SMOKE_REQUIRES_K_REVIEW';save();
   }
-  if(plan.phase==='PREPARE_ONLY')(dependencies.prepareLanguageImages??prepareLanguageImages)(root,json(path.join(repo,'runtimes/production-inputs.lock.json')),{run:(args,...rest)=>{
-   if(args[0]!=='build')return run(args,...rest);
-   const tag=args[args.indexOf('--tag')+1];retention.beforeBuild(tag);const result=run(args);retention.afterBuild(tag);return result;
-  },save,receipt});
   retention.verifyAll();
   receipt.status=plan.phase==='PREPARE_ONLY'?'PREPARE_ONLY_COMPLETE_OFFLINE_DEFERRED_NOT_PRODUCT_ACCEPTANCE':'FINAL_OFFLINE_FIXTURES_COMPLETE_NOT_GUI_OR_PRODUCT_ACCEPTANCE';save();return receipt;
  }catch(e){receipt.status='FAILED_RETAIN_AND_RECONCILE';receipt.error=e.message;if(!publicationFailed)save();throw e;}

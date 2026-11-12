@@ -81,7 +81,7 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run dev:full` | concurrently + server/dev; development. |
 | `npm.cmd run preview` | Najpierw build; frontend preview bez API, nie odbiór produktu. |
 | `npm.cmd run runtime:prepare -- …` | `node scripts/runtime-prepare-cli.mjs`; jawny projekt/profil i NOWY prywatny output według [przewodnika](windows-polyglot.md#2-jawne-prepare-bez-domyślnego-wykonania). Domyślnie `PLAN_ONLY`, nie gotowość; osobne `--execute` wymaga przyjętej spójnej rewizji i pinów/Docker. Nie uruchamia go pakieter. |
-| `npm.cmd test` | Źródła obu rodzin są w ZIP; `tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"`. Teraz tylko izolowany dowód selekcji; pełne wykonanie na spójnej rewizji po implementacji9, nie podczas smoke. |
+| `npm.cmd test` | Źródła obu rodzin są w ZIP; `node scripts/runtime-test.mjs`. Teraz tylko izolowany dowód selekcji; pełne wykonanie na spójnej rewizji po implementacji9, nie podczas smoke. |
 
 Paczka zachowuje wszystkie wybrane testy i ich zależności. Obok15skryptów runtime
 publicznego przepływu skończona allowlista dopuszcza pojedynczy prywatny test-support

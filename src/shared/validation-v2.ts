@@ -64,19 +64,22 @@ export const validateSettingsV2 = guard<SettingsV2>(R.SettingsV2Schema,s=>unique
 export const validateRuntimeConfigV1 = guard<RuntimeConfigV1>(R.RuntimeConfigV1Schema);
 export const validateTaskField = guard<TaskField>(R.TaskFieldSchema,f=>fieldsValid([f]));
 const runtimeProfileValid = (p: RuntimeProfile) => fieldsValid(p.taskFields) && unique(p.expectedTools.map(t=>t.name)) &&
-  (p.adapterFamily === 'java-maven' ? p.compilerRelease !== null && p.analysis.languageLevel === String(p.compilerRelease) && p.language.provider === 'jdt' : p.compilerRelease === null && p.language.provider !== 'jdt') &&
+  (p.adapterFamily === 'java-maven' ? p.compilerRelease !== null && p.analysis.languageLevel === String(p.compilerRelease) && ['builtin','jdt'].includes(p.language.provider) : p.compilerRelease === null && p.language.provider !== 'jdt') &&
   (p.language.provider === 'jdt' ? p.language.imageLockKey !== null && p.language.serverJvm !== null : p.language.serverJvm === null) &&
   (['jdt','pylsp'].includes(p.language.provider) ? p.language.imageLockKey !== null : p.language.imageLockKey === null) &&
   (p.language.provider !== 'pylsp' || p.adapterFamily === 'python') &&
-  (p.language.provider !== 'builtin' || ['node','typescript'].includes(p.adapterFamily)) &&
-  (p.adapterFamily !== 'python' || p.language.provider === 'pylsp');
+  (p.adapterFamily !== 'python' || ['builtin','pylsp'].includes(p.language.provider));
 export const validateRuntimeProfile = guard<RuntimeProfile>(R.RuntimeProfileSchema,runtimeProfileValid);
 export const validateRuntimeCatalog = guard<RuntimeCatalog>(R.RuntimeCatalogSchema,c=>unique(c.profiles.map(p=>p.id)) && c.profiles.every(runtimeProfileValid));
 export const validateImageLock = guard<ImageLock>(R.ImageLockSchema,l=>unique(l.images.map(i=>i.key)) && l.images.every(i=>unique(i.tools.map(t=>t.name))));
 /** Additional trusted-backend cross-file validation. Does not inspect/pull images or establish daemon readiness. */
-export function validateCatalogImageReferences(catalog: unknown, lock: unknown): boolean {
-  return validateRuntimeCatalog(catalog) && validateImageLock(lock) && catalog.profiles.every(p=>{
+export function validateCatalogImageReferences(catalog: unknown, lock: unknown, selectedProfileId?: string): boolean {
+  return validateRuntimeCatalog(catalog) && validateImageLock(lock) &&
+    (selectedProfileId === undefined || catalog.profiles.some(p=>p.id===selectedProfileId)) && catalog.profiles.every(p=>{
     const image = lock.images.find(i=>i.key === p.imageLockKey);
+    // Whole catalog remains structurally/semantically checked. Absent inactive assets
+    // are not readiness; every supplied pin still has to match its declared tools.
+    if (!image && selectedProfileId !== undefined && p.id !== selectedProfileId) return true;
     return image && p.expectedTools.every(t=>image.tools.some(actual=>actual.name === t.name && actual.version === t.version)) &&
       (p.language.imageLockKey === null || lock.images.some(i=>i.key === p.language.imageLockKey));
   });

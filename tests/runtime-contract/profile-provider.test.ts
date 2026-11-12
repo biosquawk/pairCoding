@@ -4,16 +4,16 @@ import { validateRuntimeProfile, validateRuntimeCatalog, validateTaskForProfile 
 import { profile, testsOnly } from './fixtures';
 import type { RuntimeProfile } from '../../src/shared/runtime-v2';
 
-test('ROOT exact Python+builtin counter: reject profile, nested catalog and task admission without mutation', () => {
+test('Lightweight Python+builtin: accept profile, nested catalog and task admission without mutation', () => {
   const p = {id:'python-3.13',label:'Python',adapterFamily:'python',imageLockKey:'py',expectedTools:[{name:'python',version:'3.13.9'}],compilerRelease:null,analysis:{languageLevel:'3.13',preview:false},language:{provider:'builtin',imageLockKey:null,serverJvm:null},taskFields:[]};
   const before = JSON.stringify(p);
-  assert.equal(validateRuntimeProfile(p),false);
-  assert.equal(validateRuntimeCatalog({schemaVersion:1,profiles:[p]}),false);
-  assert.equal(validateTaskForProfile(p,testsOnly()),false);
+  assert.equal(validateRuntimeProfile(p),true);
+  assert.equal(validateRuntimeCatalog({schemaVersion:1,profiles:[p]}),true);
+  assert.equal(validateTaskForProfile(p,testsOnly()),true);
   assert.equal(JSON.stringify(p),before);
 });
 
-test('Python requires pylsp; built-in workers belong only to Node/TypeScript; valid controls retained', () => {
+test('Python builtin/pylsp controls retained; off remains invalid for Python', () => {
   const builtin = {provider:'builtin' as const,imageLockKey:null,serverJvm:null};
   const controls: RuntimeProfile[] = [profile(), profile('java-maven'),
     {...profile(),id:'javascript-node',adapterFamily:'node',language:builtin},
@@ -23,7 +23,7 @@ test('Python requires pylsp; built-in workers belong only to Node/TypeScript; va
     assert.equal(validateRuntimeProfile(p),true,p.id);
     assert.equal(validateRuntimeCatalog({schemaVersion:1,profiles:[p]}),true,p.id);
   }
-  for (const provider of ['builtin','off'] as const) {
+  for (const provider of ['off'] as const) {
     const p = {...profile(),language:{provider,imageLockKey:null,serverJvm:null}};
     assert.equal(validateRuntimeProfile(p),false,`python+${provider}`);
     assert.equal(validateRuntimeCatalog({schemaVersion:1,profiles:[p]}),false);
@@ -40,6 +40,6 @@ test('unsupported cross-family providers and Java release rules remain rejected'
     const p = {...profile(family),language:{provider:'jdt',imageLockKey:'jdt',serverJvm:'27.0.1'}};
     assert.equal(validateRuntimeProfile(p),false,`${family}+jdt`);
   }
-  assert.equal(validateRuntimeProfile({...profile('java-maven'),language:{provider:'builtin',imageLockKey:null,serverJvm:null}}),false);
+  assert.equal(validateRuntimeProfile({...profile('java-maven'),language:{provider:'builtin',imageLockKey:null,serverJvm:null}}),true);
   assert.equal(validateRuntimeProfile({...profile('java-maven'),compilerRelease:21,analysis:{languageLevel:'27',preview:false}}),false);
 });

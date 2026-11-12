@@ -196,8 +196,8 @@
         "preview": false
       },
       "language": {
-        "provider": "pylsp",
-        "imageLockKey": "pylsp-runtime-3.13",
+        "provider": "builtin",
+        "imageLockKey": null,
         "serverJvm": null
       },
       "taskFields": [
@@ -305,9 +305,9 @@
         "preview": false
       },
       "language": {
-        "provider": "jdt",
-        "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0.2"
+        "provider": "builtin",
+        "imageLockKey": null,
+        "serverJvm": null
       },
       "taskFields": [
         {
@@ -400,9 +400,9 @@
         "preview": false
       },
       "language": {
-        "provider": "jdt",
-        "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0.2"
+        "provider": "builtin",
+        "imageLockKey": null,
+        "serverJvm": null
       },
       "taskFields": [
         {
@@ -495,9 +495,9 @@
         "preview": false
       },
       "language": {
-        "provider": "jdt",
-        "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0.2"
+        "provider": "builtin",
+        "imageLockKey": null,
+        "serverJvm": null
       },
       "taskFields": [
         {
@@ -614,9 +614,9 @@
         "preview": false
       },
       "language": {
-        "provider": "jdt",
-        "imageLockKey": "jdt-runtime-27",
-        "serverJvm": "27.0.1.0.2"
+        "provider": "builtin",
+        "imageLockKey": null,
+        "serverJvm": null
       },
       "taskFields": [
         {

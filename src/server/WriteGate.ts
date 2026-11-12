@@ -62,9 +62,14 @@ export class WriteGate {
   }
 
   /** Ordered server admission path, including writes queued before a Run capture. */
-  writeAsync(input: MutationAuth & { path: string; baseVersion: number; content: string }, assertScopeCurrent:()=>void = ()=>{}): Promise<Document> {
+  writeAsync(input: MutationAuth & { path: string; baseVersion: number; content: string }, assertScopeCurrent:()=>void = ()=>{},
+      onCommitted?: (document: Readonly<Document>) => void): Promise<Document> {
     const accepted = structuredClone(input);
-    return this.workspace._withQueuedMutation(async () => this.writeAuthorized(accepted,assertScopeCurrent));
+    return this.workspace._withQueuedMutation(async () => {
+      const document = this.writeAuthorized(accepted,assertScopeCurrent);
+      onCommitted?.(structuredClone(document));
+      return document;
+    });
   }
 
   /** Actual CODE_CHANGED commit seam. Precommit capture is synchronous; the postcommit token

@@ -50,7 +50,7 @@ test('finite private support selected by both policies, public command unchanged
   assert.equal(plan.commands.length, 11); assert.ok(!plan.commands.some(c => c.command.includes('remainder')));
   assert.ok(plan.commands.find(c => c.name === 'test').requiredFiles.includes(support));
   assert.ok(!plan.commands.find(c => c.name === 'runtime:prepare').requiredFiles.includes(support));
-  assert.equal(plan.commands.find(c => c.name === 'test').command, 'tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"');
+  assert.equal(plan.commands.find(c => c.name === 'test').command, 'node scripts/runtime-test.mjs');
   for (const name of ['scripts/runtime-unreviewed.mjs', 'scripts/runtime-recovery-controller.mjs',
     'scripts/runtime-operator-remainder-copy.mjs', 'scripts/.env.local']) assert.equal(selected.includes(name), false, name);
   const dest = path.join(f.base, 'verified');

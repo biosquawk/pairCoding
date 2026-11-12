@@ -18,9 +18,8 @@ import { validateReconcileMutationRequestV2, validateMutationOutcomeV2, validate
 import type { ProjectV2, RunRequestV2, SessionBundleV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import type { LanguageView } from '../shared/language-v2';
 import { validateLanguageClientMessage } from '../shared/validation-v2';
-import { RuntimeLanguageOwner } from './runtime-coordinator/RuntimeLanguageOwner';
-import { LanguageProcessAdmission } from './language/DockerLanguageProcess';
-import { DockerLanguageDriver, type LanguageDockerDriver } from './language/DockerLanguageDriver';
+import type { LanguageDockerDriver } from './language/DockerLanguageDriver';
+import type { LanguageBootstrapV2 } from '../shared/language-authority-v2';
 import { createRuntimeExecution } from './runtime-coordinator/RuntimeExecution';
 import { retainRuntimeExecutionLayout } from './runtime-coordinator/RuntimeExecutionLayout';
 import { createRuntimeDockerTransport } from './runtime-coordinator/RuntimeDockerTransport';
@@ -47,7 +46,7 @@ export interface ServerOptions {
   /** Programmatic options, not HTTP/config/env discovery surfaces. Production composition is index. */
   runtimeArguments?: readonly string[]; runtimeEnvironment?: RuntimeEnvironment;
   runtimeTransport?: Pick<DockerTransport, 'run'>;
-  /** UNIT process I/O seam only. Production always builds the credential-free Docker driver. */
+  /** Inert historical test seam. Lightweight never constructs a language driver/owner. */
   runtimeLanguageDriver?: LanguageDockerDriver;
   /** Trusted programmatic dependency only, never an env/task/HTTP selector. */
   dockerExecutable?: string;
@@ -121,7 +120,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   let coach:CoachService|undefined, execution:ExecutionServices|undefined;
   let reports:ExecutionServices['reports']|undefined;
   let runtimeExecution: ReturnType<typeof createRuntimeExecution> | undefined;
-  const languageAdmission=new LanguageProcessAdmission();
   const peers = new Map<WebSocket,{id:string;clientId:string|null; authenticated:boolean; alive:boolean; count:number; since:number; queued:number; queue:Promise<void>; handshakeGeneration:string|null;leaseSession:SessionController|null}>();
   const server = http.createServer((req,res) => { void handleHttp(req,res); });
   server.requestTimeout = 10000; server.headersTimeout = 10000; server.maxHeadersCount = 64;
@@ -156,7 +154,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     }
   }
   async function getProject():Promise<ProjectV2> {
-    return binding?.language?binding.language.readProjection(readProject):readProject();
+    return readProject();
   }
   async function readProject(): Promise<ProjectV2> {
     const bound = startup, core = currentCore();
@@ -179,12 +177,15 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     currentCore().session.assertClient(clientId,currentCore().session.state.sessionId);
   }
   function languageProjection(bound:RuntimeStartup):LanguageView {
-    if(bound===startup && binding?.language)return binding.language.view();
+    // Server conveys configuration only, never browser worker readiness.
+    const configured=bound.configuration.resolved??bound.configuration.local;
+    const local=['builtin','off'].includes(configured?.profile.language.provider??'');
+    const problem=local ? null : bound.configuration.problem ?? {
+      code:'LOCAL_LANGUAGE_UNAVAILABLE',message:'Local language features are not configured.',
+      recovery:'Repair the runtime configuration; manual editing remains available.',retryable:true};
     return {projectId:requireRuntimeWorkspace(bound).workspace.projectId,
-      profileId:bound.configuration.resolved?.profile.id ?? 'unconfigured',configurationGeneration:bound.configuration.configurationGeneration,
-      providerGeneration:'unavailable',state:'OFF',autocomplete:'OFF',docs:'N/A',
-      problem:{code:'LANGUAGE_PROVIDER_UNAVAILABLE',message:'Language provider composition is not available.',
-        recovery:'Keep editing; language runtime integration is required before completion can be enabled.',retryable:true}};
+      profileId:configured?.profile.id ?? 'unconfigured',configurationGeneration:bound.configuration.configurationGeneration,
+      providerGeneration:bound.configuration.configurationGeneration,state:'OFF',autocomplete:'OFF',docs:'N/A',problem};
   }
   async function saveSettings(original:UpdateSettingsRequestV2):Promise<ProjectV2> {
     const request=clone(original), bound=startup, owner=binding!, core=currentCore();
@@ -282,7 +283,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     return response;
   }
   async function getBundle():Promise<SessionBundleV2> {
-    return binding?.language?binding.language.readProjection(readBundle):readBundle();
+    return readBundle();
   }
   async function readBundle():Promise<SessionBundleV2> {
     const bound=startup, settingsHash=currentCore().readSettings().sourceSha256, project=await getProject();
@@ -293,10 +294,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if (activePath) { try { activeDocument=workspace.getDocument(activePath); } catch { /* explicit file GET reports read error */ } }
     if(workspace.workspaceVersion!==project.workspaceVersion || state.workspaceVersion!==project.workspaceVersion ||
       currentCore().readSettings().sourceSha256!==settingsHash) fail(409,'PROJECT_STATE_CHANGED','Snapshot changed while preparing the actual binding.');
-    if(languageProjection(bound).providerGeneration!==project.capabilities.language.providerGeneration)fail(409,'PROJECT_STATE_CHANGED','Language owner changed during snapshot.');
-    return {session:state,project,activeDocument,proposals:clone(proposals),lastRun:clone(currentRuntimeRun()),report:clone(report),chat:clone(chat),languageBootstrap:binding?.language?.bootstrap()??null};
+    if(languageProjection(bound).providerGeneration!==project.capabilities.language.providerGeneration)fail(409,'PROJECT_STATE_CHANGED','Local provider configuration changed during snapshot.');
+    return {session:state,project,activeDocument,proposals:clone(proposals),lastRun:clone(currentRuntimeRun()),report:clone(report),chat:clone(chat),languageBootstrap:binding?.bootstrap()??null};
   }
-  async function snapshot() { const bundle=await getBundle(); emit('SESSION_SNAPSHOT',bundle);binding?.language?.published(); }
+  async function snapshot() { const bundle=await getBundle(); emit('SESSION_SNAPSHOT',bundle); }
   function postProposal(decision:Extract<CoachDecision,{kind:'PROPOSE'}>) {
     // Defense in depth for stale/injected CoachService implementations bypassing the adapter.
     if(decision.proposalKind==='GENERATE_TESTS') {
@@ -310,13 +311,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   // Preparation owns its core, listeners and services. Nothing may publish to the old binding.
   async function prepareBinding(core:Core, owner:RuntimeStartup) {
     const {workspace:boundWorkspace,session:boundSession}=core;
-    let active=false, disposed=false, languagePreparing=false;
+    let active=false, disposed=false;
     let boundCoach:CoachService|undefined, boundExecution:ExecutionServices|undefined;
     let boundReports:ExecutionServices['reports']|undefined;
     let boundRuntime: ReturnType<typeof createRuntimeExecution> | undefined, runtimeError:unknown;
-    let language:RuntimeLanguageOwner|undefined;
+    let localBootstrap:LanguageBootstrapV2|null=null;
     let layout:ReturnType<typeof retainRuntimeExecutionLayout>|undefined;
-    let lastControl={epoch:boundSession.state.controlEpoch,owner:boundSession.state.writeOwner};
     let mutations:DurableMutationJournal|undefined, clients:RuntimeClientOwnership|undefined;
     let saves:RuntimeSettingsMutation|undefined, runs:RuntimeRunMutation|undefined, network:RuntimeNetworkMaintenance|undefined;
     const pending=new Set<Promise<unknown>>();
@@ -324,8 +324,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     const listeners:{source:WorkspaceService|SessionController;event:string;handler:(...args:any[])=>void}[]=[];
     const publish=(type:string,payload:unknown)=>{
       if(!active)return;
-      if(type==='CONTROL_PREPARE'){languagePreparing=true;language?.revoke();}
-      else if(type==='CONTROL_STATE'&&languagePreparing){languagePreparing=false;rebootstrap();}
       emit(type,payload);
     };
     const boundContext:ServiceContext={...core,emit:publish,onProposal:decision=>{if(active)postProposal(decision);},
@@ -337,25 +335,16 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         };
         const checked=()=>{assertBound();const value=read();assertBound();return value;};
         assertBound();
-        let value:T;
-        if(language)value=await language.readProjection(async()=>checked());
-        else {
-          // Context reads occur AFTER the actual mutation FIFO releases, never inside its action.
-          await boundWorkspace._withQueuedMutation(async()=>{});value=checked();
-        }
+        // Ordinary mutation FIFO only: no language source/capture/readiness dependency.
+        await boundWorkspace._withQueuedMutation(async()=>{});
+        const value=checked();
         assertBound();return value;
       }};
     const on=(source:WorkspaceService|SessionController,event:string,handler:(...args:any[])=>void)=>{
       source.on(event,handler);listeners.push({source,event,handler});
     };
-    function rebootstrap(){
-        if(!language || !active || disposed)return;
-        language.revoke();if(closing||transitioning||languagePreparing)return;
-        void track(language.rebootstrap().then(async()=>{await boundWorkspace._withQueuedMutation(async()=>{});if(active&&!disposed&&!closing&&!transitioning)await snapshot();})).catch(()=>{});
-    }
     async function dispose() {
       if(disposed)return;
-      if(language && !await language.retire())fail(409,'LANGUAGE_RECOVERY_REQUIRED','Retain the same language owner; retirement is unconfirmed.');
       disposed=true;active=false;
       await Promise.allSettled([...pending]);
       await network?.close();
@@ -398,33 +387,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           for(const a of mutations.runAdmissions())await runs.recover(a.identity.payload as RunRequestV2);
         } catch(error) {runtimeError=error;}
       }
-      // Language ownership is separate from Run enablement; neither has a host fallback.
-      try {
-        layout ??= retainRuntimeExecutionLayout(boundWorkspace.dataDir,path.join(path.dirname(owner.arguments.runtimeConfigPath),'.paircoach-runtime'),
-          boundWorkspace.rootPath,boundWorkspace.projectId,mutations.runAdmissions().map(a=>a.stage.plan),owner.arguments.preparedRuntimeRoots);
-        const client=startupTransports.get(owner)!;
-        const productionTransport=createRuntimeDockerTransport({stateDirectory:layout.stateDirectory,executable:options.dockerExecutable});
-        if(!options.runtimeTransport)client.install(productionTransport);
-        const driver=options.runtimeLanguageDriver ?? new DockerLanguageDriver({
-          executable:options.dockerExecutable ?? (process.platform==='win32'?'C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe':'/usr/bin/docker'),
-          dockerConfigDirectory:path.join(layout.stateDirectory,'docker-config'),
-          host:process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock'});
-        language=new RuntimeLanguageOwner({startup:owner,layout,driver,transport:client.transport,admission:languageAdmission,
-          onBootstrapReady:async()=>{await boundWorkspace._withQueuedMutation(async()=>{});if(active&&!disposed&&!closing&&!transitioning)await snapshot();},
-          assertCurrent:()=>{if(disposed || startup!==owner || transitioning || closing || languagePreparing)fail(409,'PROJECT_STATE_CHANGED','Actual language project owner changed or control preparation is pending.');}});
-      } catch(error) { /* Editing remains available; no language bootstrap/readiness is invented. */ }
-      on(boundWorkspace,'changed',(change:{path?:string;workspaceVersion:number;actor:string})=>{
-        if(!language || language.ownsCommit(change))return;
-        if(change.actor==='SETTINGS' || language.scopeChanged() || change.path && language.hasOverlay(change.path))rebootstrap();
-        else language.sourceChanged();
-      });
-      on(boundSession,'invalidate',()=>{if(language?.scopeChanged())rebootstrap();else language?.sourceChanged();});
-      on(boundSession,'veto',()=>rebootstrap());
-      on(boundSession,'control',()=>{
-        const changed=lastControl.epoch!==boundSession.state.controlEpoch || lastControl.owner!==boundSession.state.writeOwner;
-        lastControl={epoch:boundSession.state.controlEpoch,owner:boundSession.state.writeOwner};
-        if(changed)rebootstrap();
-      });
       if(options.executionFactory) { boundExecution=options.executionFactory(boundContext); boundReports=boundExecution.reports; }
       else if(options.enableExecution) {
         // Reports are independent from Run availability; NEVER instantiate the legacy host Runner.
@@ -440,7 +402,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       on(boundWorkspace,'watcherError',(error:unknown)=>publish('ERROR',apiError(error)));
       on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
       on(boundSession,'veto',()=>boundCoach?.abort());
-      return {execution:boundExecution,runtime:boundRuntime,runtimeError,language,mutations,clients,saves,runs,network,track,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
+      return {execution:boundExecution,runtime:boundRuntime,runtimeError,bootstrap:()=>clone(localBootstrap),connectLocal(connectionGeneration:string){
+        const resolved=owner.configuration.resolved??owner.configuration.local;
+        localBootstrap=resolved && ['builtin','off'].includes(resolved.profile.language.provider) ? {
+          connectionGeneration,shadowGeneration:randomUUID(),provider:resolved.profile.language.provider as 'builtin'|'off',
+          features:resolved.profile.language.provider==='builtin' ? clone(resolved.config.languageFeatures) : {completion:false,diagnostics:false}} : null;
+      },mutations,clients,saves,runs,network,track,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
     } catch(error) {await dispose();throw error;}
   }
   let binding:Awaited<ReturnType<typeof prepareBinding>>|undefined;
@@ -547,7 +514,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       session.assertClient(clientId,sessionId);
       // The cutoff is synchronous, before any provider abort await.
       const previousEpoch=session.state.controlEpoch;
-      binding?.language?.revoke();
       const result=session.veto();
       if(result.controlEpoch!==previousEpoch) facts.push({type:'VETO_EXECUTED',at:new Date().toISOString(),epoch:result.controlEpoch});
       coach?.abort(); return clone(result);
@@ -556,7 +522,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   async function stopRuntimeForTransition(requireNoPendingAdmission=true) {
     if(options.enableExecution && !options.executionFactory && (!runtimeExecution || binding?.runtimeError))
       fail(409,'RUN_RECOVERY_REQUIRED','Runtime ownership could not be recovered; finish/project replacement cannot forget retained Runs. Editing remains available.');
-    if(binding?.language && !await binding.language.retire())fail(409,'LANGUAGE_RECOVERY_REQUIRED','Retained language owner blocks project/finish transition until retirement is confirmed.');
     await runtimeExecution?.stopAll();
     if(requireNoPendingAdmission && options.enableExecution && !options.executionFactory)binding?.mutations.assertNoPendingRuns();
   }
@@ -768,7 +733,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     ws.on('error',()=>{ /* close handler revokes this connection; no token-bearing errors logged */ });
     ws.on('close',()=>{
       clearTimeout(helloDeadline);peers.delete(ws);
-      if(peer.handshakeGeneration && peer.leaseSession===startup?.core?.session)binding?.language?.revoke();
       if(peer.handshakeGeneration && peer.leaseSession && peer.clientId && ![...peers.values()].some(p=>(p.authenticated || p.handshakeGeneration!==null) && p.clientId===peer.clientId && p.leaseSession===peer.leaseSession)) {
         coach?.abort();peer.leaseSession.releaseLease(peer.clientId);
       }
@@ -792,7 +756,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(!session.claimLease(message.clientId)) {ws.close(1008,'Lease conflict');return;}
         try {binding!.clients.bind(message.clientId,message.sessionId);} catch(error) {session.releaseLease(message.clientId);throw error;}
         const helloGeneration=randomUUID(), helloBinding=startup;
-        binding?.language?.revoke();
         peer.clientId=message.clientId;peer.handshakeGeneration=helloGeneration;peer.leaseSession=session;
         // Revoke a prior same-client peer BEFORE any new snapshot/control publication.
         for(const [old,p] of peers) if(old!==ws && p.clientId===message.clientId) {p.authenticated=false;p.handshakeGeneration=null;old.close(1012,'Replaced by reconnect');}
@@ -802,19 +765,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         // Reading inside another held capture is correctly WORKSPACE_BUSY, not a cached bootstrap.
         await helloBinding.core!.workspace._withQueuedMutation(async()=>{});
         if(peer.handshakeGeneration!==helloGeneration || startup!==helloBinding || closing)return;
-        await binding?.language?.connect({id:peer.id,clientId:message.clientId,connectionGeneration:helloGeneration,
-          assertCurrent:()=>{
-            if(peers.get(ws)!==peer || peer.handshakeGeneration!==helloGeneration || startup!==helloBinding || closing || ws.readyState!==WebSocket.OPEN)
-              fail(409,'PEER_REVOKED','Actual HELLO transport was revoked.');
-            helloBinding.core!.session.assertClient(peer.clientId!,helloBinding.core!.session.state.sessionId);
-          },emit:event=>{
-            if(peers.get(ws)!==peer || !peer.authenticated || peer.handshakeGeneration!==helloGeneration || startup!==helloBinding || closing || ws.readyState!==WebSocket.OPEN)return;
-            const frame=envelope(event.type==='STATUS'?'LANGUAGE_STATUS':'DIAGNOSTICS',event.type==='STATUS'?event.status:event.result);
-            ws.send(JSON.stringify(frame));
-          }});
+        binding?.connectLocal(helloGeneration);
         const bundle=await getBundle();
         if(!peers.has(ws) || ws.readyState!==WebSocket.OPEN || peer.handshakeGeneration!==helloGeneration || startup!==helloBinding || closing) return;
-        peer.authenticated=true;emit('SESSION_SNAPSHOT',bundle);binding?.language?.published();return;
+        peer.authenticated=true;emit('SESSION_SNAPSHOT',bundle);return;
       }
       if(!peer.authenticated || message.clientId!==peer.clientId) {ws.close(1008,'HELLO required');return;}
       const admitted=startup, admittedGate=gate,admittedOwner=binding!;
@@ -824,13 +778,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         session.assertClient(message!.clientId,message!.sessionId);
       };
       assertPeerCurrent();
-      if(validateLanguageClientMessage(message)) {
-        if(!binding?.language)fail(503,'LANGUAGE_OWNER_UNAVAILABLE','Language owner is unavailable; keep editing.');
-        const result=await binding.language.handle(peer.id,message);
-        assertPeerCurrent();
-        if(result)ws.send(JSON.stringify(envelope('COMPLETE_RESULT',result)));
-        return;
-      }
+      if(validateLanguageClientMessage(message))
+        fail(400,'REMOTE_LANGUAGE_DISABLED','Remote language messages are retired. Use local editor features; manual editing remains available.');
       const p=message.payload;
       if(message.type==='VETO_ESCAPE') {
         const op=await veto(message.messageId,message.clientId,message.sessionId,p);await op.result;ack(message,op.duplicate?'DUPLICATE':'OK');return;
@@ -860,9 +809,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             // Never publish an old project's result into a replacement project/session.
             if(startup===admitted&&!closing)emit('ACK',receipt.payload,receipt.messageId);
           };
-          if(binding?.language)await binding.language.writeWithAck(input,{peerId:peer.id,transactionMessageId:command.messageId,
-            languageDocumentMessageId:p.languageDocumentMessageId??null,receiptId},assertPeerCurrent,publish,captureCommit);
-          else await admittedGate._writeWithLanguageCommit(input,{assertCurrent:assertPeerCurrent,beforeCommit:()=>null,afterCommit:async document=>{captureCommit(document);publish();}});
+          await admittedGate.writeAsync(input,assertPeerCurrent,document=>{captureCommit(document);publish();});
           if(!receipt)throw Error('Missing original committed CODE_CHANGED receipt');
           // A coach observer cannot retroactively turn the already committed/published save
           // into REJECTED or replace its retained transaction receipt.

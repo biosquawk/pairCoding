@@ -2,7 +2,7 @@
 import legacy from './ws.schema.json';
 import { ExecutionViewSchema, RunProfileV2Schema, RunRequestV2Schema, RunV2Schema, SettingsV2Schema, UpdateSettingsRequestV2Schema } from './runtime-v2.schema';
 import { LanguageClientMessageSchema, LanguageServerMessageSchema, LanguageViewSchema } from './language-v2.schema';
-import { id, nullable, object, enumeration } from './schema-v2';
+import { id, nullable, object, enumeration, bool } from './schema-v2';
 import { MutationOutcomeV2Schema, ReconcileMutationRequestV2Schema } from './runtime-mutation-v2.schema';
 export const ProtocolV2Schema = {
   ...legacy, $id: 'urn:paircoach:runtime-language:v2', title: 'PairCoach runtime/language V2 migration boundary',
@@ -11,7 +11,8 @@ export const ProtocolV2Schema = {
     SessionBundle: {
       ...legacy.$defs.SessionBundle,
       properties: { ...legacy.$defs.SessionBundle.properties,
-        languageBootstrap: nullable(object({ connectionGeneration: id, shadowGeneration: id, provider: enumeration('builtin','remote','off') })),
+        languageBootstrap: nullable({ ...object({ connectionGeneration: id, shadowGeneration: id, provider: enumeration('builtin','remote','off'),
+          features: object({ completion: bool, diagnostics: bool }) }), required: ['connectionGeneration','shadowGeneration','provider'] }),
       },
       required: [...legacy.$defs.SessionBundle.required, 'languageBootstrap'],
     },

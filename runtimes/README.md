@@ -1,3 +1,13 @@
+## Lightweight policy (current)
+All seven catalog profiles and regenerated templates select builtin/null/null. Public prepare,
+staging and the operator plan prepare execution assets only; no language images/artifacts/readiness.
+The historical language recipes below/above are inert source history, not current instructions.
+Use the public flow in docs/windows-polyglot.md. Generated selectors contain one profile only;
+changing target requires preparing that profile into a new output and restarting with its selectors.
+Local Java/Python completion is current-document prefix words; typing diagnostics=N/A.
+
+---
+
 # Runtime adapter wave1 — explicit fail-closed preparation
 
 `catalog.json` defines the seven profile IDs and neutral task fields. Only the dispatcher Node22.22.0
@@ -48,7 +58,7 @@ are disabled on npm prepare; Python uses --require-hashes/--only-binary. Run has
 Preparation checks actual tool versions against expectedTools and retains raw probes in cache tools.json.
 Before publishing production images.lock: inspect exact built imageId + real OCI digest (local
 imageId is NOT presumed registry digest), record actual tools from runtime-tools.mjs and compare
-all expected versions, add complete expectedTools to catalog; include language image pins from its
+all expected versions, add complete expectedTools to catalog; execution image pins come from its
 owner. Run actual offline task Main/Test after prepare with no registry access, prove source unchanged,
 current XML, effective javac release/preview and failed/passed variants. K must review ONE bounded
 operator request with exact argv/pins/source/ownership/limits/artifacts/cleanup before any live run.

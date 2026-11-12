@@ -66,10 +66,12 @@ nie upoważnia aplikacji do zgadywania klasy/skryptu. Nie zastępuj całych istn
 settings plikiem zawierającym tylko `runProfiles`; zachowaj pozostałe ustawienia.
 Inny własny projekt z innymi klasami/skryptami wymaga swoich selektorów, nie zmiany aplikacji.
 
-Java przykład ma początkowo `maven.compiler.release=11`; człowiek jawnie zmienia
-`pom.xml` na 17/21/27 przed wyborem odpowiedniego profilu. Spring ma początkowo21:
-dla27 zmień **oba** `java.version` i `maven.compiler.release` na27. Wymagana zgodność
-release / poziomu analizy / preview; adapter nie zmienia POM i nie obniża wersji po cichu.
+Korekta właściciela z 2026-11-12: profil runtime wybiera **rzeczywisty JDK**, a
+`maven.compiler.release` pochodzi z POM projektu. Nie zmieniaj POM ani `java.version`
+wyłącznie z powodu przejścia na nowszy kontener, np.21→27. Raport ma rozróżniać JDK
+oraz targetRelease. Pozostała walidacja i rzeczywiste błędy kompilatora pozostają.
+**Checkpoint B odłącza LSP; usunięcie historycznej równości release==JDK oraz osobny
+konfigurowalny timeout/log/cancel prepare są jeszcze do wdrożenia przed odbiorem C.**
 Spring nie jest oddzielnym profilem ani językiem i nie jest wspierany przez profile11/17.
 
 ## 1a. Pełne ustawienia projektu — PRZED prepare
@@ -226,21 +228,27 @@ Nieznane flagi, powtórzony config/receipt lub root, brak wartości, ścieżki w
 lub znaki sterujące są odrzucane; powtarzanie `--prepared-runtime` jest dozwolone
 dla różnych rozłącznych roots w podanym limicie. Nie ma flag CLI installationId, engine ani network.
 
-Dla włączonego zdalnego JDT/pylsp potrzebny jest dodatkowo **autentyczny receipt LANGUAGE**
-z jawnie dopuszczonego producenta, nie receipt Run, image lock ani plik napisany ręcznie:
+W Lightweight wszystkie siedem profili używa `builtin` z `imageLockKey: null` i
+`serverJvm: null`. Prepare pobiera/buduje wyłącznie zasoby wykonania, nigdy JDT/pylsp;
+nie przygotowuj ani nie przekazuj receipt LANGUAGE. Historyczna flaga
+`--language-receipt` jest tylko walidowana składniowo i ignorowana — nie uruchamia LSP.
 
-```powershell
-# Tylko gdy taki prawdziwy LANGUAGE receipt zostal juz przygotowany i dopuszczony.
-$languageReceipt = (Resolve-Path (Read-Host 'Pelna sciezka autentycznego LANGUAGE receipt')).Path
-npm.cmd run server -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot --language-receipt $languageReceipt
-```
+`languageFeatures.completion: false` wyłącza lokalne podpowiedzi;
+`diagnostics: false` wyłącza diagnostykę lokalnego workera JS/TS. Java/Python mają
+podpowiedzi słów z **bieżącego dokumentu** po prefiksie (Ctrl+Space), bez semantyki metod
+po kropce. Diagnostyka Java/Python podczas pisania jest `N/A`, nawet przy `diagnostics: true`;
+błędy kompilacji/wykonania/testów czytaj po Run/Test w Konsoli. `builtin` nie oznacza ON:
+stan wyznacza rzeczywisty lokalny provider/worker. Jego awaria nie blokuje ręcznej edycji,
+a zapis/Run/trener nie wymagają ramki LANGUAGE, shadow ani gotowości LSP.
 
-To wariant startu zamiast poprzedniej komendy, nie drugi równoległy serwer.
-W WSL opcjonalne `--language-receipt <ABS-WSL-LANGUAGE-receipt>` ma tę samą semantykę.
-Sam selektor/istnienie receipt nie daje language READY: konsument weryfikuje rzeczywisty
-engine, obraz, narzędzia, Config i zależności. Gdy `completion` i `diagnostics` są oba
-`false`, język jest OFF, bez zdalnego zasobu; ręczny zapis działa dalej. Włączone tylko
-jedno pole nie upoważnia do uruchomienia drugiej funkcji. Nie wymuszaj flag ani READY.
+Wygenerowany config i katalog dotyczą **jednego przygotowanego profilu**. Aby przejść
+z Java21 do Java27, uruchom publiczne prepare dla `--profile java-maven-27` do NOWEGO
+outputu i uruchom aplikację z jego nowym `runtime-config.json` oraz `jobs/java-maven-27`.
+Sama zmiana `activeProfile` w wygenerowanym jednoprofilowym katalogu nie wystarcza.
+Główny katalog siedmiu profili pozostaje walidowany w całości; brak pinów nieaktywnych
+profili nie wymaga przygotowywania ich przed wybranym Java21. Brak pinu aktywnego
+profilu nadal nie daje gotowości wykonania — żadnych wymyślonych imageId/digestów.
+
 W WSL użyj `npm start -- --runtime-config <ABS-WSL-runtime-config.json>
 --prepared-runtime <ABS-WSL-jobs/profile>`; oba selektory muszą pochodzić z tego samego
 środowiska przygotowania, nie mieszanego Windows/WSL. Jawny `--runtime-config` wybiera
@@ -252,7 +260,9 @@ rzeczywisty engine/obraz/narzędzia i kompletność cache
 `cache/<family>/<toolchainHash>/<dependencySha256>`. `imageLock` wymaga zmierzonego
 imageId **oraz prawdziwego** OCI manifest/INDEX Descriptor lub RepoDigest; samo imageId
 nie jest dowodem digestu. W Docker Desktop obie wartości mogą być równe, jeśli istnieje
-rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty lock blokuje Run.
+rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty lock blokuje Run, ale zwalidowany config/katalog/profil nadal udostępnia lokalne
+features i wybrany workspace: HTTP/WS, completion i zapis nie wymagają obrazów ani cache.
+Backend nie poświadcza uruchomienia lokalnego providera.
 CLI czyta rzeczywiste pełne SettingsV2 i wspólne task.workingDirectory, a backend ponownie
 sprawdza aktualny stan; staging/receipt CLI nie zastępuje WriteGate ani aktualnego źródła.
 
@@ -431,7 +441,7 @@ Language READY/semantyka oraz realny Spring health wymagają osobnych dowodów;
    **przed prepare** (sekcja1a), nie dopiero po starcie. Oczekuj
    właściwego profilu i osobnej gotowości Main/Tests według sekcji2c; dla Spring
    przed Main jawnie przygotuj SAME sieć według sekcji2b i odśwież projekcję.
-   `INDEXING` nie jest `ON` LSP.
+   Stan lokalnej funkcji nie jest gotowością Docker; `builtin` samo nie daje ON.
 2. Run Tests: przykłady celowo odejmują zamiast dodawać, oczekiwany **FAILED**.
    Zmień samą logikę odejmowania na dodawanie w `main.js`, `main.ts`, `calculator.py`,
    `StrategyDemo.java` lub `CounterApplication.java`, nie test. Zaczekaj na prawdziwy
@@ -442,15 +452,15 @@ Language READY/semantyka oraz realny Spring health wymagają osobnych dowodów;
    HTTP `/sum` pod pokazanym `http://127.0.0.1:<przydzielony-port>/sum`, nie sam tekst
    Started. HTTP-ready nie kończy Run statusem SUCCEEDED. Kliknij Stop: oczekuj
    potwierdzonego zatrzymania właściwego kontenera i braku odpowiedzi endpointu.
-4. Java/Python: completion po kropce i na żądanie ma znać metody projektu; zmiana nazwy
-   ma zmienić listę. Wstaw błąd typu/referencji, sprawdź rzeczywisty marker i jego
-   zniknięcie po poprawce. TS: zwróć string zamiast liczby w `add`, sprawdź realny
-   błąd tsc i popraw typ. Nie myl samego kolorowania z działającym LSP/kompilatorem.
+4. Java/Python: zmień słowo w bieżącym buforze i użyj Ctrl+Space po prefiksie; lista
+   ma uwzględnić zmianę bez oczekiwania na ACK. Nie oczekuj metod projektu ani markerów
+   Java/Python. Błąd kompilacji Java sprawdź po Run/Test. TS: zwróć string zamiast liczby
+   w `add`, sprawdź marker workera i błąd rzeczywistego tsc; popraw typ.
 5. Podpowiedź akceptowana Tab/Enter jest zwykłą edycją STUDENT; CONTROL_PREPARE/COACH
    zamyka widget i blokuje mutację, stare odpowiedzi po wecie nie otwierają go ponownie.
    W Java i Python wykonaj osobno prawdziwą rozmowę trenera oraz weto2×Esc.
 
-Błąd config/daemona/obrazu/prepare/LSP: odczytaj komunikat i recovery w UI. Run/Test
+Błąd config/daemona/obrazu/prepare: odczytaj komunikat i recovery w UI. Run/Test
 mogą być niedostępne, ale HTTP/WS, ręczna edycja, draft i snapshot recovery mają działać.
 Nie kasuj draftu, nie przenoś cache między JDK/projektami i nie traktuj Stop niepotwierdzonego
 jako sukcesu. Po nieznanym wyniku najpierw odczytaj stan tego samego runId/operacji.
@@ -484,6 +494,6 @@ nie z leżącego obok SHA256SUMS. Nie osłabia to istniejącego weryfikatora/rec
 
 Aktualne testy developera weryfikują źródłową selekcję i syntetyczne archiwum, nie
 Docker LIVE. Wymagane po integracji: wszystkie7profili, Spring21/27, offline po prepare,
-rzeczywiste GUI/ACK/Run/Tests/Stop/LSP/AI, Windows i WSL opisane oddzielnie oraz co najmniej
+rzeczywiste GUI/ACK/Run/Tests/Stop/local completion/AI, Windows i WSL opisane oddzielnie oraz co najmniej
 jeden pełny LIVE ze **świeżo rozpakowanej paczki**. Dopiero finalF/niezależny odbiór,
 nie ten dokument ani plan, rozstrzyga TEST101–107 i AC101–112.
