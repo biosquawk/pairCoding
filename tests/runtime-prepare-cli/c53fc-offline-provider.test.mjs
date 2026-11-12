@@ -20,7 +20,7 @@ async function scenario(mode) {
   const exists = p => real.existsSync(map(p));
   const read = p => real.readFileSync(map(p),'utf8');
   const version = mode === 'different-versions' ? '3.4.0' : '3.5.3';
-  const platform = mode === 'different-versions' ? '1.12.2' : '1.11.4';
+  const platform = ['different-versions','managed-transitive-version'].includes(mode) ? '1.12.2' : '1.11.4';
   const provider = `/cache/0/m2/org/apache/maven/surefire/surefire-junit-platform/${version}/provider.jar`;
   const launcher = `/cache/0/m2/org/junit/platform/junit-platform-launcher/${platform}/launcher.jar`;
   const effective = {project:{modelVersion:'4.0.0',groupId:'example',artifactId:'student',version:'1',
@@ -34,6 +34,16 @@ async function scenario(mode) {
           configuration:{testClassesDirectory:'/workspace/target/test-classes',dependenciesToScan:{dependency:'student:code'},suiteXmlFiles:{suiteXmlFile:'pupil-suite.xml'},argLine:'-Dstudent=true'},
           executions:{execution:{id:'pupil-lifecycle'}}}]}}}};
   let xml = new XMLBuilder({ignoreAttributes:false}).build(effective);
+  if(mode === 'managed-transitive-version') {
+    // Data forwarding counterexample, NOT a fake assertion that Maven actually mediated versions.
+    // Keep direct Jupiter5.11.4 but effective managed transitive engine/launcher1.12.2.
+    effective.project.dependencyManagement={dependencies:{dependency:[
+      {groupId:'org.junit.platform',artifactId:'junit-platform-engine',version:'1.12.2',type:'jar',scope:'test',exclusions:{exclusion:{groupId:'org.example',artifactId:'excluded-engine-transitive'}}},
+      {groupId:'org.junit.platform',artifactId:'junit-platform-launcher',version:'1.12.2',type:'jar',scope:'test'},
+      {groupId:'org.example',artifactId:'unused-managed-test-fixtures',version:'2.0',type:'jar',classifier:'tests',scope:'test',optional:'true',exclusions:{exclusion:{groupId:'org.example',artifactId:'excluded-fixture-transitive'}}}
+    ]}};
+    xml=new XMLBuilder().build(effective);
+  }
   if(mode === 'unrelated-plugin-overrides') { effective.project.build.plugins.plugin.push({groupId:'org.example',artifactId:'unrelated-site-plugin',version:'1.0',extensions:'true',dependencies:{dependency:{groupId:'org.example',artifactId:'site-support',version:'1.0'}}}); xml=new XMLBuilder().build(effective); }
   if(mode === 'plugin-dependencies') { effective.project.build.plugins.plugin[1].dependencies={dependency:{groupId:'org.example',artifactId:'provider-extension',version:'1.0'}}; xml=new XMLBuilder().build(effective); }
   if(mode === 'parallel-provider') { effective.project.build.plugins.plugin[1].configuration.parallel='classes'; xml=new XMLBuilder().build(effective); }
@@ -46,7 +56,7 @@ async function scenario(mode) {
   put('/input/src/test/java/IntentionallyFailingTest.java','NOT_VALID_JAVA: must never compile or execute pupil code in prepare');
   put('/input/package.json','{}');
   put('/cache/0/retained-private-receipt','UNCHANGED');
-  const calls=[]; let offlineChecked=false, onlineChecked=false, probes=0;
+  const calls=[],observedProbeModels=[]; let offlineChecked=false, onlineChecked=false, probes=0;
   const expected=[{name:'java',version:'21'},{name:'maven',version:'3.9.12'}];
   const success={status:0,signal:null,stdout:'',stderr:''};
   const fakeSpawn = (exe,args,options) => {
@@ -83,6 +93,8 @@ async function scenario(mode) {
     assert.ok(file.includes('/.paircoach/runtime/'));
     assert.equal(options.cwd,path.dirname(file),'isolated cwd');
     assert.deepEqual(pom.dependencies,effective.project.dependencies);
+    assert.deepEqual(pom.dependencyManagement,effective.project.dependencyManagement,'retain effective transitive mediation; otherwise provider/launcher can drift from RUN');
+    observedProbeModels.push({offline:args.includes('--offline'),management:pom.dependencyManagement,dependencies:pom.dependencies});
     assert.deepEqual(pom.repositories,effective.project.repositories);
     assert.deepEqual(pom.pluginRepositories,effective.project.pluginRepositories);
     assert.equal(pom.parent,undefined);assert.equal(pom.profiles,undefined);assert.equal(pom.properties,undefined);
@@ -147,6 +159,13 @@ async function scenario(mode) {
         assert.equal(exists(launcher),true);assert.equal(onlineChecked,true);assert.equal(offlineChecked,true);
       } else assert.equal(calls.length,1,'non-Maven preparation unchanged');
       assert.equal(probes,1);
+      if(mode==='managed-transitive-version') {
+        assert.deepEqual(observedProbeModels.map(m=>m.offline),[false,true]);
+        for(const observed of observedProbeModels) {
+          assert.deepEqual(observed.management,effective.project.dependencyManagement,'BOTH online/offline get exact effective management incl exclusions/type/classifier/scope/optional');
+          assert.equal(observed.dependencies.dependency.version,'5.11.4','do not rewrite direct Jupiter for the managed transitive version');
+        }
+      }
       const evidence=JSON.parse(read('/cache/0/dependencies-prepared.json'));
       assert.equal(evidence.dependencySha256,'a'.repeat(64));assert.deepEqual(evidence.tools,expected);
     }
@@ -156,7 +175,7 @@ async function scenario(mode) {
 if(process.argv[2]==='--worker') {
   await scenario(process.argv[3]);
 } else {
-  for(const mode of ['complete','different-versions','unrelated-plugin-overrides','online-provider-refused','offline-provider-missing','offline-launcher-missing','unsafe-xml','duplicate-plugin','unresolved-version','plugin-dependencies','parallel-provider','missing-plugin','online-no-provider','offline-no-provider','offline-other-provider','node-control']) {
+  for(const mode of ['complete','different-versions','managed-transitive-version','unrelated-plugin-overrides','online-provider-refused','offline-provider-missing','offline-launcher-missing','unsafe-xml','duplicate-plugin','unresolved-version','plugin-dependencies','parallel-provider','missing-plugin','online-no-provider','offline-no-provider','offline-other-provider','node-control']) {
     test('C53fc actual cache dispatcher / controlled tool processes: '+mode,()=>{
       const result=childProcess.spawnSync(process.execPath,[fileURLToPath(import.meta.url),'--worker',mode],{env:process.env,encoding:'utf8',timeout:15000,maxBuffer:1024*1024});
       assert.equal(result.error,undefined);assert.equal(result.status,0,result.stdout+result.stderr);

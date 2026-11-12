@@ -57,6 +57,7 @@ if (family === 'node' || family === 'typescript') {
   // determine provider/launcher versions. Do not duplicate Surefire's selector or
   // copy source-POM properties, executions, suites, extra classpaths or argLine.
   const model={project:{modelVersion:'4.0.0',groupId:'org.paircoach.prepare',artifactId:'provider-probe',version:'1',
+    ...(p.dependencyManagement?{dependencyManagement:p.dependencyManagement}:{}),
     ...(p.dependencies?{dependencies:p.dependencies}:{}),
     ...(p.repositories?{repositories:p.repositories}:{}),
     ...(p.pluginRepositories?{pluginRepositories:p.pluginRepositories}:{}),
