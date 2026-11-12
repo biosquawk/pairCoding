@@ -78,10 +78,14 @@ test('pure parser preserves legacy conservative oracles with separate errors, bo
  assert.equal(parseJUnit(' '.repeat(4*1024*1024+1)),null);
  assert.equal(parseJUnit('<testsuites>'+ '<testsuite>'.repeat(70)+'<testsuite tests="0"/>'+ '</testsuite>'.repeat(70)+'</testsuites>'),null);
 });
-async function outcome(xml:string|null,exitCode=0,modify?:(a:CollectedArtifacts)=>void) {
- const p=profile(),r=run(),plan=await new NodeAdapter().buildPlan(context(p,r),r),handle={runId:'run-1',opaqueId:'handle'};
- const a:CollectedArtifacts={handle,inputManifestSha256:H,collectionSha256:H,stdoutPath:'/fixture/stdout',stderrPath:'/fixture/stderr',tools:[],files:xml===null?[]:[{kind:'JUNIT_XML',path:'/fixture/artifacts/run-1.xml',sha256:sha(xml),bytes:Buffer.byteLength(xml),freshForRun:true}]};
- modify?.(a);return interpretOutcome(plan,{handle,exitCode,exitedAt:new Date().toISOString()},a,async()=>Buffer.from(xml??''));
+async function outcome(xml:string|null,exitCode=0,modify?:(a:CollectedArtifacts)=>void,modifyPlan?:(p:ExecutionPlan)=>void) {
+ const p=profile(),r=run(),c=context(p,r),root=path.join('/fixture/runs',c.ownership.runId);
+ // Match the executor's run-owned sibling layout. JUnit is interpreted from the
+ // immutable collection, NEVER from the container-writable artifacts directory.
+ Object.assign(c.input,{immutableDirectory:path.join(root,'input'),buildDirectory:path.join(root,'build'),artifactsDirectory:path.join(root,'artifacts')});
+ const plan=await new NodeAdapter().buildPlan(c,r),handle={runId:'run-1',opaqueId:'handle'};
+ const a:CollectedArtifacts={handle,inputManifestSha256:H,collectionSha256:H,stdoutPath:path.join(root,'collected/stdout'),stderrPath:path.join(root,'collected/stderr'),tools:[],files:xml===null?[]:[{kind:'JUNIT_XML',path:path.join(root,'collected/files/run-1.xml'),sha256:sha(xml),bytes:Buffer.byteLength(xml),freshForRun:true}]};
+ modify?.(a);modifyPlan?.(plan);return interpretOutcome(plan,{handle,exitCode,exitedAt:new Date().toISOString()},a,async()=>Buffer.from(xml??''));
 }
 test('current-input JUnit outcome: positive vs noXML/zero/allSkipped/nonzero/stale/mismatched bytes',async()=>{
  assert.equal((await outcome(xmls[0])).testOutcome,'PASSED');
@@ -89,6 +93,14 @@ test('current-input JUnit outcome: positive vs noXML/zero/allSkipped/nonzero/sta
  assert.equal((await outcome(xmls[4])).testOutcome,'NO_TESTS');
  for(const [xml,code] of [[xmls[0],1],[xmls[3],0],[xmls[1],0],[xmls[2],0]] as const) {const o=await outcome(xml,code);assert.equal(o.testOutcome,'FAILED');assert.equal(o.status,'FAILED');}
  for(const alter of [(a:CollectedArtifacts)=>a.inputManifestSha256='old',(a:CollectedArtifacts)=>a.files[0].freshForRun=false,(a:CollectedArtifacts)=>a.files[0].path='/fixture/old.xml',(a:CollectedArtifacts)=>a.files[0].bytes++,(a:CollectedArtifacts)=>a.files[0].sha256='0'.repeat(64),(a:CollectedArtifacts)=>a.handle={runId:'old',opaqueId:'handle'},(a:CollectedArtifacts)=>a.files=[...a.files,a.files[0]]]) assert.notEqual((await outcome(xmls[0],0,alter)).testOutcome,'PASSED');
+ // The positive fixture must not conceal the original layout guard: current
+ // container output and another run's collected XML remain untrusted too.
+ for(const location of ['/fixture/runs/run-1/artifacts/run-1.xml','/fixture/runs/old/collected/files/run-1.xml'])
+   assert.notEqual((await outcome(xmls[0],0,a=>{a.files[0].path=location;})).testOutcome,'PASSED');
+ for(const alter of [(p:ExecutionPlan)=>Object.assign(p.input,{immutableDirectory:'/fixture/input'}),
+   (p:ExecutionPlan)=>Object.assign(p.input,{buildDirectory:'/fixture/other/build'}),
+   (p:ExecutionPlan)=>Object.assign(p.input,{artifactsDirectory:'/fixture/other/artifacts'})])
+   assert.notEqual((await outcome(xmls[0],0,undefined,alter)).testOutcome,'PASSED');
  assert.equal((await outcome(xmls[2])).errors,1);assert.equal((await outcome(xmls[1])).failures,1);
 });
 test('artifact reader uses actual regular files, rejects symlinks and bounded overread',async()=>{

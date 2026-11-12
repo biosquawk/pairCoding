@@ -16,7 +16,17 @@ function fixture(t: TestContext, overlap=false) {
   fs.writeFileSync(path.join(base,'catalog.json'),JSON.stringify({schemaVersion:1,profiles:[profile]}));fs.writeFileSync(path.join(base,'images.lock.json'),JSON.stringify({schemaVersion:1,images:[image]}));
   fs.writeFileSync(config,JSON.stringify({schemaVersion:1,activeProfile:profile.id,workspaceRoot:project,runtimeCatalog:'catalog.json',imageLock:'images.lock.json',languageFeatures:{completion:true,diagnostics:true},execution:{backend:'docker',pullPolicy:'never'}}));
   const token='http-test-only-valid-length',a=createPairCoachServer({port:0,token,enableExecution:true,runtimeEnvironment:{},runtimeArguments:['--runtime-config',config],dockerExecutable:path.join(root,'missing-approved-docker')});
-  t.after(async()=>{await a.close();fs.rmSync(root,{recursive:true,force:true});});
+  t.after(async()=>{
+    try {
+      // Refused ownership intentionally has no recoverable execution service.
+      // close still cleans up in finally, but cannot certify stopped Runs.
+      if(overlap) {
+        const closed=a.close();await assert.rejects(closed,{code:'RUN_RECOVERY_REQUIRED'});
+        assert.equal(a.close(),closed,'repeat close retains the same unconfirmed outcome');
+      } else await a.close();
+      assert.equal(a.server.listening,false);
+    } finally {fs.rmSync(root,{recursive:true,force:true});}
+  });
   const request=async(port:number,method:string,url:string,body?:unknown)=>{const r=await fetch(`http://127.0.0.1:${port}${url}`,{method,signal:AbortSignal.timeout(5000),headers:{Authorization:`Bearer ${token}`,...body?{'Content-Type':'application/json'}:{}},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};};
   return {root,project,config,a,request,token};
 }
@@ -37,10 +47,22 @@ test('HTTP unsafe config-parent overlap blocks ONLY execution with CONFIG_ERROR,
   const message=JSON.parse((await snapshot)[0].toString());assert.equal(message.type,'SESSION_SNAPSHOT');
   const changed=await f.request(port,'POST','/api/file',{requestId:randomUUID(),clientId:'tab',sessionId:p.body.sessionId,controlEpoch:f.a.session.state.controlEpoch,operation:'CREATE',path:'manual.js',newPath:null,content:'EDITABLE\n',baseVersion:null});
   assert.equal(changed.status,200);assert.equal(fs.readFileSync(path.join(f.project,'manual.js'),'utf8'),'EDITABLE\n');assert.equal(fs.existsSync(path.join(f.project,'.paircoach-runtime')),false);
+  // Successful editor mutations and cleanup are NOT a no-process certificate.
+  // The same unavailable ownership must still fence finalization.
+  const auth={clientId:'tab',sessionId:p.body.sessionId};
+  const snapshots=path.join(f.project,'.paircoach','snapshots-v1'),before=fs.existsSync(snapshots)?fs.readdirSync(snapshots):[];
+  const finished=await f.request(port,'POST','/api/session/finish',{...auth,requestId:randomUUID(),expectedWorkspaceVersion:changed.body.workspaceVersion,reason:'COMPLETED'});
+  assert.equal(finished.status,409);assert.equal(finished.body.code,'RUN_RECOVERY_REQUIRED');assert.equal(f.a.session.state.lifecycle,'READY');
+  assert.deepEqual(fs.existsSync(snapshots)?fs.readdirSync(snapshots):[],before);
 });
 test('HTTP actual UNBOUND never creates managed runtime state even with execution enabled',async t=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'http-execution-unbound-')),config=path.join(root,'absent.json');
   const a=createPairCoachServer({port:0,enableExecution:true,runtimeEnvironment:{},runtimeArguments:['--runtime-config',config]});
-  t.after(async()=>{await a.close();fs.rmSync(root,{recursive:true,force:true});});await a.listen();
+  t.after(async()=>{
+    try {
+      const closed=a.close();await assert.rejects(closed,{code:'RUN_RECOVERY_REQUIRED'});
+      assert.equal(a.close(),closed,'repeat close retains the same unconfirmed outcome');assert.equal(a.server.listening,false);
+    } finally {fs.rmSync(root,{recursive:true,force:true});}
+  });await a.listen();
   assert.throws(()=>a.workspace,{code:'PROJECT_OPEN_REQUIRED'});assert.deepEqual(fs.readdirSync(root),[]);
 });

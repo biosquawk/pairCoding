@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import WebSocket from 'ws';
 import { createPairCoachServer, type ServerOptions } from '../../src/server/http';
-import { validateV2WireShape } from '../../src/shared/validation-v2';
+import { validateMutationOutcomeV2, validateV2WireShape } from '../../src/shared/validation-v2';
 import type { SettingsV2 } from '../../src/shared/runtime-v2';
 
 const settings:SettingsV2={schemaVersion:2,taskFilePath:'task.md',taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',runProfiles:[],aiConsent:false,contextPatterns:[]};
@@ -80,8 +80,30 @@ test('HTTP bound invalid runtime/malformed settings retain actual bytes, safe me
   assert.equal(r.status,200);assert.ok(validateV2WireShape('Project',r.body));assert.equal(r.body.capabilities.execution.runtime.state,'CONFIG_ERROR');assert.equal(r.body.settings.runProfiles.length,0);
   assert.equal(fs.readFileSync(path.join(dir,'settings.json'),'utf8'),raw);assert.equal(a.workspace.settings.runProfiles.length,0);
   const p=peer(t,port);await p.open();p.send(r.body.sessionId,'tab','HELLO',{token:f.token,lastServerSeq:0});const snap=await p.wait(x=>x.type==='SESSION_SNAPSHOT');
-  const run=await f.http(port,'POST','/api/run',{requestId:randomUUID(),clientId:'tab',sessionId:r.body.sessionId,mode:'RUN_MAIN',expectedWorkspaceVersion:0,configurationGeneration:r.body.capabilities.execution.runtime.configurationGeneration});
-  assert.equal(run.status,503);assert.equal(run.body.code,'RUNTIME_MUTATION_NOT_COMPOSED');
+  const request={requestId:randomUUID(),clientId:'tab',sessionId:r.body.sessionId,mode:'RUN_MAIN',expectedWorkspaceVersion:0,configurationGeneration:r.body.capabilities.execution.runtime.configurationGeneration};
+  const run=await f.http(port,'POST','/api/run',request);
+  // The composed durable RUN authority reserves before validating executable
+  // settings. Failure is UNKNOWN, never an invented pre-admission/no-process reply.
+  assert.equal(run.status,503);assert.equal(run.body.code,'MUTATION_OUTCOME_UNKNOWN');
+  const journal=path.join(dir,'runtime-mutations'),names=fs.readdirSync(journal).filter(n=>n.endsWith('.json'));assert.equal(names.length,1);
+  const original=fs.readFileSync(path.join(journal,names[0])),record=JSON.parse(original.toString());
+  assert.deepEqual(record.body.identity.payload,request);assert.equal(record.body.runProtocol,'ORIGINAL_RUN_ADMISSION_V1');
+  assert.deepEqual(record.body.outcome,{state:'UNKNOWN',result:null});assert.equal(record.body.runStage,undefined);assert.equal(record.body.runDispatch,undefined);
+  const replay=await f.http(port,'POST','/api/run',request);assert.equal(replay.status,503);assert.equal(replay.body.code,'MUTATION_OUTCOME_UNKNOWN');
+  assert.deepEqual(fs.readFileSync(path.join(journal,names[0])),original);
+  const fenced=await f.http(port,'POST','/api/run',{...request,requestId:randomUUID()});assert.equal(fenced.status,409);assert.equal(fenced.body.code,'MUTATION_PENDING');
+  assert.deepEqual(fs.readFileSync(path.join(journal,names[0])),original);assert.deepEqual(fs.readdirSync(journal).filter(n=>n.endsWith('.json')),names);assert.equal(a.workspace.workspaceVersion,0);
+  // Only the original protocol + native admission exclusion can establish abort;
+  // missing executor files/RAM alone are not used as a certificate.
+  const reconciled=await f.http(port,'POST','/api/runtime/mutation/reconcile',{mutation:{projectId:r.body.projectId,kind:'RUN',request}});
+  assert.equal(reconciled.status,200);assert.ok(validateMutationOutcomeV2(reconciled.body));
+  assert.equal(reconciled.body.state,'DEFINITIVELY_ABORTED');assert.equal(reconciled.body.result,null);assert.equal(reconciled.body.current.run,null);
+  assert.equal(reconciled.body.current.project.workspaceVersion,0);assert.equal(a.workspace.workspaceVersion,0);
+  const final=JSON.parse(fs.readFileSync(path.join(journal,names[0]),'utf8'));
+  assert.deepEqual(final.body.identity,record.body.identity);assert.deepEqual(final.body.outcome,{state:'DEFINITIVELY_ABORTED',result:null});
+  assert.equal(final.body.runStage,undefined);assert.equal(final.body.runDispatch,undefined);
+  assert.deepEqual(fs.readdirSync(journal).filter(n=>n.endsWith('.json')),names);
+  assert.equal(fs.readFileSync(path.join(dir,'settings.json'),'utf8'),raw);
   const file=await f.http(port,'POST','/api/file',{requestId:randomUUID(),clientId:'tab',sessionId:r.body.sessionId,controlEpoch:snap.payload.session.controlEpoch,operation:'CREATE',path:'new.js',content:'MANUAL\n',newPath:null,baseVersion:null});
   assert.equal(file.status,200);assert.ok(validateV2WireShape('Project',file.body));assert.equal(fs.readFileSync(path.join(f.project,'new.js'),'utf8'),'MANUAL\n');
   assert.equal(fs.readFileSync(path.join(dir,'settings.json'),'utf8'),raw);
