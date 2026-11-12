@@ -98,7 +98,9 @@ export class RuntimeLanguageOwner {
       this.options.assertCurrent();peer.assertCurrent();if(revision!==this.revision)return;
       const {startup,layout,driver,transport,admission}=this.options,core=startup.core!,runtime=startup.configuration.resolved;
       if(!runtime){this.unavailable('LANGUAGE_CONFIGURATION_REQUIRED','Select a valid runtime configuration for language features.');return;}
-      if(['jdt','pylsp'].includes(runtime.profile.language.provider) && !startup.arguments.languageReceiptPath){
+      if(['jdt','pylsp'].includes(runtime.profile.language.provider) &&
+          (runtime.config.languageFeatures.completion || runtime.config.languageFeatures.diagnostics) &&
+          !startup.arguments.languageReceiptPath){
         this.unavailable('LANGUAGE_RECEIPT_REQUIRED','Select an explicit trusted language receipt at startup.');return;
       }
       const shadow=path.join(this.root,'shadows',randomUUID());privateDirectory(shadow);
@@ -123,6 +125,7 @@ export class RuntimeLanguageOwner {
         else this.sourceChanged();
       }});
       const binding=createRuntimeLanguageBinding({scope,sourceAuthority:source,saveAuthority:source,assertCurrent,assertPeer,
+        languageFeatures:runtime.config.languageFeatures,
         selected:{ownedRoot:shadow,driver,journal:this.journal,admission,transport,preparedOutputRoots:startup.arguments.preparedRuntimeRoots,
           // Nonremote providers do not read the receipt. No fabricated remote readiness/receipt.
           ...(startup.arguments.languageReceiptPath===undefined?{}:{languageReceiptPath:startup.arguments.languageReceiptPath}),withSourceLease:async(s,v,action)=>{
