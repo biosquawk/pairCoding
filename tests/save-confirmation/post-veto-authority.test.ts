@@ -477,3 +477,99 @@ for (const choice of ['KEEP_LOCAL', 'LOAD_DISK'] as const) {
     assert.equal(f.rendered.length, 1); assert.equal(f.sent.filter(m => m.type === 'STEP_RENDERED').length, 1);
   });
 }
+
+// Reconnect selection publication: actual LiveBackend lifecycle, controlled transport.
+// The independent REAL HTTP/WS oracle lives in P1-owned selection-publication-p2-2.
+async function selectionReconnect(f: Awaited<ReturnType<typeof fixture>>, snapshot: unknown) {
+  f.setReconnectSnapshot(snapshot);
+  let off = () => {}, timer: ReturnType<typeof setTimeout> | undefined;
+  const settled = new Promise<void>((resolve, reject) => {
+    let offline = false;
+    off = f.live.subscribe('state', state => {
+      if (state.isOffline) offline = true;
+      else if (offline) resolve();
+    });
+    timer = setTimeout(() => reject(Error('selection reconnect did not settle')), 2000);
+  });
+  f.live.reconnect();
+  try { await settled; } finally { off(); clearTimeout(timer); }
+}
+const selectionViews = (f: Awaited<ReturnType<typeof fixture>>) => f.sent.filter(m => m.type === 'VIEW_CHANGED');
+const selectionAck = (f: Awaited<ReturnType<typeof fixture>>, message: any) => f.receive('ACK', {
+  replyTo: message.messageId, status: 'OK', documentVersion: message.payload.documentVersion,
+  workspaceVersion: f.remote.project.workspaceVersion, controlEpoch: f.remote.session.controlEpoch, error: null,
+});
+
+test('selection HELLO republishes agreed path once, fresh original ACK alone authorizes chat; broadcasts do not storm', async t => {
+  const f = await fixture(t); await f.live.selectFile('main.txt');
+  const old = selectionViews(f).at(-1); selectionAck(f, old);
+  await selectionReconnect(f, f.remote);
+  const fresh = selectionViews(f).at(-1);
+  assert.equal(selectionViews(f).length, 2, 'same server path still needs new connection view publication');
+  assert.notEqual(fresh.messageId, old.messageId);
+  assert.deepEqual(fresh.payload, { path: 'main.txt', documentVersion: 1, cursor: null, selection: null });
+  const question = f.live.sendChatMessage('current selection'); await setImmediate();
+  selectionAck(f, old); await setImmediate();
+  assert.equal(f.sent.some(m => m.type === 'CHAT_MESSAGE'), false, 'old view ACK is not fresh authority');
+  selectionAck(f, fresh); assert.equal(await question, true);
+  for (let n = 0; n < 3; n++) { f.receive('SESSION_SNAPSHOT', f.remote); await setImmediate(); }
+  assert.equal(selectionViews(f).length, 2, 'ordinary same-path snapshots must not cause VIEW/snapshot feedback');
+  assert.equal(f.sent.filter(m => m.type === 'HELLO').length, 1);
+  assert.equal(f.sent.some(m => ['CODE_CHANGED', 'CONTROL_READY', 'STEP_RENDERED'].includes(m.type)), false);
+  assert.equal(f.http.some(r => r.method !== 'GET'), false);
+});
+
+for (const adverse of ['read-failure', 'draft', 'coach'] as const) {
+  test(`selection HELLO ${adverse} cannot publish old content or replay a mutation`, async t => {
+    const f = await fixture(t); await f.live.selectFile('main.txt');
+    selectionAck(f, selectionViews(f).at(-1));
+    if (adverse === 'draft') f.live.saveFileContent('main.txt', 'protected draft');
+    const snapshot = structuredClone(f.remote);
+    if (adverse === 'coach') { snapshot.session.writeOwner = 'COACH'; snapshot.session.controlEpoch = 1; }
+    if (adverse === 'read-failure') f.setFileRead(() => { throw Error('read unavailable'); });
+    await selectionReconnect(f, adverse === 'read-failure' ? { ...snapshot, activeDocument: null } : snapshot);
+    assert.equal(selectionViews(f).length, 1);
+    assert.equal(f.sent.some(m => ['CODE_CHANGED', 'CONTROL_READY', 'STEP_RENDERED'].includes(m.type)), false);
+    assert.equal(f.http.some(r => r.method !== 'GET'), false);
+    if (adverse === 'draft') {
+      assert.equal(f.live.getState().files[0].content, 'protected draft');
+      assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
+    }
+    if (adverse === 'read-failure') assert.match(f.live.getState().connectionError!, /read unavailable/);
+  });
+}
+
+for (const interleaving of ['reselect', 'generation', 'coach', 'disconnect'] as const) {
+  test(`selection HELLO pending read rechecks ${interleaving}, never publishes superseded document`, async t => {
+    const f = await fixture(t); await f.live.selectFile('main.txt');
+    selectionAck(f, selectionViews(f).at(-1));
+    f.remote.project.files.push({ path: 'other.txt', kind: 'FILE', version: 1 });
+    let release!: (value: unknown) => void, reading!: () => void;
+    const started = new Promise<void>(resolve => { reading = resolve; });
+    f.setFileRead(() => new Promise(resolve => { release = resolve; reading(); }));
+    const connecting = selectionReconnect(f, { ...f.remote, activeDocument: null });
+    await started;
+    if (interleaving === 'reselect') {
+      f.setFileRead(() => doc('other.txt', 'other bytes')); await f.live.selectFile('other.txt');
+    } else if (interleaving === 'generation') {
+      f.remote.activeDocument = doc('main.txt', 'new generation', 2); f.remote.project.files[0].version = 2;
+      f.receive('SESSION_SNAPSHOT', f.remote); await setImmediate();
+    } else if (interleaving === 'coach') f.control('COACH', 1);
+    else f.live.close();
+    release(doc()); await setImmediate();
+    if (interleaving === 'disconnect') {
+      // close() intentionally cannot settle a new authorized connection.
+      await assert.rejects(connecting, /did not settle/);
+    } else await connecting;
+    const added = selectionViews(f).slice(1);
+    if (interleaving === 'reselect') {
+      assert.equal(f.live.getState().activePath, 'other.txt');
+      assert.deepEqual(added.map(m => m.payload), [{ path: 'other.txt', documentVersion: 1, cursor: null, selection: null }]);
+    } else if (interleaving === 'generation') {
+      assert.deepEqual(added.map(m => m.payload), [{ path: 'main.txt', documentVersion: 2, cursor: null, selection: null }]);
+      assert.equal(f.live.getState().files[0].content, 'new generation');
+    } else assert.deepEqual(added, []);
+    assert.equal(f.sent.some(m => ['CODE_CHANGED', 'CONTROL_READY', 'STEP_RENDERED'].includes(m.type)), false);
+    assert.equal(f.http.some(r => r.method !== 'GET'), false);
+  });
+}

@@ -659,15 +659,21 @@ export class LiveBackend {
         ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readError ?? null;
       // Only the latest successfully installed generation consumes HELLO. An
       // overlapping broadcast can supersede an earlier async task-file read.
-      if (hello && hello === this.helloSnapshot && hello.ws === this.ws && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId) {
+      if (generation !== this.generation || this.stopped) return;
+      const settledHello = !!hello && hello === this.helloSnapshot && hello.ws === this.ws
+        && hello.sessionId === bundle.session.sessionId && hello.clientId === this.clientId;
+      if (settledHello) {
         this.helloSnapshot = null; this.reconcileDecision(bundle);
       }
       if (bundle.report) this.observeFinishReport(bundle.report);
       else void this.reconcileFinish();
-      // Selection made while the snapshot was loading was not sent offline.
-      // Advertise only its view, never replay CREATE/RENAME/DELETE or a save.
-      if (this.selectedView && this.selectedView.path === this.state.activePath && this.documents.has(this.state.activePath)
-        && this.session?.activeFilePath !== this.state.activePath) this.observePathOnly(true);
+      // HELLO establishes a new view/ACK scope even when the server path already
+      // agrees. Consume it once, not on the snapshot broadcasts our view can cause.
+      // Advertise only settled current content; never replay mutations or a save.
+      if (generation === this.generation && !this.stopped && this.session?.writeOwner === 'STUDENT'
+        && !this.preparing && !this.vetoPending && this.selectedView
+        && this.selectedView.path === this.state.activePath && this.documents.has(this.state.activePath)
+        && (settledHello || this.session.activeFilePath !== this.state.activePath)) this.observePathOnly(true);
       this.replayWindowPresence();
       this.saves.forEach((_, path) => this.schedule(path)); this.publish();
       void this.refreshSnapshots();
