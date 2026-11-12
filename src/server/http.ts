@@ -14,7 +14,7 @@ import type { Settings } from '../shared/protocol';
 import {projectRunFacts, type RunFacts} from './coach/runFacts';
 import type { ChatEntry, CoachDecision, Proposal, Report, Run } from '../shared/protocol';
 import { apiError, CommandLedger, TransportError, validateRequest, type CommandLedgerOptions, type ClientMessage } from './transport';
-import { validateReconcileMutationRequestV2, validateMutationOutcomeV2, validateV2WireShape, validateV2Request } from '../shared/validation-v2';
+import { validateTaskForProfile, validateReconcileMutationRequestV2, validateMutationOutcomeV2, validateV2WireShape, validateV2Request } from '../shared/validation-v2';
 import type { ProjectV2, RunRequestV2, SessionBundleV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import type { LanguageView } from '../shared/language-v2';
 import { validateLanguageClientMessage } from '../shared/validation-v2';
@@ -28,7 +28,7 @@ import type { RuntimeEnvironment, RuntimeReadinessDependencies } from './runtime
 import { createRuntimeStartup, requireRuntimeWorkspace, type RuntimeStartup } from './runtime-coordinator/RuntimeStartup';
 import { validateRuntimeOpenProjectRequest, validateRuntimeClientMessage, validateRuntimeNetworkPrepareRequest } from './runtime-coordinator/RuntimeHttpValidation';
 import { readRuntimeProject, applyRuntimeSettingsMetadata } from './runtime-coordinator/RuntimeProject';
-import { aggregateRuntimeReadiness } from './runtime-config';
+import { runtimeTaskFields } from './runtime-config';
 import { RuntimeSettingsMutation } from './runtime-coordinator/RuntimeSettingsMutation';
 import { DurableMutationJournal } from './runtime-coordinator/MutationJournal';
 import { RuntimeRunMutation } from './runtime-coordinator/RuntimeRunMutation';
@@ -200,7 +200,6 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     assertMutationScope(bound,request.clientId);core.session.assertClient(request.clientId,request.sessionId);
     owner.clients.assertBound(request.clientId,request.sessionId);
     const epoch=core.session.state.controlEpoch, source=core.readSettings(), configuration=bound.configuration;
-    const runtime=owner.runtime;
     const assertAdmission=()=>{
       assertMutationScope(bound,request.clientId);core.session.assertClient(request.clientId,request.sessionId);
       if(core.session.state.controlEpoch!==epoch || core.session.state.writeOwner!=='STUDENT') fail(409,'WRITE_OWNER_CONFLICT','Student control changed during SAVE.');
@@ -221,10 +220,24 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       applyRuntimeSettingsMetadata(core.workspace,request.settings);
     },async()=>{
       assertAdmission();
-      const execution=await aggregateRuntimeReadiness(configuration,request.settings,
-        options.runtimeReadiness ?? runtime?.readinessForSettings(request.settings) ?? {
-          execution:{readiness:async()=>{throw owner.runtimeError ?? Error('Execution unavailable');}},probe:bound.prepared});
-      assertAdmission();
+      // SAVE confirms persistence, not execution admission. Never hold its original HTTP
+      // confirmation behind engine/cache/tool probes. The immutable staged result is an
+      // explicitly unmeasured, fail-closed projection; the ordinary post-response snapshot
+      // performs current readiness. Run still has its independent real admission checks.
+      const selected=configuration.resolved??configuration.local;
+      const pending={code:'RUNTIME_READINESS_PENDING',message:'Execution readiness has not been measured for these saved settings.',
+        recovery:'Keep editing. The connected session will receive actual runtime readiness separately.',retryable:true};
+      const problem=configuration.problem??pending;
+      const execution:ProjectV2['capabilities']['execution']={runtime:{profileId:selected?.profile.id??null,label:selected?.profile.label??'',
+        configurationGeneration:configuration.configurationGeneration,taskFields:runtimeTaskFields(selected?.profile),
+        state:configuration.problem?'CONFIG_ERROR':'PREPARE_REQUIRED',problem},
+        modes:{RUN_MAIN:{canRun:false,problem},RUN_TESTS:{canRun:false,problem}}};
+      if(configuration.resolved)for(const mode of ['RUN_MAIN','RUN_TESTS'] as const) {
+        const run=request.settings.runProfiles.find(p=>p.kind===mode);
+        if(!run || !validateTaskForProfile(configuration.resolved.profile,run))execution.modes[mode]={canRun:false,
+          problem:{code:'TASK_CONFIG_INVALID',message:'Task selectors are absent or incompatible with the active runtime.',
+            recovery:'Review task selectors in project settings.',retryable:false}};
+      }
       const language=languageProjection(bound);
       if(owner.runtimeError) {
         const problem={code:'RUNTIME_STATE_UNAVAILABLE',message:'Execution state cannot be safely initialized.',
@@ -681,7 +694,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(url.pathname!=='/api/project/open') session.assertClient(body.clientId,body.sessionId);
       if(url.pathname==='/api/project/settings') {
         // Durable result authority, not an expiring in-memory HTTP receipt.
-        respond(res,200,await saveSettings(body as UpdateSettingsRequestV2));return;
+        const project=await saveSettings(body as UpdateSettingsRequestV2);
+        respond(res,200,project);
+        if(project.capabilities.execution.runtime.problem?.code==='RUNTIME_READINESS_PENDING')refreshConnectedReadiness();
+        return;
       }
       if(url.pathname==='/api/run') {
         // SAME durable journal, not the expiring HTTP command ledger.

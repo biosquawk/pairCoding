@@ -5,6 +5,8 @@ import { validateExecutionView, validateLanguageView, validateRunRequestV2, vali
 
 export interface RuntimeAuthorityV2 {
   projectId: string; sessionId: string; clientId: string; connectionGeneration: string;
+  /** Production caller supplies the existing session epoch; local legacy callers may omit it. */
+  controlEpoch?: number;
   workspaceVersion: number; configurationGeneration: string; connected: boolean; canExecute: boolean; canSaveSettings: boolean;
 }
 export interface RuntimeClientV2Dependencies {
@@ -56,6 +58,10 @@ export class RuntimeClientV2 {
   private pendingRun: { operation: AbortController; request: RunRequestV2; authority: RuntimeAuthorityV2;
     project: ProjectV2; previousRunId: string | null; runId: string | null;
     valid: boolean; observedRevision: number } | null = null;
+  /** Only the original HTTP promise can confirm this SAVE. A matching publication may
+   * advance local currentness, but cannot settle UNKNOWN or authorize another mutation. */
+  private pendingSave: { operation: AbortController; request: UpdateSettingsRequestV2; authority: RuntimeAuthorityV2;
+    project: ProjectV2 | null; run: RunV2 | null; valid: boolean; observedRevision: number } | null = null;
   private revision = 0;
   private disposed = false;
   private bound: RuntimeAuthorityV2 | null = null;
@@ -76,6 +82,7 @@ export class RuntimeClientV2 {
   applyExecution(value: unknown): boolean {
     const a = this.dependencies.current();
     if (this.disposed || busyRun(this.state.run) || !a || !validateExecutionView(value) || value.runtime.configurationGeneration !== a.configurationGeneration) return false;
+    if (this.pendingSave) this.pendingSave.valid = false;
     this.bound = clone(a); this.revision++;
     this.state = { ...this.state, project: null, execution: clone(value), run: null, error: null };
     this.publish(); return true;
@@ -95,11 +102,19 @@ export class RuntimeClientV2 {
       pending.valid &&= own;
       if (own) { pending.runId = (run as RunV2).runId; pending.observedRevision = this.revision; }
     }
+    const save = this.pendingSave;
+    if (save && save.operation === this.operation) {
+      // Poison permanently on an intervening unrelated observation, even if a later
+      // snapshot resembles our saved settings. Readiness-only updates remain read-only.
+      const own = this.matchesPendingSaveProject(value, save) && this.saveAuthorityCurrent(save, a) && equal(run, save.run);
+      save.valid &&= own;
+      if (own) save.observedRevision = this.revision;
+    }
     this.bound = clone(a);
     this.state = { ...this.state, project: clone(value), execution: clone(value.capabilities.execution), run: clone(run as RunV2 | null), error: null }; this.publish(); return true;
   }
   invalidate(): void {
-    this.operation?.abort(); this.operation = null; this.pendingRun = null; this.bound = null; this.revision++;
+    this.operation?.abort(); this.operation = null; this.pendingRun = null; this.pendingSave = null; this.bound = null; this.revision++;
     this.state = { project: null, execution: null, run: null, pending: null, error: null, reconciliationRequired: false }; this.publish();
   }
   private matchesPendingRun(run: RunV2, pending: NonNullable<RuntimeClientV2['pendingRun']>): boolean {
@@ -113,6 +128,32 @@ export class RuntimeClientV2 {
     return !!pending && pending.operation === operation && pending.valid && pending.runId !== null &&
       pending.observedRevision === this.revision && equal(this.dependencies.current(), pending.authority) &&
       equal(this.state.project, pending.project) && !!this.state.run && this.matchesPendingRun(this.state.run, pending);
+  }
+  private saveAuthorityCurrent(pending: NonNullable<RuntimeClientV2['pendingSave']>, current: RuntimeAuthorityV2): boolean {
+    return Object.keys(pending.authority).every(key => key === 'workspaceVersion' ||
+      pending.authority[key as keyof RuntimeAuthorityV2] === current[key as keyof RuntimeAuthorityV2]) &&
+      (current.workspaceVersion === pending.request.expectedWorkspaceVersion || current.workspaceVersion === pending.request.expectedWorkspaceVersion + 1);
+  }
+  private matchesPendingSaveProject(value: ProjectV2, pending: NonNullable<RuntimeClientV2['pendingSave']>): boolean {
+    const before = pending.project;
+    return value.projectId === pending.authority.projectId && value.sessionId === pending.authority.sessionId &&
+      value.workspaceVersion === pending.request.expectedWorkspaceVersion + 1 && equal(value.settings, pending.request.settings) &&
+      value.capabilities.execution.runtime.configurationGeneration === pending.authority.configurationGeneration &&
+      (!before || value.rootPath === before.rootPath && equal(value.files, before.files) &&
+        value.capabilities.execution.runtime.profileId === before.capabilities.execution.runtime.profileId &&
+        value.capabilities.language.providerGeneration === before.capabilities.language.providerGeneration);
+  }
+  private ownsPendingSaveResponse(operation: AbortController, value: unknown): boolean {
+    const pending = this.pendingSave, current = this.dependencies.current();
+    return !!pending && pending.operation === operation && pending.valid && !!current &&
+      // Never introduce a version-currentness exception for a caller that cannot expose
+      // the already-existing Veto/control epoch. Its original strict path stays intact.
+      Number.isSafeInteger(pending.authority.controlEpoch) &&
+      validProject(value) && this.matchesPendingSaveProject(value, pending) && this.saveAuthorityCurrent(pending, current) &&
+      pending.observedRevision === this.revision && equal(this.state.run, pending.run) &&
+      // No observation at all is allowed too: SESSION_STATE can publish only the new
+      // version before HTTP. The exact original response proves the sole +1 commit.
+      (equal(this.state.project, pending.project) || !!this.state.project && this.matchesPendingSaveProject(this.state.project, pending));
   }
   private authority(): RuntimeAuthorityV2 {
     const a = this.dependencies.current(), bound = this.bound;
@@ -192,8 +233,9 @@ export class RuntimeClientV2 {
         const key = this.scope(a), entry = { mutation: { kind, requestId, projectId: a.projectId, sessionId: a.sessionId, clientId: a.clientId, expectedWorkspaceVersion: a.workspaceVersion }, inFlight: true };
         this.unresolved.set(key, entry); dispatch.sent = { key, entry };
       }), current = this.dependencies.current();
-      if (operation.signal.aborted || this.operation !== operation || (revision !== this.revision && !(kind === 'RUN' && this.ownsPendingRunObservation(operation))) || !current ||
-        Object.keys(a).some(key => a[key as keyof RuntimeAuthorityV2] !== current[key as keyof RuntimeAuthorityV2]))
+      const ownSave = kind === 'SAVE' && this.ownsPendingSaveResponse(operation, value);
+      if (operation.signal.aborted || this.operation !== operation || !ownSave && ((revision !== this.revision && !(kind === 'RUN' && this.ownsPendingRunObservation(operation))) || !current ||
+        Object.keys(a).some(key => a[key as keyof RuntimeAuthorityV2] !== current[key as keyof RuntimeAuthorityV2])))
         throw new Error('Odpowiedź dotyczy nieaktualnej sesji lub wersji. Odśwież stan; zachowano wpisane ustawienia.');
       accept(value, a);
       if (dispatch.sent && this.unresolved.get(dispatch.sent.key) === dispatch.sent.entry) {
@@ -209,6 +251,7 @@ export class RuntimeClientV2 {
     } finally {
       if (dispatch.sent) dispatch.sent.entry.inFlight = false;
       if (this.pendingRun?.operation === operation) this.pendingRun = null;
+      if (this.pendingSave?.operation === operation) this.pendingSave = null;
       if (this.operation === operation) { this.operation = null; this.state.pending = null; }
       this.publish();
     }
@@ -269,13 +312,18 @@ export class RuntimeClientV2 {
       if (!a.canSaveSettings || a.workspaceVersion !== expectedWorkspaceVersion) throw new Error('Konflikt wersji ustawień. Zachowano formularz; odczytaj nową wersję przed ponownym zapisem.');
       const body = { requestId: this.dependencies.requestId(), clientId: a.clientId, sessionId: a.sessionId, expectedWorkspaceVersion, settings: captured };
       if (!validateUpdateSettingsRequestV2(body)) throw new Error('Niepoprawne ustawienia V2.');
+      this.pendingSave = { operation: this.operation!, request: clone(body), authority: clone(a),
+        project: clone(this.state.project), run: clone(this.state.run), valid: true, observedRevision: this.revision };
       dispatched(body.requestId);
       return this.dependencies.http.saveSettings(body, signal);
     }, (value, a) => {
-      if (!validProject(value) || value.projectId !== a.projectId || value.sessionId !== a.sessionId || value.workspaceVersion <= expectedWorkspaceVersion ||
+      if (!validProject(value) || value.projectId !== a.projectId || value.sessionId !== a.sessionId || value.workspaceVersion !== expectedWorkspaceVersion + 1 ||
         !equal(value.settings, captured))
         throw new Error('Serwer nie potwierdził zapisu tych ustawień. Zachowano formularz; odśwież stan przed ponowieniem.');
-      saved = clone(value); this.state.project = clone(value); this.state.execution = clone(value.capabilities.execution);
+      const observed = this.state.project, pending = this.pendingSave;
+      const installed = pending && this.ownsPendingSaveResponse(this.operation!, value) && observed &&
+        observed.workspaceVersion === value.workspaceVersion ? observed : value;
+      saved = clone(installed); this.state.project = clone(installed); this.state.execution = clone(installed.capabilities.execution);
       this.bound = { ...a, workspaceVersion: value.workspaceVersion, configurationGeneration: value.capabilities.execution.runtime.configurationGeneration }; this.revision++;
     });
     return ok && saved ? { ok: true, project: saved } : { ok: false, message: this.state.error ?? 'Operacja zajęta lub anulowana. Zachowano formularz.' };
