@@ -1,8 +1,16 @@
+import { ServicePreparationV2 } from './ServicePreparationV2';
+import type { RunV2, SettingsV2, RunRequestV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
+import type { MutationIdentity } from '../shared/runtime-mutation-v2';
+import type { LanguageAuthorityV2, AutosaveAckEnvelope } from './runtimeWiringV2';
+import { validateMutationOutcomeV2, validateReconcileMutationRequestV2, validateLanguageView, validateExecutionView, validateRunV2, validateV2WireShape, validateLanguageServerMessage } from '../shared/validation-v2';
+import { RuntimeWiringV2, type WiringControllerV2 } from './runtimeWiringV2';
+import type { SettingsSaveResultV2, RuntimeUnconfirmedMutationV2 } from './RuntimeClientV2';
+import type { EditorLanguageBinding } from './monacoLspBridge';
 import type * as Wire from '../shared/protocol';
 import { EditorViewThrottleP2, sameEditorViewP2, type EditorViewObservationP2 } from './editorViewP2';
 import type { ReportSummary } from './reportHistory';
 import type { CoachEditStep, EndReason, ProjectSettings, WindowPresence } from '../types/paircoach';
-import type { ClientState, ServerMessage, ServerPayloads, UpdatedFile } from './liveTypes';
+import type { ClientState, ServerMessage, ServerPayloads, UpdatedFile, ProjectSnapshot, BundleSnapshot } from './liveTypes';
 import { emptyLiveState, mapDocument, mapProposal, mapReport, mapRun, mapSettings } from './liveMapper';
 
 type Socket = Pick<WebSocket, 'readyState' | 'send' | 'close' | 'onopen' | 'onmessage' | 'onerror' | 'onclose'>;
@@ -13,9 +21,11 @@ export interface LiveOptions {
   socket?: (url: string) => Socket;
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
   clientId?: string;
+  /** Private caller seam: a browser tab must retain its OWN client identity, not adopt another tab from localStorage. */
+  maintenanceIdentityError?: string;
 }
 type Draft = { content: string; baseVersion: number };
-type Flight = { messageId: string; content: string; timer?: ReturnType<typeof setTimeout> };
+type Flight = { messageId: string; content: string; stamp?: import('../shared/language-v2').DocumentStamp; projectId?: string; sessionId?: string; generation?: number; baseVersion?: number; controlEpoch?: number; timer?: ReturnType<typeof setTimeout> };
 type Save = { draft: Draft; flight?: Flight; timer?: ReturnType<typeof setTimeout>; conflict: boolean };
 type ProposalDecision = {
   messageId: string; sessionId: string; clientId: string; proposalId: string; accepted: boolean;
@@ -38,6 +48,10 @@ class HttpRejectedError extends Error {
   }
 }
 const id = () => globalThis.crypto.randomUUID();
+const sameJSON=(a:unknown,b:unknown):boolean=>{
+  if(a===b)return true;if(!a||!b||typeof a!=='object'||typeof b!=='object')return false;
+  const keys=Object.keys(a);return keys.length===Object.keys(b).length&&keys.every(k=>Object.hasOwn(b,k)&&sameJSON((a as Record<string,unknown>)[k],(b as Record<string,unknown>)[k]));
+};
 
 // UTF-16 positions, exactly as Monaco and the wire contract. Reject clamped/invalid ranges.
 export function applyWireEdit(content: string, range: Wire.Range, text: string): string {
@@ -61,7 +75,7 @@ export class LiveBackend {
   private invalidInterventions = new Set<string>();
   private proposals = new Map<string, Wire.Proposal>();
   private outputSeq = new Map<string, number>();
-  private project: Wire.Project | null = null;
+  private project: ProjectSnapshot | null = null;
   private session: Wire.Session | null = null;
   private ws: Socket | null = null;
   private token: string | null;
@@ -107,13 +121,150 @@ export class LiveBackend {
   private viewThrottle = new EditorViewThrottleP2(() => { this.sendEditorView(); });
   private chatSending = false;
 
+  // Exact immutable original requests retained BEFORE dispatch for the frozen reconciliation seam.
+  // Metadata from RuntimeClient alone cannot reconstruct lost mode/settings. No guessed read is called.
+  private runtimeMutations=new Map<string,MutationIdentity>();
+  private languageScope:LanguageAuthorityV2|null=null;
+  private releaseConfirmedRuntimeMutation(metadata:Readonly<RuntimeUnconfirmedMutationV2>) {
+    const key=JSON.stringify([metadata.projectId,metadata.sessionId,metadata.clientId,metadata.requestId]);
+    const original=this.runtimeMutations.get(key);
+    if(original&&original.projectId===metadata.projectId&&original.kind===metadata.kind&&
+      original.request.sessionId===metadata.sessionId&&original.request.clientId===metadata.clientId&&
+      original.request.requestId===metadata.requestId&&original.request.expectedWorkspaceVersion===metadata.expectedWorkspaceVersion)
+      this.runtimeMutations.delete(key);
+  }
+  private retainRuntimeMutation(kind:'RUN'|'SAVE',request:RunRequestV2|UpdateSettingsRequestV2) {
+    if(!this.project)throw new Error('Brak bieżącego projektu.');
+    const key=JSON.stringify([this.project.projectId,request.sessionId,request.clientId,request.requestId]);
+    const body={mutation:{projectId:this.project.projectId,kind,request}};
+    if(!validateReconcileMutationRequestV2(body))throw new Error('Niepoprawna tożsamość operacji.');
+    const existing=this.runtimeMutations.get(key);
+    if(existing&&!sameJSON(existing,body.mutation))throw new Error('Identyfikator użyty dla innej operacji.');
+    if(!existing)this.runtimeMutations.set(key,structuredClone(body.mutation));
+  }
+  private latestRuntimeRun: {run:RunV2;seq:number;projectId:string;sessionId:string}|null=null;
+  private connectionGeneration = id();
+  private maintenanceSourceRevision = 0;
+  private sourceRequests = 0;
+  private readonly servicePreparation = new ServicePreparationV2({
+    current: () => {
+      const p=this.project,s=this.session,e=p&&'execution' in p.capabilities?p.capabilities.execution:null,r=this.wiring.runtime.snapshot();
+      if(!p||!s||!e)return null;
+      const active=r.run&&['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.run.status);
+      const reason=!this.synced||this.stopped||this.ws?.readyState!==1||p.projectId!==s.projectId||p.sessionId!==s.sessionId?'Połącz i zsynchronizuj bieżący projekt przed przygotowaniem.':
+        s.lifecycle==='FINISHED'?'Sesja zakończona; przygotowanie niedostępne.':
+        s.writeOwner!=='STUDENT'||this.preparing||this.vetoPending?'Poczekaj na rozliczenie sterowania i Veto.':
+        this.finishAttempt||this.finishStarting||this.proposalDecision||this.pendingSteps.size?'Najpierw rozstrzygnij bieżącą operację sesji.':
+        this.saves.size||this.state.fileConflict||this.sourceRequests?'Poczekaj na potwierdzenie zapisu i rozstrzygnij konflikt pliku.':
+        r.pending||r.reconciliationRequired?'Najpierw rozstrzygnij bieżący Run lub zapis ustawień.':
+        active?'Zatrzymaj i rozlicz bieżące wykonanie przed przygotowaniem.':undefined;
+      return {projectId:p.projectId,clientId:this.clientId,sessionId:s.sessionId,workspaceVersion:this.state.workspaceVersion,
+        configurationGeneration:e.runtime.configurationGeneration,controlEpoch:s.controlEpoch,
+        stamp:JSON.stringify([this.connectionGeneration,this.generation,this.lastSeq,this.maintenanceSourceRevision,p.files]),
+        allowed:reason===undefined,reason};
+    },requestId:id,publish:()=>this.publish(),
+    post:body=>this.http('/api/runtime/service-network/prepare','POST',body),
+    isAbsence:error=>error instanceof HttpRejectedError&&error.status===409&&!error.bodyUnreadable&&
+      (error.code==='SERVICE_NETWORK_NOT_DISPATCHED'||error.code==='SERVICE_NETWORK_ABSENCE_CONFIRMED'),
+    refresh:async authority=>{
+      const project=this.project,session=this.session,seq=this.lastSeq,generation=this.generation,source=this.maintenanceSourceRevision,connection=this.connectionGeneration;
+      const value=await this.http<import('../shared/runtime-v2').ProjectV2>('/api/project');
+      if(!this.synced||this.stopped||this.project!==project||this.session!==session||!session||seq!==this.lastSeq||generation!==this.generation||source!==this.maintenanceSourceRevision||
+        connection!==this.connectionGeneration||this.preparing||this.vetoPending||this.saves.size||this.sourceRequests||
+        session.writeOwner!=='STUDENT'||session.controlEpoch!==authority.controlEpoch||!validateV2WireShape('Project',value)||
+        value.projectId!==authority.projectId||value.sessionId!==authority.sessionId||value.workspaceVersion!==authority.workspaceVersion||
+        value.capabilities.execution.runtime.configurationGeneration!==authority.configurationGeneration)return false;
+      // Shared RuntimeClient validates Settings/language/execution consistency BEFORE installation.
+      if(!this.wiring.runtime.applyProject(value,this.wiring.runtime.snapshot().run))return false;
+      this.projectState(value);this.publish();return true;
+    },
+  });
+
+  private readonly wiring = new RuntimeWiringV2({
+    current: () => this.wiringController(), messageId: id,
+    send: message => { this.send(message.type, message.payload, message.messageId); },
+    problem: message => { this.state.languageProblem = message; },
+    status: view => {
+      if(this.project&&'language' in this.project.capabilities)this.project.capabilities.language=structuredClone(view);
+      this.state.language=structuredClone(view);this.state.languageProblem=view.problem?.message??null;
+      if(view.state==='FAILED'||view.state==='OFF')this.wiring.sourceChanged();
+      this.publish();
+    },
+    runtime: {
+      current: () => {
+        const p = this.project, execution = p && 'execution' in p.capabilities ? p.capabilities.execution : null;
+        return p && this.session && execution ? { projectId:p.projectId,sessionId:this.session.sessionId,clientId:this.clientId,
+          connectionGeneration:this.connectionGeneration,workspaceVersion:this.state.workspaceVersion,
+          configurationGeneration:execution.runtime.configurationGeneration,connected:this.synced && !this.stopped,
+          canExecute:this.synced && !this.stopped,
+          canSaveSettings:this.synced && !this.stopped && !this.preparing && !this.vetoPending && this.session.writeOwner==='STUDENT' && !this.savesHasConflict() } : null;
+      }, requestId:id, maintenanceBlocked:()=>this.servicePreparation.snapshot().blocked, confirmedMutation:metadata=>this.releaseConfirmedRuntimeMutation(metadata), http: {
+        run:(body,signal)=>{this.retainRuntimeMutation('RUN',body);return this.http('/api/run','POST',body,true,signal);},
+        stop:(runId,body,signal)=>this.http(`/api/run/${encodeURIComponent(runId)}/stop`,'POST',body,true,signal),
+        saveSettings:(body,signal)=>{this.retainRuntimeMutation('SAVE',body);return this.http('/api/project/settings','PUT',body,true,signal);},
+      },
+    },
+  });
+  private wiringController(): WiringControllerV2 | null {
+    if (!this.project || !this.session) return null;
+    return { projectId:this.project.projectId,sessionId:this.session.sessionId,clientId:this.clientId,connectionGeneration:this.connectionGeneration,
+      connected:this.ws?.readyState===1 && !this.stopped,synced:this.synced,writeOwner:this.session.writeOwner,
+      controlEpoch:this.session.controlEpoch,preparing:!!this.preparing,vetoPending:!!this.vetoPending,
+      language:this.currentLanguageScope(),
+      workspaceVersion:this.project.workspaceVersion,
+      sourceVector:JSON.stringify([this.project.workspaceVersion,this.project.files]),
+      drafts:[...this.saves].map(([path,s])=>({path,content:s.draft.content,baseVersion:s.draft.baseVersion,conflict:s.conflict})).sort((a,b)=>a.path.localeCompare(b.path)),
+      document:path=>{const d=this.documents.get(path);return d?{content:d.content,version:d.version,readOnly:d.readOnly,conflict:!!this.saves.get(path)?.conflict}:null;},
+    };
+  }
+  private currentLanguageScope():LanguageAuthorityV2|null {
+    const scope=this.languageScope,p=this.project,s=this.session,v=p&&'language' in p.capabilities?p.capabilities.language:null;
+    const execution=p&&'execution' in p.capabilities?p.capabilities.execution:null;
+    return scope&&p&&s&&v&&v.state!=='FAILED'&&v.state!=='OFF'&&execution&&p.projectId===s.projectId&&p.sessionId===s.sessionId&&scope.projectId===p.projectId&&scope.sessionId===s.sessionId&&
+      scope.profileId===v.profileId&&scope.profileId===execution.runtime.profileId&&scope.configurationGeneration===v.configurationGeneration&&
+      scope.configurationGeneration===execution.runtime.configurationGeneration&&scope.providerGeneration===v.providerGeneration ? scope : null;
+  }
+  private installLanguageBootstrap(bundle:BundleSnapshot) {
+    this.languageScope=null;
+    if(!validateV2WireShape('SessionBundle',bundle)||!('languageBootstrap' in bundle)||!bundle.languageBootstrap)return;
+    const p=bundle.project,v=p.capabilities.language,e=p.capabilities.execution;
+    if(!validateLanguageView(v)||!validateExecutionView(e)||p.projectId!==bundle.session.projectId||p.sessionId!==bundle.session.sessionId||v.projectId!==p.projectId||
+      v.profileId!==e.runtime.profileId||v.configurationGeneration!==e.runtime.configurationGeneration)return;
+    this.languageScope={...structuredClone(bundle.languageBootstrap),projectId:p.projectId,sessionId:bundle.session.sessionId,
+      profileId:v.profileId,configurationGeneration:v.configurationGeneration,providerGeneration:v.providerGeneration};
+  }
+  private languagePresentation() {
+    const scope=this.currentLanguageScope(),view=this.project&&'language' in this.project.capabilities?this.project.capabilities.language:null;
+    const enabled=!!scope&&scope.provider!=='off';
+    this.state.language=view?enabled||view.state==='FAILED'?structuredClone(view):{...view,state:'OFF',autocomplete:'OFF'}:null;
+    this.state.languageProblem=enabled||view?.state==='FAILED' ? view?.problem?.message??null : 'Autouzupełnianie OFF: brak aktualnego autoryzowanego zakresu serwera. Ręczna edycja dostępna.';
+  }
+  getEditorLanguageBinding(): EditorLanguageBinding | undefined { return this.project ? this.wiring.getBinding(this.project.projectId) : undefined; }
+  retainModelTombstone(path:string,content:string):boolean {
+    try {if(!this.storage)throw new Error('localStorage niedostępne');
+      this.storage.setItem(`${this.key()}:model-tombstone:${encodeURIComponent(path)}:${Date.now()}`,JSON.stringify({path,content,projectId:this.project?.projectId}));return true;
+    } catch {this.state.storageError='Nie można zachować starego modelu. Skopiuj jego tekst przed ponownym użyciem tej samej ścieżki.';this.publish();return false;}
+  }
+  setBuiltinLanguageProvider(provider: EditorLanguageBinding['builtin']) { this.wiring.setBuiltin(provider); }
+  private applyRuntimeProject(run: unknown = this.wiring.runtime.snapshot().run) {
+    if(!this.project || !this.synced)return;
+    if(validateV2WireShape('Project',this.project))this.wiring.runtime.applyProject(this.project,run);
+    else if('execution' in this.project.capabilities && validateExecutionView(this.project.capabilities.execution))this.wiring.runtime.applyExecution(this.project.capabilities.execution);
+  }
   constructor(options: LiveOptions = {}) {
     this.baseUrl = (options.baseUrl ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
     this.token = options.token ?? null;
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.socketFactory = options.socket ?? (url => new WebSocket(url));
     this.storage = options.storage;
+    const maintenanceKey=`paircoach:service-prepare:v1:${this.baseUrl}`;
     this.clientId = options.clientId ?? id();
+    this.servicePreparation.initialize(this.storage,maintenanceKey,this.clientId,options.maintenanceIdentityError);
+    this.wiring.runtime.subscribe(()=>{
+      this.state.runtime=this.wiring.runtime.snapshot();
+      if(this.state.runtime.run) this.state.activeRun=mapRun(this.state.runtime.run,this.state.activeRun);
+      this.publish();
+    });
     if (!this.storage && typeof window !== 'undefined') this.state.storageError = 'localStorage niedostępne. Skopiuj niezapisany draft przed zamknięciem strony.';
   }
   getState() { return this.state; }
@@ -124,6 +275,7 @@ export class LiveBackend {
   }
   private emit(event: string, value: any) { this.listeners.get(event)?.forEach(fn => fn(value)); }
   private publish() {
+    this.state.runtime={...this.wiring.runtime.snapshot(),maintenance:this.servicePreparation.snapshot()};
     this.state = { ...this.state, pendingPaths: [...this.saves.keys()], isOffline: !this.synced,
       writeOwner: !this.synced ? 'SYNCING' : this.vetoPending ? 'STUDENT' : this.preparing ? 'SYNCING' : this.session?.writeOwner ?? 'SYNCING' };
     this.emit('state', this.state);
@@ -154,8 +306,11 @@ export class LiveBackend {
       }
     } catch { this.state.storageError = 'Nie można odczytać zapisanego draftu. Magazyn przeglądarki wymaga sprawdzenia.'; }
   }
-  private async http<T>(path: string, method = 'GET', body?: unknown, authenticate = true): Promise<T> {
+  private async http<T>(path: string, method = 'GET', body?: unknown, authenticate = true, signal?: AbortSignal): Promise<T> {
+    const sourceMutation=method!=='GET'&&['/api/file','/api/project/open','/api/project/settings'].includes(path);
+    if(sourceMutation){this.sourceRequests++;this.maintenanceSourceRevision++;}
     const controller = new AbortController();
+    const abort=()=>controller.abort(); signal?.addEventListener('abort',abort,{once:true}); if(signal?.aborted)controller.abort();
     const timer = setTimeout(() => controller.abort(), 5000);
     try {
       const response = await this.fetcher(`${this.baseUrl}${path}`, { method, signal: controller.signal, headers: {
@@ -175,13 +330,13 @@ export class LiveBackend {
       if (error instanceof HttpRejectedError) throw error;
       if (controller.signal.aborted) throw new HttpDeadlineError('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
       throw error;
-    } finally { clearTimeout(timer); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',abort);if(sourceMutation){this.sourceRequests--;this.maintenanceSourceRevision++;} }
   }
   private commandBody(extra: object = {}, requestId = id()) {
     if (!this.session) throw new Error('Sesja nie jest jeszcze zsynchronizowana. Połącz ponownie.');
     return { requestId, clientId: this.clientId, sessionId: this.session.sessionId, ...extra };
   }
-  private send(type: string, payload: object, messageId = id()) {
+  private send(type: string, payload: object, messageId: string = id()) {
     if (!this.session || this.ws?.readyState !== 1) throw new Error('Brak połączenia WebSocket. Draft pozostaje lokalny.');
     this.ws.send(JSON.stringify({ protocolVersion: '3.0', messageId, sessionId: this.session.sessionId, clientId: this.clientId, type, payload }));
     return messageId;
@@ -192,7 +347,7 @@ export class LiveBackend {
     try {
       if (!this.token) this.token = (await this.http<{ token: string }>('/dev/bootstrap', 'GET', undefined, false)).token;
       if (!this.token) throw new Error('Brak tokenu lokalnego serwera. Otwórz URL launchera lub uruchom backend.');
-      const [project, session] = await Promise.all([this.http<Wire.Project>('/api/project'), this.http<Wire.Session>('/api/session')]);
+      const [project, session] = await Promise.all([this.http<ProjectSnapshot>('/api/project'), this.http<Wire.Session>('/api/session')]);
       if (this.stopped) return;
       if (this.session && this.session.sessionId !== session.sessionId) {
         this.lastSeq = 0; this.invalidInterventions.clear();
@@ -206,7 +361,7 @@ export class LiveBackend {
       this.replaceFinishSession(session.sessionId);
       this.clearForeignSnapshots(project.projectId); this.project = project; this.session = session;
       const ws = this.socketFactory(`${this.baseUrl.replace(/^http/, 'ws')}/ws/session`);
-      this.ws = ws;
+      this.connectionGeneration=id(); this.wiring.invalidate('SCOPE'); this.ws = ws;
       this.connectionTimer = setTimeout(() => { if (!this.synced) ws.close(); }, 5000);
       ws.onopen = () => { if (ws === this.ws) { try {
         this.helloSnapshot = { ws, sessionId: this.session!.sessionId, clientId: this.clientId };
@@ -223,6 +378,8 @@ export class LiveBackend {
   }
   reconnect() { this.retries = 0; this.stopped = false; clearTimeout(this.reconnectTimer); this.resync(); }
   private disconnected() {
+    this.languageScope=null;this.languagePresentation();
+    this.wiring.invalidate('DISCONNECTED');
     if (this.stopped) return;
     this.invalidateEditorView();
     this.synced = false; this.preparing = null; this.pendingSteps.clear(); this.generation++;
@@ -243,11 +400,15 @@ export class LiveBackend {
     }
   }
   private resync() {
+    this.languageScope=null;this.languagePresentation();
+    this.wiring.invalidate('DISCONNECTED');
     this.invalidateEditorView();
     this.synced = false; this.pendingSteps.clear(); this.publish();
     if (this.ws) this.ws.close(); else this.disconnected();
   }
   close() {
+    this.languageScope=null;this.languagePresentation();
+    this.wiring.invalidate('DISCONNECTED');
     this.invalidateEditorView();
     this.stopped = true; this.generation++;
     clearTimeout(this.reconnectTimer); clearTimeout(this.connectionTimer); clearTimeout(this.vetoTimer); clearInterval(this.tick);
@@ -265,16 +426,23 @@ export class LiveBackend {
       this.state.snapshots = []; this.state.snapshotsError = null;
     }
   }
-  private projectState(project: Wire.Project) {
+  private projectState(project: ProjectSnapshot) {
     this.clearForeignSnapshots(project.projectId);
+    const previous=this.project;
+    if(previous && (previous.projectId!==project.projectId || JSON.stringify(previous.files)!==JSON.stringify(project.files))) this.wiring.sourceChanged();
     this.project = project;
+    this.languagePresentation();
     this.state.workspaceVersion = project.workspaceVersion;
     this.state.projectSettings = mapSettings(project.settings);
     const c = project.capabilities;
-    this.state.capabilities = { ...c, docsPlugin: c.docs, autocompletePlugin: c.autocomplete, runMainReason: c.canRunMain ? undefined : 'Brak zatwierdzonego profilu Run Main.', runTestsReason: c.canRunTests ? undefined : 'Brak zatwierdzonego profilu Run Tests.' };
-    this.state.scenario = { ...this.state.scenario, id: project.projectId, title: project.rootPath, taskMode: project.settings.taskMode,
-      taskFilePath: project.settings.taskFilePath ?? '', reviewNotesPath: project.settings.reviewNotesPath, capabilities: this.state.capabilities };
-    const taskPath = project.settings.taskFilePath;
+    const execution='execution' in c ? c.execution : null;
+    this.state.capabilities = { canRunMain:!!execution?.modes.RUN_MAIN.canRun,canRunTests:!!execution?.modes.RUN_TESTS.canRun,
+      docsPlugin:'NOT_INSTALLED',autocompletePlugin:'OFF',
+      runMainReason:execution?.modes.RUN_MAIN.problem?.message ?? 'Wymagany profil wykonania V2. Otwórz ustawienia wykonania.',
+      runTestsReason:execution?.modes.RUN_TESTS.problem?.message ?? 'Wymagany profil wykonania V2. Otwórz ustawienia wykonania.' };
+    this.state.scenario = { ...this.state.scenario, id: project.projectId, title: project.rootPath, taskMode: this.state.projectSettings.taskMode,
+      taskFilePath: this.state.projectSettings.taskFilePath, reviewNotesPath: this.state.projectSettings.reviewNotesPath, capabilities: this.state.capabilities };
+    const taskPath = this.state.projectSettings.taskFilePath;
     const taskError = taskPath ? this.loadErrors.get(taskPath) : undefined;
     this.state.taskReadError = taskPath && taskError ? { path: taskPath, message: taskError } : null;
     const visible = [...project.files];
@@ -285,7 +453,9 @@ export class LiveBackend {
   private sessionState(session: Wire.Session) {
     this.replaceFinishSession(session.sessionId);
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
+    if(this.session && (session.sessionId!==this.session.sessionId || session.controlEpoch!==this.session.controlEpoch || session.writeOwner!==this.session.writeOwner)) this.wiring.sourceChanged();
     this.session = session;
+    this.wiring.authoritativeState(session.controlEpoch);
     this.state.controlEpoch = session.controlEpoch; this.state.workspaceVersion = session.workspaceVersion;
     this.state.coachMode = session.coachMode; this.state.aiStatus = session.aiStatus;
     this.state.sessionStatus = session.timer.status; this.state.pauseOnHidden = session.timer.pauseOnHidden;
@@ -331,7 +501,8 @@ export class LiveBackend {
     if (existing && existing.version > doc.version) return;
     this.installDocument(doc, external); this.publish();
   }
-  private async snapshot(bundle: Wire.SessionBundle, seq: number) {
+  private async snapshot(bundle: BundleSnapshot, seq: number) {
+    this.wiring.invalidate('SCOPE');
     this.invalidateEditorView();
     const generation = ++this.generation;
     const hello = this.helloSnapshot;
@@ -339,6 +510,7 @@ export class LiveBackend {
     this.saves.forEach(save => { clearTimeout(save.timer); clearTimeout(save.flight?.timer); save.flight = undefined; save.timer = undefined; });
     this.documents.clear(); this.loadErrors.clear(); this.projectState(bundle.project); this.restoreDrafts();
     this.sessionState(bundle.session);
+    this.installLanguageBootstrap(bundle);this.languagePresentation();
     if (this.vetoPending && this.vetoCutoff && bundle.session.writeOwner === 'STUDENT'
       && (bundle.session.sessionId !== this.vetoCutoff.sessionId || bundle.session.controlEpoch > this.vetoCutoff.epoch)) {
       // Lost ACK is not success; this authoritative new epoch is the proof of cutoff.
@@ -362,7 +534,7 @@ export class LiveBackend {
     this.pendingSteps.clear(); this.preparing = null; this.readySent = false;
     this.publish();
     try {
-      const paths = new Set([this.state.activePath, bundle.project.settings.taskFilePath, ...this.saves.keys()].filter(Boolean));
+      const paths = new Set([this.state.activePath, this.state.projectSettings.taskFilePath, ...this.saves.keys()].filter(Boolean));
       for (const [path, save] of this.saves) {
         if (!bundle.project.files.some(file => file.path === path && file.kind === 'FILE')) {
           save.conflict = true; this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: '', diskDeleted: true }; paths.delete(path);
@@ -385,7 +557,9 @@ export class LiveBackend {
       // Keep UNKNOWN/terminal outcome visible even if a background task-file read
       // failed; retain that independent failure for after the decision resolves.
       if (this.proposalDecision && readError) this.decisionResultError ??= readError;
-      this.synced = true; this.retries = 0; clearTimeout(this.connectionTimer);
+      this.synced = true;
+      const observed=this.latestRuntimeRun;
+      this.applyRuntimeProject(observed && observed.seq>seq && observed.projectId===bundle.project.projectId && observed.sessionId===bundle.session.sessionId ? observed.run : bundle.lastRun); this.wiring.authoritativeState(bundle.session.controlEpoch); this.retries = 0; clearTimeout(this.connectionTimer);
       if (this.finishAttempt && readError) this.finishAttempt.previousError = readError;
       this.state.connectionError = this.proposalDecision?.notice ?? this.decisionResultError
         ?? this.finishAttempt?.previousError ?? this.finishAttempt?.notice ?? readError ?? null;
@@ -407,13 +581,28 @@ export class LiveBackend {
   }
   receive(message: ServerMessage) {
     if (message.protocolVersion !== '3.0' || !Number.isSafeInteger(message.seq) || message.seq < 1 || (this.session && message.sessionId !== this.session.sessionId)) throw new Error('Niepoprawna koperta protokołu.');
-    if (message.type === 'SESSION_SNAPSHOT') { if (message.seq <= this.lastSeq) return; void this.snapshot(message.payload, message.seq); return; }
+    if (message.type === 'SESSION_SNAPSHOT') {
+      if (message.seq <= this.lastSeq) return;
+      // A shaped V2 project may not silently downgrade a missing/malformed REQUIRED bootstrap
+      // to legacy/null. Mixed raw settings retain their explicit manual-migration path only.
+      if(validateV2WireShape('Project',message.payload.project)&&!validateV2WireShape('SessionBundle',message.payload)) {
+        this.wiring.invalidate('SCOPE');this.languageScope=null;this.synced=false;this.languagePresentation();
+        throw new Error('Niepoprawny SESSION_SNAPSHOT V2: wymagany ścisły languageBootstrap.');
+      }
+      void this.snapshot(message.payload, message.seq);return;
+    }
     if (message.seq <= this.lastSeq) return; // duplicate never reapplies
     if (message.seq !== this.lastSeq + 1) { this.fail(new Error('Luka w sekwencji serwera. Wymagana synchronizacja.')); this.resync(); return; }
     this.lastSeq = message.seq;
+    if(message.type==='COMPLETE_RESULT'||message.type==='DIAGNOSTICS'||message.type==='LANGUAGE_STATUS') {
+      if(!validateLanguageServerMessage(message)) throw new Error('Niepoprawna odpowiedź językowa V2.');
+      this.wiring.receive(message); return;
+    }
     switch (message.type) {
-      case 'ACK': this.ack(message.payload); break;
+      case 'ACK':
+        this.ack(message.payload,message.messageId,message.sessionId,validateV2WireShape('ServerMessage',message));break;
       case 'CONTROL_PREPARE':
+        this.wiring.invalidate('CONTROL_PREPARE');
         if (!this.synced || this.vetoPending || this.savesHasConflict()) { this.send('CONTROL_READY', { requestId: message.payload.requestId, workspaceVersion: this.state.workspaceVersion, ready: false }); break; }
         this.preparing = message.payload.requestId; this.prepareLoaded = false; this.readySent = false;
         this.saves.forEach((_, path) => this.flushFile(path));
@@ -425,7 +614,9 @@ export class LiveBackend {
         break;
       case 'CONTROL_STATE': {
         if (!this.session || message.payload.controlEpoch < this.session.controlEpoch) break;
+        this.wiring.sourceChanged();
         this.session = { ...this.session, ...message.payload };
+        this.wiring.authoritativeState(message.payload.controlEpoch);
         this.state.controlEpoch = message.payload.controlEpoch; this.state.coachMode = message.payload.coachMode;
         this.preparing = null;
         // Student CONTROL_STATE acknowledges the cutoff, not permission to overwrite a draft.
@@ -435,7 +626,9 @@ export class LiveBackend {
       case 'COACH_STEP_EDIT': void this.coachStep(message.payload); break;
       case 'SESSION_STATE': this.sessionState(message.payload); void this.reconcileFinish(); break;
       case 'EXTERNAL_FILE_SYNC': {
+        this.wiring.sourceChanged();
         const p = message.payload; this.state.workspaceVersion = p.workspaceVersion;
+        if(p.operation==='DELETED'||p.operation==='CREATED')this.wiring.fileOperation(p.operation==='DELETED'?'DELETE':'CREATE',p.path);
         if (this.editorView?.path === p.path) this.invalidateEditorView();
         if (this.project) {
           this.project.workspaceVersion = p.workspaceVersion;
@@ -463,7 +656,10 @@ export class LiveBackend {
         this.state.chatEntries = [...this.state.chatEntries, { id: proposal.id, sender: 'COACH', message: proposal.questionText, timestamp: Date.now(), proposal }]; break;
       }
       case 'CHAT_REPLY': this.state.chatEntries = [...this.state.chatEntries, { id: message.messageId, sender: 'COACH', message: message.payload.text, timestamp: Date.now() }]; break;
-      case 'RUN_STATE': this.state.activeRun = mapRun(message.payload, this.state.activeRun); break;
+      case 'RUN_STATE':
+        if(!validateRunV2(message.payload)) { this.state.connectionError='Odrzucono wykonanie spoza kontraktu V2; bez uruchamiania na hoście.'; break; }
+        if(this.project && this.session)this.latestRuntimeRun={run:structuredClone(message.payload),seq:message.seq,projectId:this.project.projectId,sessionId:this.session.sessionId};
+        this.applyRuntimeProject(message.payload); break;
       case 'RUN_OUTPUT': {
         const p = message.payload;
         if (p.outputSeq <= (this.outputSeq.get(p.runId) ?? 0)) break;
@@ -498,11 +694,13 @@ export class LiveBackend {
     if (!save || !doc || save.flight || save.conflict || !this.synced || this.vetoPending || this.session?.writeOwner !== 'STUDENT') return;
     clearTimeout(save.timer); save.timer = undefined;
     const messageId = id();
-    save.flight = { messageId, content: save.draft.content, timer: setTimeout(() => {
+    save.flight = { messageId, content: save.draft.content, projectId:this.project?.projectId,sessionId:this.session.sessionId,generation:this.generation,baseVersion:doc.version,controlEpoch:this.session.controlEpoch, timer: setTimeout(() => {
       this.fail(new Error('Brak ACK zapisu. Draft zachowany; sprawdzam stan serwera.')); this.resync();
     }, 5000) };
-    try { this.send('CODE_CHANGED', { path, baseVersion: doc.version, controlEpoch: this.session.controlEpoch, content: save.draft.content, editKind: 'TYPING' }, messageId); }
-    catch (error) { clearTimeout(save.flight?.timer); save.flight = undefined; this.fail(error); }
+    const sourceId=this.wiring.beginAutosave(messageId,path,save.flight.content,doc.version,this.session.controlEpoch);
+    try { this.send('CODE_CHANGED', { path, baseVersion: doc.version, controlEpoch: this.session.controlEpoch, content: save.flight.content, editKind: 'TYPING',
+      ...(sourceId?{languageDocumentMessageId:sourceId}:{}) }, messageId); }
+    catch (error) { this.wiring.cancelAutosave(messageId);clearTimeout(save.flight?.timer); save.flight = undefined; this.fail(error); }
     this.publish();
   }
   private ready() {
@@ -512,7 +710,11 @@ export class LiveBackend {
       // Stay locked until CONTROL_STATE, not just until send().
     }
   }
-  private ack(p: ServerPayloads['ACK']) {
+  private ack(p: ServerPayloads['ACK'],messageId:string,sessionId:string,verifiedEnvelope:boolean) {
+    const envelope:AutosaveAckEnvelope={messageId,sessionId,replyTo:p.replyTo,status:p.status,documentVersion:p.documentVersion,workspaceVersion:p.workspaceVersion,controlEpoch:p.controlEpoch};
+    // Must precede any local workspace/base/draft mutation. Receipt presence is never enough.
+    if(verifiedEnvelope)this.wiring.prepareAutosaveAck(envelope);
+    else this.wiring.cancelAutosave(p.replyTo); // Legacy negative VIEW handling is not language-ACK proof.
     const viewFlight = this.viewFlight;
     if (viewFlight?.messageId === p.replyTo) {
       clearTimeout(viewFlight.timer); this.viewFlight = null;
@@ -551,6 +753,7 @@ export class LiveBackend {
       this.vetoPending = null; this.vetoCutoff = null; clearTimeout(this.vetoTimer);
       if (this.session) { this.session.controlEpoch = p.controlEpoch; this.session.writeOwner = 'STUDENT'; }
       this.state.controlEpoch = p.controlEpoch;
+      this.wiring.authoritativeState(p.controlEpoch);
       this.saves.forEach((_, path) => this.schedule(path));
     }
     for (const [path, save] of this.saves) {
@@ -558,7 +761,11 @@ export class LiveBackend {
       const flight = save.flight; clearTimeout(flight.timer); save.flight = undefined;
       const doc = this.documents.get(path);
       if (!doc) { save.conflict = true; this.persist(); break; }
-      if (p.status === 'REJECTED' || p.documentVersion === null) {
+      if (flight.projectId!==this.project?.projectId || flight.sessionId!==this.session?.sessionId || flight.generation!==this.generation ||
+        flight.controlEpoch!==p.controlEpoch || flight.controlEpoch!==this.session?.controlEpoch || flight.baseVersion!==doc.version) {
+        save.conflict=true; this.wiring.invalidate('CONFLICT'); this.persist(); break;
+      }
+      if (p.status === 'REJECTED' || p.documentVersion === null || p.documentVersion<=doc.version) {
         save.conflict = true; this.fail(new Error(`${p.error?.code ?? 'SAVE_REJECTED'}: ${p.error?.message ?? 'Zapis odrzucony. Draft zachowany.'}`));
         void this.loadFile(path, true).catch(e => this.fail(e));
         if (this.preparing) { this.send('CONTROL_READY', { requestId: this.preparing, workspaceVersion: this.state.workspaceVersion, ready: false }); this.preparing = null; }
@@ -574,10 +781,12 @@ export class LiveBackend {
         else if (this.preparing) this.flushFile(path); else this.schedule(path);
         this.projectState(this.project!);
       }
-      this.persist(); this.ready(); this.viewThrottle.schedule(); break;
+      this.wiring.ackTransition(envelope);
+      this.applyRuntimeProject(); this.persist(); this.ready(); this.viewThrottle.schedule(); break;
     }
   }
   saveFileContent(path: string, content: string) {
+    this.maintenanceSourceRevision++;
     const doc = this.documents.get(path), current = this.saves.get(path);
     // A deleted-on-disk file may still have an editable protected draft. Preserve new typing
     // without manufacturing a disk version or clearing the explicit conflict barrier.
@@ -585,6 +794,7 @@ export class LiveBackend {
     if (!current && doc?.content === content) return;
     // Timer callbacks own this Save object. Replacing it would strand the copied
     // timer handle when the original callback expires behind a conflict/veto barrier.
+    this.wiring.draftChanged(path,content);
     if (current) current.draft = { ...current.draft, content };
     else this.saves.set(path, { draft: { content, baseVersion: doc!.version }, conflict: false });
     this.state.activePointer = null; this.state.activeHintBubble = null;
@@ -622,6 +832,7 @@ export class LiveBackend {
     this.send('STEP_RENDERED', { stepId: p.stepId, interventionId: p.interventionId, documentVersion: p.version }); this.publish();
   }
   triggerVeto() {
+    this.wiring.invalidate('VETO');
     if (this.vetoPending || !this.session) return;
     if (this.session.interventionId) this.invalidInterventions.add(this.session.interventionId);
     this.pendingSteps.clear(); this.preparing = null;
@@ -677,8 +888,8 @@ export class LiveBackend {
     try {
       await this.flushAll();
       // New folder means new consent and no inherited executable approval.
-      const settings: Wire.Settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
-      const project = await this.http<Wire.Project>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
+      const settings: SettingsV2 = { schemaVersion:2, taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
+      const project = await this.http<ProjectSnapshot>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
       this.invalidateEditorView();
       this.selectedView = null; this.selectionRequest++;
       this.generation++; this.lastSeq = 0; this.documents.clear(); this.loadErrors.clear(); this.state.fileConflict = null; this.state.activePath = '';
@@ -691,8 +902,9 @@ export class LiveBackend {
     try {
       await this.flushAll();
       if (!current()) return;
-      const project = await this.http<Wire.Project>('/api/file', 'POST', this.commandBody({ operation, path, newPath, content, baseVersion: operation === 'CREATE' ? null : this.documents.get(path)?.version ?? this.project?.files.find(f => f.path === path)?.version, controlEpoch: this.session?.controlEpoch }));
+      const project = await this.http<ProjectSnapshot>('/api/file', 'POST', this.commandBody({ operation, path, newPath, content, baseVersion: operation === 'CREATE' ? null : this.documents.get(path)?.version ?? this.project?.files.find(f => f.path === path)?.version, controlEpoch: this.session?.controlEpoch }));
       if (!current()) return;
+      this.wiring.fileOperation(operation,path,newPath ?? undefined);
       this.documents.delete(path); this.projectState(project); this.publish();
       if (operation !== 'DELETE' && selection === this.selectionRequest) await this.selectFile(newPath ?? path);
     } catch (error) { if (current()) this.fail(error); }
@@ -838,7 +1050,7 @@ export class LiveBackend {
     clearTimeout(decision.timer); decision.timer = undefined;
     decision.notice = notice; decision.done(); this.fail(new Error(notice));
   }
-  private reconcileDecision(bundle: Wire.SessionBundle) {
+  private reconcileDecision(bundle: BundleSnapshot) {
     const decision = this.proposalDecision;
     if (!decision?.disconnected || decision.replayed || decision.sessionId !== bundle.session.sessionId || decision.clientId !== this.clientId) return;
     // ONLY a fresh authorized snapshot after our new HELLO is eligible. A live
@@ -856,8 +1068,56 @@ export class LiveBackend {
   dismissHintBubble() { this.state.activeHintBubble = null; this.publish(); }
   updateBubblePos(x: number, y: number) { if (this.state.activeHintBubble) this.state.activeHintBubble = { ...this.state.activeHintBubble, posX: x, posY: y }; this.publish(); }
   clearCoachPointer() { this.state.activePointer = null; this.publish(); }
-  async run(isTest: boolean) { try { await this.flushAll(); this.state.activeRun = mapRun(await this.http<Wire.Run>('/api/run', 'POST', this.commandBody({ mode: isTest ? 'RUN_TESTS' : 'RUN_MAIN', expectedWorkspaceVersion: this.state.workspaceVersion })), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
-  async stopExecution() { if (!this.state.activeRun) return; try { this.state.activeRun = mapRun(await this.http<Wire.Run>(`/api/run/${encodeURIComponent(this.state.activeRun.runId)}/stop`, 'POST', this.commandBody()), this.state.activeRun); this.publish(); } catch (error) { this.fail(error); } }
+  async run(isTest: boolean) {
+    if(this.wiring.runtime.snapshot().pending||this.servicePreparation.snapshot().blocked) return;
+    const scope=this.getReportHistoryScope();
+    try { await this.flushAll(()=>scope===this.getReportHistoryScope());
+      if(!scope || scope!==this.getReportHistoryScope()) throw new Error('Sesja zmieniła się przed uruchomieniem.');
+      if(this.session?.writeOwner!=='STUDENT'||this.preparing||this.vetoPending)throw new Error('Uruchomienie oczekuje na rozliczenie bieżącego sterowania. Stop pozostaje dostępny.');
+      this.applyRuntimeProject();
+      if(!await this.wiring.runtime.run(isTest?'RUN_TESTS':'RUN_MAIN')) this.fail(new Error(this.wiring.runtime.snapshot().error ?? 'Wymagany serwer i profil wykonania V2. Bez wykonania na hoście.'));
+    } catch(error) {this.fail(error);}
+  }
+  async reconcileRuntimeMutation():Promise<boolean> {
+    // Select an exact already-retained identity, never rewrite current session authority.
+    const [selected]=this.wiring.runtime.retainedMutations();if(!selected)return false;
+    let settledKey:string|undefined;
+    const ok=await this.wiring.runtime.reconcileRetained(selected,async(metadata,signal)=>{
+      const key=JSON.stringify([metadata.projectId,metadata.sessionId,metadata.clientId,metadata.requestId]);
+      const retained=this.runtimeMutations.get(key),project=this.project,session=this.session;
+      if(!retained||!project||!session||retained.kind!==metadata.kind||retained.request.expectedWorkspaceVersion!==metadata.expectedWorkspaceVersion||
+        project.projectId!==retained.projectId||retained.request.sessionId!==metadata.sessionId||retained.request.requestId!==metadata.requestId||
+        retained.request.clientId!==metadata.clientId||this.clientId!==metadata.clientId)
+        throw new Error('Brak oryginalnego żądania w bieżącym autoryzowanym zakresie. Blokada zachowana.');
+      const mutation=structuredClone(retained),generation=this.generation,connection=this.connectionGeneration,seq=this.lastSeq;
+      const value=await this.http<unknown>('/api/runtime/mutation/reconcile','POST',{mutation},true,signal);
+      if(signal.aborted||!this.synced||this.stopped||this.generation!==generation||this.connectionGeneration!==connection||this.lastSeq!==seq||
+        this.project!==project||this.session!==session||!validateMutationOutcomeV2(value)||!sameJSON(value.mutation,mutation)||value.state==='UNKNOWN'||
+        value.current.project.projectId!==project.projectId||value.current.project.sessionId!==session.sessionId)
+        throw new Error('Odczyt nie rozstrzygnął dokładnego żądania w aktualnej sesji. Blokada zachowana.');
+      // A definitive authenticated outcome carries a separate coherent CURRENT snapshot, not the retained result.
+      // Install only synchronously here; RuntimeClient then checks/applies this same authority before clearing its fence.
+      this.wiring.sourceChanged();this.projectState(value.current.project);session.workspaceVersion=value.current.project.workspaceVersion;
+      settledKey=key;
+      return {project:value.current.project,run:value.current.run};
+    });
+    if(ok&&settledKey)this.runtimeMutations.delete(settledKey);
+    this.publish();return ok;
+  }
+  async prepareRuntimeEnvironment(reconcile=false):Promise<boolean> { return this.servicePreparation.perform(reconcile); }
+  async stopExecution() { await this.wiring.runtime.stop(); }
+  async saveRuntimeSettings(settings:SettingsV2,expectedWorkspaceVersion:number):Promise<SettingsSaveResultV2> {
+    if(this.wiring.runtime.snapshot().pending||this.servicePreparation.snapshot().blocked)return {ok:false,message:'Operacja trwa lub przygotowanie wymaga uzgodnienia. Zachowano formularz.'};
+    const scope=this.getReportHistoryScope();
+    try {
+      await this.flushAll(()=>scope===this.getReportHistoryScope());
+      if(!scope || scope!==this.getReportHistoryScope()) throw new Error('Sesja zmieniła się. Zachowano formularz.');
+      this.applyRuntimeProject();
+      const result=await this.wiring.runtime.saveSettings(settings,expectedWorkspaceVersion);
+      if(result.ok) {this.wiring.sourceChanged();this.projectState(result.project);if(this.session)this.session.workspaceVersion=result.project.workspaceVersion;this.applyRuntimeProject();this.publish();}
+      return result;
+    } catch(error) {return {ok:false,message:error instanceof Error?error.message:String(error)};}
+  }
   async finishSession(reason: EndReason) {
     // A second click is NOT permission to repeat an unresolved HTTP mutation.
     if (this.finishStarting || this.finishAttempt || this.stopped || this.session?.lifecycle === 'FINISHED') return;
@@ -976,11 +1236,12 @@ export class LiveBackend {
     if (!this.project) return false;
     const projectId = this.project.projectId;
     try {
-      // Only human-confirmed structured profiles. Never parse the display command into shell execution.
-      const wireSettings: Wire.Settings = { ...this.project.settings, aiConsent: settings.aiConsent, taskMode: settings.taskMode, taskFilePath: settings.taskFilePath || null, reviewNotesPath: settings.reviewNotesPath, runProfiles: settings.wireRunProfiles ?? this.project.settings.runProfiles, contextPatterns: settings.contextPatterns ?? this.project.settings.contextPatterns };
-      const project = await this.http<Wire.Project>('/api/project/settings', 'PUT', this.commandBody({ expectedWorkspaceVersion: this.state.workspaceVersion, settings: wireSettings }));
-      if (this.project?.projectId !== projectId || project.projectId !== projectId) return false;
-      this.projectState(project);
+      // Explicit V2 only. No legacy/mixed executable fields ever reach settings persistence.
+      const base=this.state.projectSettings.runtimeSettings;
+      if(!base) throw new Error('LEGACY_RUN_PROFILE_REQUIRES_MIGRATION. Zachowano oryginalne ustawienia; przygotuj jawny plik V2.');
+      const wireSettings:SettingsV2={...base,aiConsent:settings.aiConsent,taskMode:settings.taskMode,taskFilePath:settings.taskFilePath||null,reviewNotesPath:settings.reviewNotesPath,contextPatterns:settings.contextPatterns??base.contextPatterns};
+      const result=await this.saveRuntimeSettings(wireSettings,this.state.workspaceVersion);
+      if(!result.ok)return false;
       if (wireSettings.taskFilePath) { try { await this.loadFile(wireSettings.taskFilePath); } catch (error) { this.fail(new Error(`Ustawienia zapisano, ale plik zadania jest niedostępny: ${error instanceof Error ? error.message : String(error)}`)); } }
       this.publish(); return true;
     } catch (error) { if (this.project?.projectId === projectId) this.fail(error); return false; }
@@ -1011,7 +1272,7 @@ export class LiveBackend {
     if (conflict.diskDeleted) {
       if (choice === 'KEEP_LOCAL') {
         try {
-          const project = await this.http<Wire.Project>('/api/file', 'POST', this.commandBody({ operation: 'CREATE', path: conflict.path, newPath: null, content: save.draft.content, baseVersion: null, controlEpoch: this.session?.controlEpoch }));
+          const project = await this.http<ProjectSnapshot>('/api/file', 'POST', this.commandBody({ operation: 'CREATE', path: conflict.path, newPath: null, content: save.draft.content, baseVersion: null, controlEpoch: this.session?.controlEpoch }));
           clearTimeout(save.timer); this.saves.delete(conflict.path); this.projectState(project); await this.loadFile(conflict.path);
         } catch (error) { this.fail(error); return; }
       } else { clearTimeout(save.timer); this.saves.delete(conflict.path); this.state.activePath = ''; }

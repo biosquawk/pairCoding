@@ -48,7 +48,19 @@ export class PairCoachClient {
     }
     const localOrigin = typeof window !== 'undefined' && ['127.0.0.1', 'localhost'].includes(window.location.hostname)
       && window.location.protocol === 'http:' && window.location.port !== '3000' ? window.location.origin : undefined;
-    this.live = new LiveBackend({ ...options, baseUrl: options.baseUrl ?? localOrigin, storage, token: options.token ?? this.authToken });
+    // A reload may resume ONLY this tab's identity; never select another tab's
+    // clientId from the global maintenance record. Authentication/HELLO remain real.
+    let clientId=options.clientId,maintenanceIdentityError=options.maintenanceIdentityError;
+    if(!clientId&&typeof window!=='undefined') {
+      try {
+        const key=`paircoach:client:v3:${options.baseUrl??localOrigin??'http://127.0.0.1:8080'}`;
+        const saved=window.sessionStorage.getItem(key);
+        if(saved!==null&&!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(saved))throw Error('Niepoprawna tożsamość karty. Zachowaj jej magazyn.');
+        clientId=saved??globalThis.crypto.randomUUID();window.sessionStorage.setItem(key,clientId);
+        if(window.sessionStorage.getItem(key)!==clientId)throw Error('Nie potwierdzono tożsamości karty.');
+      } catch {maintenanceIdentityError='Nie można zachować własnej tożsamości karty. Przygotowanie zablokowane; ręczna edycja pozostaje dostępna.';}
+    }
+    this.live = new LiveBackend({ ...options, baseUrl: options.baseUrl ?? localOrigin, storage,clientId,maintenanceIdentityError, token: options.token ?? this.authToken });
     if (this.transportMode === 'LIVE_BACKEND' && typeof window !== 'undefined') queueMicrotask(() => void this.live.connect());
   }
 
@@ -93,7 +105,7 @@ export class PairCoachClient {
   }
 
   // Getters
-  public getState() {
+  public getState():ClientState {
     if (this.transportMode === 'LIVE_BACKEND') return this.live.getState();
     return { ...simulator.getFullState(), transportMode: this.transportMode, connectionError: null, taskReadError: null, storageError: null, snapshotsError: null, pendingPaths: [] } satisfies ClientState;
   }
@@ -163,6 +175,14 @@ export class PairCoachClient {
     simulator.setWindowPresence(presence);
   }
 
+  public getEditorLanguageBinding() { return this.transportMode === 'LIVE_BACKEND' ? this.live.getEditorLanguageBinding() : undefined; }
+  public retainModelTombstone(path:string,content:string) {return this.live.retainModelTombstone(path,content);}
+  public setBuiltinLanguageProvider(provider: import('./monacoLspBridge').EditorLanguageBinding['builtin']) {
+    if (this.transportMode==='LIVE_BACKEND') this.live.setBuiltinLanguageProvider(provider);
+  }
+  public prepareRuntimeEnvironment(reconcile=false) { return this.transportMode==='LIVE_BACKEND'?this.live.prepareRuntimeEnvironment(reconcile):Promise.resolve(false); }
+  public reconcileRuntimeMutation() { return this.live.reconcileRuntimeMutation(); }
+  public saveRuntimeSettings(settings: import('../shared/runtime-v2').SettingsV2,version:number) { return this.live.saveRuntimeSettings(settings,version); }
   public getEditorViewScope() { return this.transportMode === 'LIVE_BACKEND' ? this.live.getEditorViewScope() : null; }
   public updateEditorView(view: EditorViewObservationP2) { if (this.transportMode === 'LIVE_BACKEND') this.live.updateEditorView(view); }
   public clearEditorView(scope: string | null) { if (this.transportMode === 'LIVE_BACKEND') this.live.clearEditorView(scope); }

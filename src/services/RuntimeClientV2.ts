@@ -1,3 +1,4 @@
+import type { ServicePreparationState } from './ServicePreparationV2';
 import type { ExecutionView, ProjectV2, RunKind, RunProfileV2, RunRequestV2, RunV2, SettingsV2, TaskEntry, TaskField, TaskFieldKey, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import { TASK_FIELD_KEYS } from '../shared/runtime-v2';
 import { validateExecutionView, validateLanguageView, validateRunRequestV2, validateRunV2, validateSettingsV2, validateUpdateSettingsRequestV2, validateV2WireShape } from '../shared/validation-v2';
@@ -9,6 +10,10 @@ export interface RuntimeAuthorityV2 {
 export interface RuntimeClientV2Dependencies {
   current(): Readonly<RuntimeAuthorityV2> | null;
   requestId(): string;
+  maintenanceBlocked?(): boolean;
+  /** Cleanup notification only, after validated acceptance and exact unresolved-entry removal.
+   * Detached immutable metadata; never a new authority or HTTP-success shortcut. */
+  confirmedMutation?(metadata: Readonly<RuntimeUnconfirmedMutationV2>): void;
   /** Existing authenticated HTTP caller wrappers. No alternate persistence/socket/host fallback. */
   http: {
     run(body: RunRequestV2, signal: AbortSignal): Promise<unknown>;
@@ -23,6 +28,7 @@ export interface RuntimeUnconfirmedMutationV2 {
   kind: 'RUN' | 'SAVE'; requestId: string; projectId: string; sessionId: string; clientId: string; expectedWorkspaceVersion: number;
 }
 export interface RuntimeClientV2State {
+  maintenance?: ServicePreparationState;
   project: ProjectV2 | null; execution: ExecutionView | null; run: RunV2 | null; pending: 'RUN' | 'STOP' | 'SAVE' | null; error: string | null; reconciliationRequired: boolean;
 }
 export type SettingsSaveResultV2 = { ok: true; project: ProjectV2 } | { ok: false; message: string };
@@ -50,10 +56,10 @@ export class RuntimeClientV2 {
   private bound: RuntimeAuthorityV2 | null = null;
   // Reconnect/invalidate is not evidence that a dispatched mutation did not happen.
   private unresolved = new Map<string, { mutation: RuntimeUnconfirmedMutationV2; inFlight: boolean }>();
-  private scope(a: Pick<RuntimeAuthorityV2, 'projectId' | 'sessionId'>): string { return JSON.stringify([a.projectId, a.sessionId]); }
+  private scope(a: Pick<RuntimeAuthorityV2, 'projectId' | 'sessionId' | 'clientId'>): string { return JSON.stringify([a.projectId, a.sessionId, a.clientId]); }
   private requiresReconciliation(): boolean {
     const a = this.dependencies.current();
-    return !!a && this.unresolved.has(this.scope(a));
+    return !!a && [...this.unresolved.values()].some(e=>e.mutation.projectId===a.projectId&&e.mutation.clientId===a.clientId);
   }
   constructor(private readonly dependencies: RuntimeClientV2Dependencies) {}
   snapshot(): RuntimeClientV2State { return { ...clone(this.state), reconciliationRequired: this.requiresReconciliation() }; }
@@ -102,6 +108,25 @@ export class RuntimeClientV2 {
     if (this.disposed || this.operation || !a?.connected) return false;
     const authority = clone(a), key = this.scope(a), unresolved = this.unresolved.get(key);
     if (!unresolved || unresolved.inFlight) return false;
+    return this.reconcileSelected(key,unresolved,authority,read);
+  }
+  /** Explicit selection only. Generic reconcile() deliberately remains CURRENT-session-only.
+   * Full original wire requests stay private in the authenticated caller, never reconstructed here. */
+  retainedMutations(): readonly Readonly<RuntimeUnconfirmedMutationV2>[] {
+    const a=this.dependencies.current();
+    if(this.disposed||!a)return [];
+    return [...this.unresolved.values()].filter(e=>!e.inFlight&&e.mutation.projectId===a.projectId&&e.mutation.clientId===a.clientId).map(e=>clone(e.mutation));
+  }
+  async reconcileRetained(selection: Readonly<RuntimeUnconfirmedMutationV2>,
+    read:(mutation:Readonly<RuntimeUnconfirmedMutationV2>,signal:AbortSignal)=>Promise<{project:unknown;run:unknown}>):Promise<boolean> {
+    const a=this.dependencies.current();
+    if(this.disposed||this.operation||!a?.connected||selection.projectId!==a.projectId||selection.clientId!==a.clientId)return false;
+    const key=this.scope(selection),unresolved=this.unresolved.get(key);
+    if(!unresolved||unresolved.inFlight||!equal(selection,unresolved.mutation))return false;
+    return this.reconcileSelected(key,unresolved,clone(a),read);
+  }
+  private async reconcileSelected(key:string,unresolved:{mutation:RuntimeUnconfirmedMutationV2;inFlight:boolean},authority:RuntimeAuthorityV2,
+    read:(mutation:Readonly<RuntimeUnconfirmedMutationV2>,signal:AbortSignal)=>Promise<{project:unknown;run:unknown}>):Promise<boolean> {
     const operation = new AbortController(), revision = this.revision;
     this.operation = operation;
     try {
@@ -124,6 +149,10 @@ export class RuntimeClientV2 {
   private async perform<T>(kind: RuntimeClientV2State['pending'], action: (a: RuntimeAuthorityV2, signal: AbortSignal, dispatched: (requestId: string) => void) => Promise<T>,
     accept: (value: T, a: RuntimeAuthorityV2) => void): Promise<boolean> {
     if (this.operation || this.disposed) return false;
+    if (kind !== 'STOP' && this.dependencies.maintenanceBlocked?.()) {
+      this.state.error = 'Przygotowanie trwa lub jego wynik wymaga sprawdzenia. Ręczna edycja i Stop pozostają dostępne.';
+      this.publish(); return false;
+    }
     if (kind !== 'STOP' && this.requiresReconciliation()) {
       this.state.error = 'Wynik poprzedniej operacji jest nieznany. Wymagany autoryzowany odczyt jej rozstrzygnięcia przed nowym Run lub zapisem. Zachowano formularz; edycja ręczna pozostaje dostępna.';
       this.publish(); return false;
@@ -142,7 +171,12 @@ export class RuntimeClientV2 {
         Object.keys(a).some(key => a[key as keyof RuntimeAuthorityV2] !== current[key as keyof RuntimeAuthorityV2]))
         throw new Error('Odpowiedź dotyczy nieaktualnej sesji lub wersji. Odśwież stan; zachowano wpisane ustawienia.');
       accept(value, a);
-      if (dispatch.sent && this.unresolved.get(dispatch.sent.key) === dispatch.sent.entry) this.unresolved.delete(dispatch.sent.key);
+      if (dispatch.sent && this.unresolved.get(dispatch.sent.key) === dispatch.sent.entry) {
+        this.unresolved.delete(dispatch.sent.key);
+        // The operation remains singleflight during this cleanup. Notification failure
+        // cannot turn an already validated definitive success back into UNKNOWN.
+        try { this.dependencies.confirmedMutation?.(Object.freeze(clone(dispatch.sent.entry.mutation))); } catch { /* Cleanup only. */ }
+      }
       return true;
     } catch (error) {
       if (this.operation === operation) this.state.error = error instanceof Error ? error.message : 'Operacja niepotwierdzona. Odśwież stan przed ponowieniem.';
