@@ -1,88 +1,95 @@
-# PairCoach — profile i przykłady kontenerowe (Windows / WSL)
+# PairCoach Lightweight — profile i przykłady (Windows / WSL)
 
-**ETAP9: IMPLEMENTED_PENDING_COHERENT_INTEGRATION_AND_FINAL_QA — nie wydanie.**
-**LIVE_NOT_RUN / ZIP_NOT_RUN; finalny spójny SHA: odłożony do integracji.**
-Zamrożony checkpoint przewodnika korzysta z publicznego kontraktu konsumenta
-`4903cffa80ef0b1faa9d3b23c382d9d8fc0d3021` (zależności:
-`7c54f6a6fac11e94f4afe0bbda112c09c8615708`,
-`3a5037822e0252d70cb9d740852fac9402480b04`,
-`d30af1df3352ed7312e7aa4d03903762bf25dbe2`). To **dependency-only**, nie odbiór
-całego backendu, języków ani gotowej paczki; nie trzeba czekać na ich freeze,
-żeby przygotować tę instrukcję. Poniższe komendy są instrukcją po integracji,
-nie zgodą na replay historycznych prepare ani dowodem ich wykonania.
-Ten dokument uzupełnia [start](windows-start.md) i [pakowanie](windows-package.md).
-Sprawdź rewizję wskazaną przez K oraz zaufany, przekazany niezależnie SHA256 manifestu.
-Sam ZIP, plan prepare, lokalny tag ani pusty `runtimes/images.lock.json` nie oznacza gotowości.
-Publiczne CLI i runtime assets są osobną, źródłowo odebraną dostawą P1_4.
-To nie odbiór ich integracji z backendem: przed użyciem K musi wskazać spójną rewizję
-aplikacji zawierającą producenta, konsumenta i pakowanie. Niepełna kopia źródeł ma
-jawnie odmówić zamiast pominąć wymagane pliki.
-Nie korzystaj zamiast nich z prywatnych operator-request/ROOT paths.
+**Kandydat, nie potwierdzone wydanie.** Aktualny SHA oraz wyniki są w raporcie K.
+Publiczne wykonanie prepare, Java21/Spring21 GUI, native Windows i świeży ZIP
+pozostają **NOT_RUN**, dopóki raport nie zawiera rzeczywistego wyniku.
+Ten przewodnik opisuje obsługę; nie zastępuje [instalacji](windows-start.md)
+ani [weryfikacji paczki](windows-package.md).
 
-## 1. Platforma i wybór profilu
+## 1. Platforma i profil
 
-Użyj **jednej** ustalonej instalacji: Node >=22.22.0, npm, przeglądarka oraz Docker
-Desktop z Linux containers. Windows i WSL to różne środowiska klienta — nie mieszaj
-ich `node_modules` ani ścieżek bind mount. Zalogowany Codex trener/raport i logowanie
-ChatGPT są opisane w windows-start; prepare nie wymaga ani nie przekazuje kluczy AI.
-Nie instaluj hostowego JDK, Mavena ani Pythona i nie zmieniaj JAVA_HOME/PATH.
+Potrzebujesz Node.js >=22.22.0 z npm, przeglądarki i Docker Desktop z kontenerami
+Linux. Narzędzia zadania (JDK, Maven, Python, pytest, TypeScript) działają w
+kontenerze: nie instaluj ich na hoście. Prepare nie wymaga poświadczeń AI.
+Windows i WSL to osobne środowiska klienta: nie mieszaj ich `node_modules`,
+ścieżek projektów ani bind mountów. W WSL używaj ścieżek `/…`, w PowerShell `C:\…`.
 
-Otwórz rzeczywiście wybrany runtime config: jawny `--runtime-config <absolutny-plik>`
-albo domyślny `paircoach.runtime.json` **w katalogu aplikacji/modułu**, nigdy plik
-wyszukany w bieżącym cwd terminala. Repozytoryjny szablon wskazuje `java-maven-21`
-i `./examples/java-pattern`, ale jego obecność w paczce nie gwarantuje poprawności
-ani gotowości. Ustaw `activeProfile` oraz `workspaceRoot` według tabeli poniżej. Wszystkie względne ścieżki konfiguracji (`workspaceRoot`,
-`runtimeCatalog`, `imageLock`) liczone są od **pliku konfiguracji**, nie terminala.
-Katalog i lock to odpowiednio `./runtimes/catalog.json` i `./runtimes/images.lock.json`.
-Nie wpisuj domyślnego/fikcyjnego imageId ani digestu. Dokładny RuntimeConfigV1 ma
-`schemaVersion: 1`, tekstowe `activeProfile`, `workspaceRoot`, `runtimeCatalog`, `imageLock`,
-`languageFeatures: { completion: boolean, diagnostics: boolean }` oraz
-`execution: { backend: "docker", pullPolicy: "never" }`; bez dodatkowych pól.
-Brak/niepoprawny config oznacza `CONFIG_ERROR`, nie automatyczny prepare lub host fallback.
-Jeśli brak również rzeczywistej ścieżki projektu, odpowiedź `PROJECT_OPEN_REQUIRED`
-wymaga jawnego otwarcia istniejącego projektu przez obecne GUI / `POST /api/project/open`;
-nie twórz zastępczej sesji/workspace. Ręczna edycja i recovery pozostają oddzielne od Run.
-
-Priorytet profilu: `PAIRCOACH_RUNTIME_PROFILE` > `activeProfile`.
-Priorytet workspace: jawne otwarcie projektu w GUI > `PAIRCOACH_WORKSPACE_DIR` > `workspaceRoot`.
-Usuń niezamierzone nadpisania env w swojej sesji; zmiana profilu wymaga restartu aplikacji.
-Po restarcie sprawdź profil i stan runtime w nagłówku, zanim klikniesz Run.
-Nie przenoś ustawień/kontekstu Run/AI/LSP z poprzedniego projektu.
-
-| Przykład (`examples/…`) | `activeProfile` | Main — jawny TaskRunConfig | Tests — jawne selektory |
+| Przykład w `examples/` | Profil | Main | Tests |
 |---|---|---|---|
+| `java-pattern` | `java-maven-11`, `java-maven-17`, `java-maven-21`, `java-maven-27` | JAVA_MAIN `demo.StrategyDemo` | names: `demo.StrategyDemoTest`; paths: puste |
+| `spring-counter` | `java-maven-21`, `java-maven-27` | SPRING_BOOT containerPort `8080`, healthPath `/sum` | names: `demo.CounterApplicationTest`; paths: puste |
 | `javascript-counter` | `javascript-node` | SCRIPT `main.js` | paths: `counter.test.js`; names: puste |
 | `typescript-counter` | `typescript-node` | SCRIPT `main.ts` | paths: `counter.test.ts`; names: puste |
 | `python-calculator` | `python-3.13` | SCRIPT `calculator.py` | paths: `test_calculator.py`; names: puste |
-| `java-pattern` | `java-maven-11`, `java-maven-17`, `java-maven-21`, `java-maven-27` | JAVA_MAIN `demo.StrategyDemo` | paths: puste; names: `demo.StrategyDemoTest` |
-| `spring-counter` | `java-maven-21`, `java-maven-27` | SPRING_BOOT containerPort `8080`, healthPath `/sum` | paths: puste; names: `demo.CounterApplicationTest` |
 
-**Profil środowiska ≠ konfiguracja zadania.** Każdy przykład zawiera `task.v2.json`
-z dwoma oddzielnymi RunProfileV2 (`RUN_MAIN`, `RUN_TESTS`), `workingDirectory: "."`,
-`timeoutMs: 120000` i strukturą `task.entry` / `task.tests`. To szablon danych do
-jawnego zapisania w ustawieniach projektu V2, **nie** automatyczny import ani shell command.
-Przejrzyj pola Main i Tests w ustawieniach i zapisz je jawnie; samo otwarcie katalogu
-nie upoważnia aplikacji do zgadywania klasy/skryptu. Nie zastępuj całych istniejących
-settings plikiem zawierającym tylko `runProfiles`; zachowaj pozostałe ustawienia.
-Inny własny projekt z innymi klasami/skryptami wymaga swoich selektorów, nie zmiany aplikacji.
+Profil Java wybiera **rzeczywisty JDK kontenera**, a POM projektu określa
+**target release**. Nie muszą być równe: `java-pattern` z release11 pozostaje
+release11 również na JDK21/27. Nie przepisuj POM przy zmianie profilu.
+Pozostała walidacja i rzeczywiste błędy kompilatora pozostają. Spring to wariant
+projektu Java, nie osobny język; przykład wymaga JDK21 lub27.
 
-Korekta właściciela z 2026-11-12: profil runtime wybiera **rzeczywisty JDK**, a
-`maven.compiler.release` pochodzi z POM projektu. Nie zmieniaj POM ani `java.version`
-wyłącznie z powodu przejścia na nowszy kontener, np.21→27. Raport ma rozróżniać JDK
-oraz targetRelease. Pozostała walidacja i rzeczywiste błędy kompilatora pozostają.
-Równość release==JDK jest usunięta w source/effective-POM/adapter/prepare. Przykład
-java-pattern zachowuje target11 na JDK11/17/21/27, Spring target21 na JDK21/27.
-`runtime-input.json` zawiera osobne `actualJDK` (sprawdzone javac) i `targetRelease`
-(z effective-POM). Starszy JDK z nowszym targetem ma pokazać rzeczywisty błąd kompilatora.
-**Osobny konfigurowalny timeout/log/cancel prepare pozostaje do wdrożenia.**
-Spring nie jest oddzielnym profilem ani językiem i nie jest wspierany przez profile11/17.
+Wybór profilu i projektu zapisuje `paircoach.runtime.json` w katalogu aplikacji
+albo jawny plik `--runtime-config ABS`. Względne `workspaceRoot`, `runtimeCatalog`
+i `imageLock` liczą się od **tego pliku**, nie od terminala. Format:
 
-## 1a. Pełne ustawienia projektu — PRZED prepare
+```json
+{
+  "schemaVersion": 1,
+  "activeProfile": "java-maven-21",
+  "workspaceRoot": "./examples/java-pattern",
+  "runtimeCatalog": "./runtimes/catalog.json",
+  "imageLock": "./runtimes/images.lock.json",
+  "languageFeatures": { "completion": true, "diagnostics": true },
+  "execution": { "backend": "docker", "pullPolicy": "never" }
+}
+```
 
-CLI czyta **`<kanoniczny-projekt>/.paircoach/settings.json`**, nie `task.v2.json`.
-Najpierw zapisz jawnie pełne ustawienia V2; prepare nigdy ich nie tworzy ani migruje.
-Dla **nowego** `examples/javascript-counter`, przy zamkniętej aplikacji, utwórz
-katalog `.paircoach` i zapisz w nim `settings.json` jako UTF-8 bez BOM:
+Sam config nie przygotowuje obrazu. Poniższa publiczna komenda generuje config
+wskazujący rzeczywiście przygotowany **jeden wybrany profil** i projekt.
+Nie trzeba przygotowywać pozostałych sześciu profili, aby użyć Java21.
+`PAIRCOACH_RUNTIME_PROFILE` nadpisuje `activeProfile`; jawne otwarcie projektu
+w GUI ma pierwszeństwo przed `PAIRCOACH_WORKSPACE_DIR` i `workspaceRoot`.
+Usuń niezamierzone nadpisania w swojej sesji. Zmiana profilu wymaga restartu.
+
+## 2. Nowa prywatna kopia przykładu i pełne ustawienia
+
+Najpierw zbuduj aplikację według windows-start. W PowerShell pozostań w jej
+katalogu. Poniższy przykład tworzy **nową** kopię Java; nie nadpisuje źródeł
+ani istniejących danych. Dla Spring zmień tylko `$example` na `spring-counter`.
+
+```powershell
+$ErrorActionPreference = 'Stop'
+$app = (Resolve-Path '.').Path
+$example = 'java-pattern'
+$profile = 'java-maven-21'
+$base = Join-Path $env:LOCALAPPDATA ('PairCoachLightweight\' + [guid]::NewGuid().ToString('N'))
+if (Test-Path -LiteralPath $base) { throw 'Katalog istnieje: zachowaj jego dane' }
+New-Item -ItemType Directory -Path $base | Out-Null
+$base = (Resolve-Path -LiteralPath $base).Path
+$project = Join-Path $base $example
+Copy-Item -LiteralPath (Join-Path $app ('examples\' + $example)) -Destination $project -Recurse
+$settingsDir = Join-Path $project '.paircoach'
+$settingsFile = Join-Path $settingsDir 'settings.json'
+if (Test-Path -LiteralPath $settingsDir) { throw 'Istniejace dane: nie nadpisuj ustawien' }
+New-Item -ItemType Directory -Path $settingsDir | Out-Null
+$template = Get-Content -LiteralPath (Join-Path $project 'task.v2.json') -Raw | ConvertFrom-Json
+$settings = [ordered]@{
+    schemaVersion = 2
+    taskFilePath = $null
+    taskMode = 'IMPLEMENTATION'
+    reviewNotesPath = 'review.md'
+    aiConsent = $false
+    contextPatterns = @()
+    runProfiles = @($template.runProfiles)
+}
+$utf8 = New-Object Text.UTF8Encoding($false)
+[IO.File]::WriteAllText($settingsFile, ($settings | ConvertTo-Json -Depth 20), $utf8)
+Remove-Item Env:PAIRCOACH_RUNTIME_PROFILE -ErrorAction SilentlyContinue
+Remove-Item Env:PAIRCOACH_WORKSPACE_DIR -ErrorAction SilentlyContinue
+Remove-Item Env:PAIRCOACH_DATA_DIR -ErrorAction SilentlyContinue
+```
+
+Dla nowej kopii Java powyższy zapis tworzy następujące pełne ustawienia (nie sam fragment task):
 
 ```json
 {
@@ -98,8 +105,16 @@ katalog `.paircoach` i zapisz w nim `settings.json` jako UTF-8 bez BOM:
       "timeoutMs": 120000,
       "task": {
         "workingDirectory": ".",
-        "entry": { "kind": "SCRIPT", "path": "main.js" },
-        "tests": { "paths": [], "names": [] }
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.StrategyDemo"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.StrategyDemoTest"
+          ]
+        }
       }
     },
     {
@@ -107,396 +122,181 @@ katalog `.paircoach` i zapisz w nim `settings.json` jako UTF-8 bez BOM:
       "timeoutMs": 120000,
       "task": {
         "workingDirectory": ".",
-        "entry": { "kind": "TESTS" },
-        "tests": { "paths": ["counter.test.js"], "names": [] }
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.StrategyDemo"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.StrategyDemoTest"
+          ]
+        }
       }
     }
   ]
 }
 ```
 
-To kompletny przykład **tylko dla świeżego projektu JS**, nie polecenie nadpisania
-istniejących ustawień. Jeśli plik już istnieje, zachowaj jego bajty i użyj jawnego
-zapisu/migracji V2 w ustawieniach aplikacji; zachowaj task, zgodę, kontekst, drafty
-oraz pozostałe dane. Nie zastępuj pliku samym `runProfiles` ani całym `task.v2.json`.
-Dla innych przykładów jawnie ustaw Main/Tests według tabeli i szablonu `task.v2.json`,
-pozostawiając pełną otoczkę SettingsV2. Zgodę AI włączaj osobno i świadomie w GUI.
-Brak/legacy/mixed settings powoduje odmowę z instrukcją jawnego zapisu, bez zgadywania.
-Niestandardowy backend `dataDir` poza tą lokalizacją nie jest obsługiwany przez CLI;
-nie przenoś plików ani nie wybieraj innego katalogu na próbę.
-Dwa różne `task.workingDirectory` Main/Tests są w tym CLI jawnie odrzucane;
-jedno wspólne niekropkowe `workingDirectory` ma być zachowane, nie zastąpione `.`.
+Prepare czyta **`<projekt>/.paircoach/settings.json`**, nie samo `task.v2.json`.
+Powyższe pełne SettingsV2 są tylko dla nowej kopii. W istniejącym projekcie użyj
+jawnego zapisu/migracji w ustawieniach GUI: zachowaj pozostałe dane, zgodę,
+kontekst i drafty. Nie zastępuj settings samym `runProfiles` ani całym task.
+Przykłady mają osobne RUN_MAIN/RUN_TESTS, wspólne `workingDirectory: "."`
+i timeout programu120000ms. Inny projekt wymaga własnej klasy/skryptu i testów.
+CLI odrzuca fragmenty/legacy settings, niestandardowy dataDir oraz różne
+workingDirectory Main/Tests, zamiast zgadywać lub przenosić dane.
 
-## 2. Jawne prepare (bez domyślnego wykonania)
+## 3. Publiczne przygotowanie wybranego środowiska
 
-Poniżej schemat docelowy, nie dowód gotowości bieżących źródeł. Przed `--execute`
-sprawdź aktualną dopuszczoną rewizję i ograniczenia opisane pod przykładem.
-Z katalogu aplikacji, po instalacji zależności zgodnie z windows-start:
+Z katalogu aplikacji, z ustawionymi wyżej `$project`, `$profile`, `$base`:
 
 ```powershell
-$project = (Resolve-Path '.\examples\javascript-counter').Path
-$profile = 'javascript-node'
-# Istniejący prywatny rodzic, NOWE różne katalogi wyniku; nie repo/workspace/home/cache innej aplikacji.
-$planOut = Read-Host 'Pelna sciezka NOWEGO prywatnego katalogu dla planu'
+# Opcjonalny odczyt planu: nie przygotowuje ani nie zapisuje katalogu planu.
+$planOut = Join-Path $base 'plan'
 npm.cmd run runtime:prepare -- --project $project --profile $profile --output $planOut
-if ($LASTEXITCODE -ne 0) { throw 'Plan FAIL: zachowaj wynik i odczytaj blad, nie ponawiaj w ciemno' }
-# Dopiero po odczycie planu/pinow. To operacja sieciowa/Docker, nie codzienny Run.
-$executeOut = Read-Host 'Pelna sciezka INNEGO NOWEGO prywatnego katalogu wykonania'
+if ($LASTEXITCODE -ne 0) { throw 'Plan FAIL: odczytaj blad; nie zmieniaj POM dla nowszego JDK' }
+# Zwykle jawne prepare uzytkownika: pobieranie/budowanie moze wymagac internetu.
+$executeOut = Join-Path $base 'prepared'
 npm.cmd run runtime:prepare -- --project $project --profile $profile --output $executeOut --execute
-if ($LASTEXITCODE -ne 0) { throw 'Prepare FAIL/nieznany: zachowaj receipts i uzgodnij stan zasobow przed ponowieniem' }
+if ($LASTEXITCODE -ne 0) { throw 'Prepare nieukonczone: zachowaj output i odczytaj log' }
 ```
 
-W WSL odpowiednikiem jest `npm run runtime:prepare -- --project <absolutna-sciezka-WSL>
---profile <ID-z-tabeli> --output <NOWY-prywatny-katalog-WSL> [--execute]`.
-Nie przekazuj ścieżki `C:\…` do klienta Node uruchomionego w WSL ani odwrotnie.
-Domyślny wynik JSON `PLAN_ONLY` **nie przygotowuje** obrazów/cache i nie tworzy
-nawet katalogu `$planOut`: brak zapisu, sieci i wywołań Docker. Po odczycie planu
-wykonanie wymaga osobnego `--execute` i INNEGO nowego prywatnego outputu. Brak zatwierdzonych pinów/assets,
-obrazu, daemona lub zależności ma dać błąd/NOTREADY, bez host/mock fallbacku.
-Prepare ma używać wyłącznie package-relative pinów i skryptów; żadnych operator-only request paths.
-Nie montuje home, prywatnego `.m2`, docker.sock ani sekretów i nie przyjmuje flag Docker z zadania.
-Po `pom.xml`, `requirements.txt`, `package.json` lub lock/config zmienionym względem
-przygotowanego projektu wykonaj nowe jawne prepare; zwykła edycja źródła nie zmienia zależności.
-Run/Test używają później wyłącznie przypiętych lokalnych obrazów `--pull=never` i zarządzanych cache.
+W WSL odpowiednikiem jest:
 
-**Przekazanie wyniku do aplikacji: odebrany źródłowo producent P1_4, JESZCZE NIE ZINTEGROWANY.**
-K dopuścił dokładne źródła CLI `337dbb3aa1d439a4c9cf706037c80a595419f773`
-i pełne assets `b60254a40aa8c47455b829ffa1844e11b99f6311`; poniższe nazwy/statusy
-odpowiadają temu producentowi. To identyfikatory źródeł, nie finalna rewizja aplikacji.
-W pełnym źródle generator, catalog, production pins i language prepare mają spójne
-metadane Java/Javac `27.0.1.0.2`; nie zmieniaj ich na `27.0.1.0` ani nie ignoruj
-ścisłej kontroli narzędzi. Wcześniejsze prepare z błędnymi metadanymi zakończyło się FAIL,
-nie gotowością Java27. Odbiór źródła nie upoważnia do ponawiania tego wykonania.
-Historyczny dowód operatora wykazał dodatkowy problem źródeł b602: nawet samo
-`buildx inspect` zapisywało metadane i blokowało następną komendę przez guard pustego config.
-K odebrał źródłową poprawkę **`5a0f7fe5deee33350e0e5fe2b90de2b3c35a0f91`**
-(tree `0510efc57d6da372683d31cf563857384fccb5d8`, na b602): osobne owned
-`BUILDX_CONFIG`/HOME oraz NOWY pusty credential config dla każdej komendy zewnętrznej
-i zagnieżdżonej, wspólna capability producenta. Znane seed/lock są wyłącznie
-sprawdzane stat i zachowane, nigdy czytane, używane ponownie ani kasowane;
-obce pliki/config.json, link lub zmiana tożsamości powodują odmowę po trwałym receipt,
-przed następnym procesem. Nie obchodź jej przez dowolny niepusty config, usuwanie
-metadanych, globalne env ani ręczny retry. Poprawka nie zmienia pinów/narzędzi/OCI/cache.
-Rzeczywista kontrola tego helpera info→buildx inspect→info potwierdziła 3 puste config
-oraz osobny stan Buildx, ale **nie** actual build/tokenSeeds ani Windows.
-Następny rzeczywisty przebieg operatora na tych źródłach zakończył się **FAIL exit1**
-po 7,495 s: `FAILED_RETAIN_AND_RECONCILE`, `Reused image identity/manifest changed`.
-Wykonał tylko 4 odczyty Docker, bez nowych jobs/build/pull/kontenerów. Zachowany counter
-na rzeczywistym receipt wskazuje błąd porównania kolejności kluczy JSON: Id, Descriptor
-oraz RepoDigests są semantycznie identyczne, lecz guard odrzuca inną kolejność pól.
-To błąd produktu w operator-only remainder, nie brak uprawnień ani dowód zmiany obrazu;
-nie dowodzi też poprawności publicznego `--execute`. Poprawka P1_4 wymaga osobnego
-odbioru źródła i nowego planu/guardów operatora, z zachowaniem wszystkich kontroli
-obrazu/manifestu. Nie przestawiaj ręcznie pól receipt, nie osłabiaj guardu i nie
-ponawiaj/resume/overwrite tego wyniku. Nie powstał zasób wymagający cleanup.
-Źródłowy odbiór 5a0f nie jest zakończonym prepare. Dwa stare testy zgodności prywatnego env/transport seam pozostają
-FAIL, bez zmiany ich asercji; pełny zestaw nie jest zielony. Producent i backend nadal
-wymagają spójnej integracji. Nie uruchamiaj starego planu ani operator-only remainder.
-Historyczny celowany smoke rzeczywistego CLI `6417183` na izolowanej źródłowej kopii bez Git w WSL potwierdził
-`PLAN_ONLY` bez zapisu i procesów potomnych (7 profili oraz Spring21/27), a także odmowę
-fragmentu settings, obcej flagi i istniejącego outputu. Używał istniejących zależności,
-nie świeżej instalacji. Nie wykonywał `--execute`, npm/PowerShell ani backendu i nie jest
-nowym testem poprawionych źródeł. Poprawiona tożsamość obrazu zachowuje zatwierdzony
-selektor nazwa:tag, osobno rzeczywisty digest i imageId — nie zamieniaj selektora
-na RepoDigest, aby ręcznie obejść odmowę konsumenta.
-Faktyczny konsument i zintegrowany pakiet nadal wymagają osobnego potwierdzenia;
-nie jest to gotowe wydanie.
-Execute zwraca `PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE` albo `NOTREADY`, nigdy
-status końcowy `READY`. Sam exit0, receipt lub wygenerowany config nie dowodzi gotowości.
-Przy `NOTREADY` zachowaj output/diagnostykę; nie dopisuj locka i nie ponawiaj na ślepo.
-Dopiero przy potwierdzonym wygenerowaniu konfiguracji pod NOWYM `$executeOut` będą:
+```bash
+npm run runtime:prepare -- --project "$project" --profile "$profile" --output "$executeOut" --execute
+```
 
-- `runtime-config.json` — istniejący format RuntimeConfigV1 z rzeczywistym projektem;
-- `catalog.json` — dokładnie jeden zatwierdzony wybrany profil;
-- `images.lock.json` — rzeczywiste pomiary obrazów/narzędzi;
-- `jobs/<profile>/receipt.json` i związany cache — wybierany jest **rodzic tego receipt**,
-  nie zewnętrzny `$executeOut`.
+Zmienne WSL mają być absolutnymi ścieżkami WSL; istniejący prywatny rodzic outputu
+musi mieć uprawnienia0700 (`umask 077` przed tworzeniem własnego katalogu).
+Output ma być NOWY i poza aplikacją/projektem. Plan i execute to osobne działania;
+wynik `PLAN_ONLY` nie stanowi zgody ROOT ani receipt do ręcznego wypełnienia.
 
-Docelowy start z katalogu aplikacji (PowerShell, obie ścieżki absolutne):
+**Timeout/log/cancel prepare: implementacja P1 jest w toku.** Nie ma jeszcze
+potwierdzonej składni dodatkowych parametrów w tej rewizji; nie używaj
+wymyślonych flag. Ta luka musi być uzupełniona przed odbiorem publicznego prepare.
+Timeout przygotowania jest oddzielny od limitu120000ms programu ucznia;
+nie zwiększaj z tego powodu limitów Run, autosave ani weta.
+
+Oczekiwany wynik wykonania to `PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE`,
+nie końcowe READY. `NOTREADY`, błąd albo przerwanie nie dowodzą braku skutków:
+zachowaj katalog i log, odczytaj wynik tej operacji przed kolejnym zapisem.
+Nie usuwaj receiptów, nie dopisuj imageId/digestów i nie uruchamiaj ponownie
+w tym samym output. Nowa próba ma wynikać z usunięcia przyczyny/nowych danych,
+nie z resetu historii. Nie potrzeba ręcznych receiptów ROOT, okresowego odnawiania
+zgody, recovery902 ani operator-only remainder.
+
+Udane prepare tworzy pod `$executeOut`:
+- `runtime-config.json` — config rzeczywistego projektu;
+- `catalog.json` — wybrany profil;
+- `images.lock.json` — rzeczywiste tożsamości obrazów i narzędzi;
+- `jobs/<profile>/receipt.json` oraz cache — zachowaj cały wynik.
+
+Wersje narzędzi pochodzą z uruchomionych binarek przez `runtime-tools.mjs`
+wewnątrz obrazu, nie z tagu/metadanych. Dla Java rozróżniaj wynik java/javac
+od targetRelease z Maven/effective-POM. Nie uruchamiaj sondy na hostowym JDK.
+Przy zmianie POM, requirements, package/lock lub konfiguracji zależności wykonaj
+nowe prepare; zwykła edycja kodu nie wymaga ponownego pobierania zależności.
+Run/Test używa lokalnego przypiętego obrazu (`pull=never`) i cache, bez hostowego
+fallbacku, pobierania w Run ani montowania home, prywatnego `.m2` czy docker.sock.
+Prepare nie przygotowuje JDT/pylsp, obrazów LSP ani receipt LANGUAGE.
+
+## 4. Start i zmiana profilu
+
+Po potwierdzonym wygenerowaniu konfiguracji, w tym samym PowerShell:
 
 ```powershell
-$runtimeConfig = (Resolve-Path (Join-Path $executeOut 'runtime-config.json')).Path
-$preparedRoot = (Resolve-Path (Join-Path (Join-Path $executeOut 'jobs') $profile)).Path
+$runtimeConfig = (Resolve-Path -LiteralPath (Join-Path $executeOut 'runtime-config.json')).Path
+$preparedRoot = (Resolve-Path -LiteralPath (Join-Path (Join-Path $executeOut 'jobs') $profile)).Path
 npm.cmd start -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot
-# Dodatkowe --prepared-runtime <ABSOLUTNY-rodzic-receipt> tylko dla rzeczywistych innych przygotowan (max16).
 ```
 
-Dla samego serwera: `npm.cmd run server -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot`.
-Oba skrypty uruchamiają `tsx src/server/index.ts`; rzeczywisty serwer oczekuje na listen
-przed wypisaniem `http://127.0.0.1:<port>`. Użyj tego adresu, nie zgadywanego portu;
-token nie jest wypisywany. Zmiany Coach/collector nie zmieniają tego publicznego CLI.
-Flagi i wartości podawaj osobno (nie `--flaga=wartosc`). Config i receipt najwyżej raz,
-prepared roots 0–16: absolutne, kanoniczne, różne, rozłączne, bez przecinka.
-Nieznane flagi, powtórzony config/receipt lub root, brak wartości, ścieżki względne
-lub znaki sterujące są odrzucane; powtarzanie `--prepared-runtime` jest dozwolone
-dla różnych rozłącznych roots w podanym limicie. Nie ma flag CLI installationId, engine ani network.
+W WSL:
 
-W Lightweight wszystkie siedem profili używa `builtin` z `imageLockKey: null` i
-`serverJvm: null`. Prepare pobiera/buduje wyłącznie zasoby wykonania, nigdy JDT/pylsp;
-nie przygotowuj ani nie przekazuj receipt LANGUAGE. Historyczna flaga
-`--language-receipt` jest tylko walidowana składniowo i ignorowana — nie uruchamia LSP.
-
-`languageFeatures.completion: false` wyłącza lokalne podpowiedzi;
-`diagnostics: false` wyłącza diagnostykę lokalnego workera JS/TS. Java/Python mają
-podpowiedzi słów z **bieżącego dokumentu** po prefiksie (Ctrl+Space), bez semantyki metod
-po kropce. Diagnostyka Java/Python podczas pisania jest `N/A`, nawet przy `diagnostics: true`;
-błędy kompilacji/wykonania/testów czytaj po Run/Test w Konsoli. `builtin` nie oznacza ON:
-stan wyznacza rzeczywisty lokalny provider/worker. Jego awaria nie blokuje ręcznej edycji,
-a zapis/Run/trener nie wymagają ramki LANGUAGE, shadow ani gotowości LSP.
-
-Wygenerowany config i katalog dotyczą **jednego przygotowanego profilu**. Aby przejść
-z Java21 do Java27, uruchom publiczne prepare dla `--profile java-maven-27` do NOWEGO
-outputu i uruchom aplikację z jego nowym `runtime-config.json` oraz `jobs/java-maven-27`.
-Sama zmiana `activeProfile` w wygenerowanym jednoprofilowym katalogu nie wystarcza.
-Główny katalog siedmiu profili pozostaje walidowany w całości; brak pinów nieaktywnych
-profili nie wymaga przygotowywania ich przed wybranym Java21. Brak pinu aktywnego
-profilu nadal nie daje gotowości wykonania — żadnych wymyślonych imageId/digestów.
-
-W WSL użyj `npm start -- --runtime-config <ABS-WSL-runtime-config.json>
---prepared-runtime <ABS-WSL-jobs/profile>`; oba selektory muszą pochodzić z tego samego
-środowiska przygotowania, nie mieszanego Windows/WSL. Jawny `--runtime-config` wybiera
-wygenerowany config zamiast domyślnego `paircoach.runtime.json`; CLI nie przepisuje
-zainstalowanego rootconfig/catalog/lock. Nie dopisuj nowego pola RuntimeConfigV1 ani env.
-
-Konsument ma niezależnie potwierdzić bieżący projekt/zależności/task,
-rzeczywisty engine/obraz/narzędzia i kompletność cache
-`cache/<family>/<toolchainHash>/<dependencySha256>`. `imageLock` wymaga zmierzonego
-imageId **oraz prawdziwego** OCI manifest/INDEX Descriptor lub RepoDigest; samo imageId
-nie jest dowodem digestu. W Docker Desktop obie wartości mogą być równe, jeśli istnieje
-rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty lock blokuje Run, ale zwalidowany config/katalog/profil nadal udostępnia lokalne
-features i wybrany workspace: HTTP/WS, completion i zapis nie wymagają obrazów ani cache.
-Backend nie poświadcza uruchomienia lokalnego providera.
-CLI czyta rzeczywiste pełne SettingsV2 i wspólne task.workingDirectory, a backend ponownie
-sprawdza aktualny stan; staging/receipt CLI nie zastępuje WriteGate ani aktualnego źródła.
-
-Ta zmiana dokumentacji/pakietera nie importuje osobnego źródła CLI ani konsumenta.
-Celowany plan-only/Gitless smoke producenta to PASS wyłącznie dla izolowanej kopii
-łączącej zamrożone źródła — nie dowód zintegrowanego backendu ani świeżej paczki.
-Wcześniejsza odmowa pakietera na brakującym CLI pozostaje historycznym FAIL; nie została
-przepisana na PASS. Konsument nadal nie jest potwierdzony; kandydat **nie spełnia całego AC112**.
-Nie obchodź odmowy przez ręczne docker run, receipt-presence ani fikcyjny lock.
-Offline proof pozostaje osobno wymagany po prepare; samo pobranie obrazów i zależności
-lub tiny tool probe go nie zastępuje.
-
-## 2a. Zarządzany stan i transport — kontrakt integracji, nie dowód wykonania
-
-Po integracji konsument ma wyznaczać `config-dir` z rodzica **rzeczywiście wybranego
-pliku runtime config**, nie z settings/dataDir/cwd/TMPDIR ani wyszukiwania env.
-Stan ma trafić do `<config-dir>/.paircoach-runtime/projects/<sha256(UTF8 canonicalProjectRoot)>/`
-z `installation.json`, `runs`, `journal`: prywatny, kanoniczny, bez linków i rozłączny
-w obie strony z oryginalnym workspace oraz zatwierdzonymi read-only prepared/cache roots.
-To nie nowe pole JSON ani flaga. Nie wybieraj writable state przez `--prepared-runtime`.
-Pierwszy rzeczywisty binding serwera wywołuje `retainRuntimeExecutionLayout` z dataDir
-tego projektu i `<dirname(runtimeConfigPath)>/.paircoach-runtime`. Tworzy i utrwala UUID
-raz dla dokładnych canonicalWorkspaceRoot/projectId w powyższym `installation.json`.
-Oryginalny `<project-dataDir>/runtime-execution-layout.json` kotwiczy kolejne uruchomienia:
-nie nadpisuj go i nie przenoś stanu przy zmianie config. To **TA SAMA installationId**
-dla Run, service prepare, readiness i language owner — nie wartość wybierana przez operatora,
-klienta lub CLI. Stabilny installationId i dziennik mają przetrwać restart;
-konflikt/częściowy stan wymaga recovery, nie resetu tożsamości. UNBOUND nie tworzy katalogu ani fikcyjnego projektu.
-Gdy położenie config powoduje overlap lub brak zapisu, Run ma pokazać `CONFIG_ERROR`;
-HTTP, ręczny edytor i recovery działają dalej. Użyj rzeczywistego runtime config poza
-konfliktującym projektem/read-only root, nie ukrytego fallbacku. Settings/dataDir/tmp
-nie stanowią zgody na RW oryginalnego kodu.
-
-Zatwierdzony klient to `/usr/bin/docker` w WSL/Linux albo
-`C:\Program Files\Docker\Docker\resources\bin\docker.exe` na Windows;
-endpoint odpowiednio `unix:///var/run/docker.sock` lub `npipe:////./pipe/docker_engine`.
-Brak klienta/daemona wyłącza wykonanie, nie edytor; bez instalacji automatycznej,
-PATH discovery, executable z zadania/profilu ani fallbacku hostowego.
-Transport używa tylko własnego prywatnego pustego config pod managed root i zatwierdzonego
-env, nie odziedziczonych poświadczeń/DOCKER_HOST/DOCKER_CONFIG ani globalnej zmiany env.
-Run nie wykonuje prepare/build/plugin; prepare pozostaje osobnym jawnym krokiem.
-
-Run/Test mają `network=none` i read-only zatwierdzony cache. Spring RUN_MAIN wymaga
-**wcześniej przygotowanej sieci `paircoach-<installationId>-service`**; read-only inspect
-musi potwierdzić dokładną tożsamość, `Internal===true` i `Driver==='bridge'`.
-Wbudowana zewnętrzna sieć Docker `bridge` **nie spełnia** tego warunku. Nie twórz sieci
-z zadania, nie wybieraj host/arbitrary network. Brak tej sieci daje czytelny not-ready
-wyłącznie trybu service, nie trwałe wyłączenie Spring. Jawny publiczny kontrakt przygotowania tej sieci
-jest już zamrożony poniżej; **źródło nie jest dowodem rzeczywistego service PASS**.
-Port wyłącznie 127.0.0.1, health, twardy Stop i orphan recovery pozostają obowiązkowe.
-
-## 2b. Spring: jawne przygotowanie sieci TEJ SAMEJ instalacji
-
-**SOURCE CHECKPOINT, nie aktualnie zintegrowane/wydane GUI.** Poniższa ścieżka opiera się
-na źródłowo przyjętym przez K frontendzie **`e3965caf75f0e2900dd498667092b670fb314421`**
-i istniejącym checkpointcie backendu **`6d098bf22e0f1d4cd21043b4abed068146600e0c`**.
-Nie jest to osobny odbiór historycznego b63 ani całego backendu. Do wykonania potrzebna
-jest wskazana przez K spójna integracja; nie wnioskuj z tego opisu, że uruchomione GUI
-już zawiera te kontrolki. Nie trzeba nowego backendu, nagłówka ani zgody właściciela.
-
-Po przygotowaniu runtime i starcie **rzeczywistego** serwera otwórz ten sam projekt
-w **„LIVE — lokalny backend”**. Rozwiń **„Środowisko: …”** i w sekcji
-**„Środowisko wykonania”** kliknij **„Przygotuj środowisko”**. To jawne przygotowanie
-sieci instalacji, nie prepare obrazów ani uruchomienie programu/testów. Nie wpisuj
-tokenów, ID ani poleceń API: klient korzysta z bieżącego uwierzytelnionego powiązania
-projektu/sesji i sam trwale zachowuje całe oryginalne żądanie przed wysłaniem.
-
-- **„Przygotowanie / uzgadnianie…”** oznacza operację w toku; nie wysyłaj drugiego żądania.
-- Po utracie lub niepoprawnej odpowiedzi **„Przygotowanie niepotwierdzone — gotowość
-  wymaga bieżącego odczytu.”** nie oznacza READY. Zachowaj magazyn tej karty.
-  Tylko osobne jawne kliknięcie **„Dokończ przygotowanie”** wysyła dokładnie oryginalne
-  sześć pól, także **ten sam clientId/requestId**, bez ich aktualizowania do nowej sesji.
-  Jeśli oryginał wcześniej nie dotarł do serwera (prior MISSING), może nastąpić
-  **pierwsze przygotowanie**; istniejący prior jest uzgadniany przez read-first ledger
-  i bieżący readback, bez ponownego tworzenia. To nie wyłącznie odczyt statusu.
-  Reconnect, render, timer ani błąd fetch nie wysyłają POST automatycznie.
-- Po ścisłym potwierdzeniu `PREPARED` klient wykonuje świeży uwierzytelniony
-  **`GET /api/project`**. Dopiero komunikat **„Przygotowanie potwierdzone. Odczytano
-  bieżącą gotowość; sprawdź osobno program i testy poniżej.”** potwierdza ten odczyt,
-  nie sukces Spring. Sprawdź oddzielnie **„Uruchom program”** i **„Uruchom testy”**,
-  ich dostępność i powody. `PREPARED` **nie oznacza READY** obu trybów. Błędny, stary
-  lub nieudany odczyt pozostawia oryginał i stan niepotwierdzony.
-
-Istniejące **„Sprawdź wynik operacji”** w pasku aplikacji dotyczy nieznanego Run/zapisu,
-**nie** tego przygotowania. Nie zastępuj nim „Dokończ przygotowanie”. Przycisk przygotowania
-może być niedostępny do synchronizacji, rozliczenia sterowania/Veto, zapisu/konfliktu,
-bieżącego Run lub innej operacji; przeczytaj powód przy przycisku. Przy nieznanym wyniku
-nowy Run/zapis ustawień pozostaje zablokowany; Stop znanego wykonania jest oddzielny.
-Brak trwałego magazynu/tożsamości karty blokuje przygotowanie; ręczna edycja pozostaje dostępna.
-
-Po **ukończonym** przygotowaniu poprawna pusta historia (`entries: []`) nie jest UNKNOWN:
-nowa uwierzytelniona karta zachowuje **własny clientId** i może uruchomić program/testy,
-zapisać ustawienia oraz jawnie przygotować środowisko, o ile pozostałe warunki na to pozwalają.
-Samo otwarcie nie zmienia historii ani nie wysyła POST; nowy oryginał jest zapisywany
-pod własną tożsamością dopiero przed jawnym wysłaniem, z porównaniem poprzednio
-odczytanych bajtów (compare-before-write/CAS) i pełnym readbackiem.
-**Niepusty obcy zapis UNKNOWN/ABSENT, także z receipt, pozostaje niezmienny i blokujący**:
-nie przejmuj starego clientId ani oryginału, nie czyść storage i nie zmieniaj requestId,
-aby ominąć odmowę. Niepoprawny zapis, quota, zmiana przez inną kartę lub błąd readback
-pozostają fail-closed; pusta historia nie jest wyjątkiem od tych kontroli.
-
-Kontrakt transportu poniżej służy odczytowi, nie ręcznemu składaniu żądania:
-**`POST /api/runtime/service-network/prepare`** do rzeczywistego loopback serwera,
-`Content-Type: application/json`, istniejący `Authorization: Bearer …` i zasady Host/Origin.
-Nie pozyskuj tokenu z logu, nie wysyłaj go na zewnątrz i nie twórz zastępczej sesji.
-Klient utrwala całe ciało i kontynuuje z **identycznym oryginalnym requestem**:
-
-```typescript
-// POST body: DOKLADNIE te szesc pol; stringi musza przejsc istniejace validId.
-type RuntimeNetworkPrepareRequest = {
-  requestId: string;
-  clientId: string;
-  sessionId: string;
-  expectedWorkspaceVersion: number; // safe integer >= 0
-  configurationGeneration: string;
-  controlEpoch: number; // safe integer >= 0
-}
+```bash
+npm start -- --runtime-config "$executeOut/runtime-config.json" --prepared-runtime "$executeOut/jobs/$profile"
 ```
 
-Nie dodawaj installationId, network/name, engineId, ścieżek ani flag Docker.
-Przy aktywnym/nieuzgodnionym Run, pending mutations, nieaktualnej wersji/config/epoce,
-kontroli innej niż STUDENT lub zakończonym/zastąpionym bindingu operacja odmawia.
-Nie zmieniaj guardów. Maintenance nie uruchamia się samo ze startup, Run, settings
-ani odczytu gotowości. Serwer sprawdza binding/wersję/config/epokę i dobiera oryginalny layout/engine przed efektem.
-Sukces HTTP200 ma **dokładnie siedem pól** (`PreparedServiceNetwork`):
+Pozostaw serwer uruchomiony i otwórz wypisany adres loopback (standardowo8080).
+Nie zatrzymuj innej usługi zajmującej port; nie ma publicznej flagi `--port`.
+Nie używaj mock/preview zamiast LIVE. Publiczny start używa danych
+`<projekt>/.paircoach`; nie ustawiaj alternatywnego dataDir. Token obsługuje
+istniejący klient aplikacji — nie kopiuj go do logów lub poleceń.
 
-```typescript
-type PreparedServiceNetwork = {
-  schemaVersion: 1;
-  status: 'PREPARED';
-  installationId: string;
-  projectId: string;
-  engineId: string;
-  name: string;
-  networkId: string;
-}
-```
+`--prepared-runtime` wskazuje **rodzica receipt**, czyli `jobs/<profile>`, nie
+cały output. Flagi i wartości są oddzielne; ścieżki absolutne, kanoniczne,
+bez przecinków. Dla rzeczywiście innych rozłącznych przygotowań dopuszczalne
+jest powtórzenie `--prepared-runtime` (maks16). Nie ma flag installationId,
+engine ani network. Błędny config daje CONFIG_ERROR, nie automatyczny prepare.
 
-Odpowiedź pokazuje prawdziwą **TĘ SAMĄ installationId** serwera i sieć
-`paircoach-${installationId}-service`, z utrwalonym dowodem lokalnego internal bridge
-(**`Internal===true` i `Driver==='bridge'`**). Obca sieć, sama nazwa bez receipt, zmieniona
-tożsamość/engine ani wbudowany external bridge nie wystarczają. Nie generuj drugiej installationId,
-nie kasuj installation/journal i nie wykonuj ręcznego `docker network create`.
-`SERVICE_NETWORK_OUTCOME_UNKNOWN`, timeout lub503 nie dowodzą braku efektu;
-`IDEMPOTENCY_CONFLICT` wymaga oryginalnego ciała, nie poprawiania go pod starym ID.
-Wyłącznie czytelne potwierdzenie dokładnego `SERVICE_NETWORK_NOT_DISPATCHED` /
-`SERVICE_NETWORK_ABSENCE_CONFIRMED` dopuszcza osobne nowe kliknięcie
-**„Przygotuj środowisko”** z aktualnym powiązanym stanem. Nie rób blind retry.
+Aby przejść Java21→Java27, zatrzymaj własny serwer po zakończeniu/Stop Run,
+wykonaj prepare z `--profile java-maven-27` do NOWEGO outputu i wystartuj z jego
+nowym config oraz `jobs/java-maven-27`. Nie zmieniaj POM ani samego activeProfile
+w wygenerowanym jednoprofilowym katalogu: brakującego profilu tam nie ma.
 
-## 2c. Odczytaj gotowość, nie twórz jej odczytem
+Pierwszy binding sam utrwala installationId/layout w danych projektu i stan
+wykonania poza źródłami (`.paircoach-runtime` obok runtime config). Zachowaj
+`runtime-execution-layout.json`, installation i journal przy restarcie;
+nie wybieraj UUID, nie przenoś cache/danych między projektami i nie kasuj stanu,
+aby ominąć konflikt. Konflikt własności wymaga odczytu/recovery, nie resetu.
 
-Odśwież rzeczywiste autoryzowane **`GET /api/project`** albo odbierz świeży WS
-HELLO/STATE_SYNC (`SessionBundleV2`). W projekcie odczytaj:
+## 5. GUI: Java21, potem Spring21
 
-- `capabilities.execution.runtime`: `profileId`, `label`, `configurationGeneration`,
-  `state`, `problem`, `taskFields`;
-- `capabilities.execution.modes.RUN_MAIN` i `RUN_TESTS`: osobne `canRun` i `problem`;
-- `capabilities.language`: oddzielny stan języka, nie wynik Run ani sieci.
+1. W **LIVE — lokalny backend** otwórz ten sam przygotowany projekt.
+   Sprawdź profil i osobno dostępność **Uruchom program** oraz **Uruchom testy**
+   w panelu **Środowisko**. Sam config, receipt, exit0 lub runtime READY nie
+   zastępuje gotowości danego trybu. Brak Docker/obrazu/prepare nie blokuje
+   ręcznej edycji, zapisu ani odzyskiwania draftu.
+2. **Run Tests**: przykłady celowo odejmują zamiast dodawać, więc oczekiwany jest
+   FAILED. Zmień logikę w kodzie, nie test. Zaczekaj na ACK i ponów Tests:
+   oczekuj PASSED z rzeczywistym raportem bieżącego runId i testCount>0.
+   Brak raportu to UNKNOWN, zero testów to NO_TESTS, same skipped nie dają PASS.
+3. **Run Main** ma pokazać wynik zmienionego kodu. W Spring przed Main rozwiń
+   **Środowisko → Środowisko wykonania → Przygotuj środowisko**. To jawne
+   przygotowanie internal bridge tej instalacji, nie build obrazu. Nie wykonuj
+   ręcznego `docker network create` ani POST. Po potwierdzeniu sprawdź świeżą
+   gotowość Main i Tests; PREPARED nie oznacza automatycznie gotowości obu.
+4. Spring: czekaj na rzeczywisty HTTP `/sum` pod pokazanym loopback portem.
+   Odpowiedź nie kończy działającego Main. Kliknij **Stop**: oczekuj potwierdzenia
+   zatrzymania właściwego kontenera i niedostępnego endpointu, nie tylko zmiany UI.
+5. Przy niepotwierdzonym przygotowaniu sieci zachowaj tę kartę i jej storage.
+   **Dokończ przygotowanie** kontynuuje dokładny oryginał; nie zmieniaj requestId,
+   clientId ani tożsamości instalacji i nie czyść magazynu. Nieznany Run/zapis
+   odczytuj przez **Sprawdź wynik operacji**; to inna operacja niż przygotowanie
+   sieci. Nie traktuj nieznanego Stop jako zakończonego.
 
-Stany runtime to `READY`, `CONFIG_ERROR`, `DAEMON_OFF`, `IMAGE_MISSING`,
-`PREPARE_REQUIRED`. Czytaj konkretny `problem.code/message/recovery/retryable`
-na poziomie runtime **i danego trybu**. Samo runtime READY nie zastępuje
-`modes.RUN_MAIN.canRun` lub `modes.RUN_TESTS.canRun`. Agregacja ponownie sprawdza
-bieżący daemon/profil/obraz oraz przygotowane zależności i task, każdy tryb osobno.
-Service bez zweryfikowanego SAME bridge ma Main niegotowy; dopiero jawne prepare
-plus świeża projekcja może to zmienić. Tests nie są z tej przyczyny globalnie wyłączane.
-Nie ma `/readiness` ani `/api/runtime/readiness`; nie dodawaj trasy i nie ustawiaj READY
-ręcznie. Config, receipt, nazwa sieci lub exit0 nie zastępują tych kontroli.
-Language READY/semantyka oraz realny Spring health wymagają osobnych dowodów;
-`INDEXING` nie jest ON. W razie błędu zachowaj edycję/recovery, bez host fallbacku.
+Każdy profil ma `language.provider: "builtin"`, `imageLockKey: null`,
+`serverJvm: null`. `builtin` nie oznacza automatycznie ON ani gotowości Docker:
+status lokalnych funkcji ma odpowiadać faktycznemu providerowi/workerowi.
+- Java/Python: Ctrl+Space podpowiada słowa z **bieżącego bufora** po prefiksie,
+  bez czekania na ACK, bez metod po kropce i bez semantycznej analizy projektu.
+  Diagnostyka podczas pisania jest N/A również przy `diagnostics: true`;
+  błędy kompilacji/testów są w Konsoli po Run/Test.
+- JS/TS: lokalny worker; rzeczywisty TypeScript kompiluje się dopiero przy Run/Test.
+- `languageFeatures.completion: false` wyłącza podpowiedzi;
+  `diagnostics: false` wyłącza lokalną diagnostykę JS/TS. Błąd workera nie może
+  blokować ręcznego pisania. Zapis/ACK/Run/trener nie wymagają wiadomości LANGUAGE.
+- Akceptacja podpowiedzi to zwykła edycja przez WriteGate, ACK i Undo/Redo.
+  CONTROL_PREPARE zamyka listę; Enter/Tab nie może wtedy zmienić bufora.
+  Weto2×Esc i ochrona plików ucznia pozostają aktywne.
 
-## 3. Jeden scenariusz po integracji prepare i backendu
+## 6. Paczka, dowody i powrót do poprzedniej instalacji
 
-1. Wybierz zgodny profil i przykład, przygotuj go, uruchom aplikację według windows-start,
-   otwórz ten sam katalog przykładu w GUI. Pełne ustawienia V2 muszą być zapisane
-   **przed prepare** (sekcja1a), nie dopiero po starcie. Oczekuj
-   właściwego profilu i osobnej gotowości Main/Tests według sekcji2c; dla Spring
-   przed Main jawnie przygotuj SAME sieć według sekcji2b i odśwież projekcję.
-   Stan lokalnej funkcji nie jest gotowością Docker; `builtin` samo nie daje ON.
-2. Run Tests: przykłady celowo odejmują zamiast dodawać, oczekiwany **FAILED**.
-   Zmień samą logikę odejmowania na dodawanie w `main.js`, `main.ts`, `calculator.py`,
-   `StrategyDemo.java` lub `CounterApplication.java`, nie test. Zaczekaj na prawdziwy
-   ACK zapisu i uruchom Tests ponownie: oczekuj świeżego JUnit bieżącego runId,
-   testCount>0, nie tylko exit0. Brak raportu=UNKNOWN; zero testów=NO_TESTS;
-   same skipped nie oznaczają PASSED. Konsola ma pokazać nowy wynik kodu.
-3. Run Main: JS/TS/Java/Python pokazuje aktualny wynik. Dla Spring poczekaj na prawdziwy
-   HTTP `/sum` pod pokazanym `http://127.0.0.1:<przydzielony-port>/sum`, nie sam tekst
-   Started. HTTP-ready nie kończy Run statusem SUCCEEDED. Kliknij Stop: oczekuj
-   potwierdzonego zatrzymania właściwego kontenera i braku odpowiedzi endpointu.
-4. Java/Python: zmień słowo w bieżącym buforze i użyj Ctrl+Space po prefiksie; lista
-   ma uwzględnić zmianę bez oczekiwania na ACK. Nie oczekuj metod projektu ani markerów
-   Java/Python. Błąd kompilacji Java sprawdź po Run/Test. TS: zwróć string zamiast liczby
-   w `add`, sprawdź marker workera i błąd rzeczywistego tsc; popraw typ.
-5. Podpowiedź akceptowana Tab/Enter jest zwykłą edycją STUDENT; CONTROL_PREPARE/COACH
-   zamyka widget i blokuje mutację, stare odpowiedzi po wecie nie otwierają go ponownie.
-   W Java i Python wykonaj osobno prawdziwą rozmowę trenera oraz weto2×Esc.
+K wiąże paczkę z dokładnym40SHA, packageId i SHA256 archiwum/manifestu.
+Weryfikację i świeżą instalację wykonuj według windows-package/windows-start,
+z niezależnie przekazanym zaufanym hashem manifestu. Nie wystarczy hash leżący
+obok nieznanego ZIP. Źródłowy ZIP nie zawiera sekretów, node_modules, obrazów,
+cache, raw receipts ani danych `.paircoach`. Świeża instalacja ma własne zależności
+natywne i własne publiczne prepare; nie kopiuj dowodów gotowości ze starej.
 
-Błąd config/daemona/obrazu/prepare: odczytaj komunikat i recovery w UI. Run/Test
-mogą być niedostępne, ale HTTP/WS, ręczna edycja, draft i snapshot recovery mają działać.
-Nie kasuj draftu, nie przenoś cache między JDK/projektami i nie traktuj Stop niepotwierdzonego
-jako sukcesu. Po nieznanym wyniku najpierw odczytaj stan tego samego runId/operacji.
+Build, prepare, start, zdrowy proces i działający scenariusz GUI to osobne wyniki.
+Pełny odbiór wymaga siedmiu profili, Spring21/27, działających funkcji chronionych,
+regresji oraz pełnego scenariusza ze świeżego ZIP. Test komponentowy lub plan
+tego nie zastępuje. WSL z GUI Windows nie dowodzi native Windows/PowerShell;
+raport rozróżnia te środowiska i podaje rzeczywiste ograniczenia.
 
-## 4. Pakowanie i granice dowodu
-
-Producent stosuje `node scripts/package-windows.mjs --commit <pełny40SHA> --list`
-i `--dry-run`, sprawdza manifest/closure i dopiero po osobnej zgodzie procedurę
-`--output <nowyKatalogPozaRepo>` z windows-package. Każdy dołączony plik ma bytes i SHA256:
-rootconfig, source runtime scripts, `runtimes/`, `docker/`, pięć `examples/` i stary
-kontrakt snapshot recovery. Wykluczone są m.in. `.env*`, sekrety/klucze, node_modules,
-obrazy/tar, download binaries, cache/target/__pycache__, raw receipts/logi i artifacts.
-Symlink, submodule w wybranym zakresie i alias nazwy Windows są odrzucane.
-`manifest.commands` obejmuje także literalny `runtime:prepare`; pakieter niczego nie wykonuje.
-Obie polityki źródłowe (pakieter i weryfikator) wymagają dokładnie15skryptów runtime
-publicznego przepływu, w tym CLI i jego helpera `runtime-image-retention.mjs`.
-Osobno dopuszczają **jedno prywatne źródło test-support**:
-`scripts/runtime-operator-remainder.mjs`. Nie jest ono importem publicznego CLI ani
-nową komendą npm/HTTP/acquisition API. Jest wymagane, jeżeli paczka wybiera którykolwiek
-z testów `runtime-prepare-cli/remainder.test.mjs`,
-`runtime-remainder-image-equality/image-equality.test.mjs` lub
-`runtime-image-retention/seams.test.mjs` pod `tests/` (także dynamiczny import fixture).
-Brak tego modułu powoduje odmowę planu/weryfikacji przed zapisem, nie pominięcie testu.
-Wszystkie oryginalne asercje pozostają; pakieter i weryfikator nie wykonują modułu.
-Samo dołączenie źródła nie upoważnia do uruchomienia operator-only remainder i nie
-dowodzi dostępności obrazów ani zakończenia naprawy. Kontrolery historycznej naprawy,
-ROOT recovery i prywatne proof fixtures pozostają izolowane i poza paczką.
-Nie rozszerzaj polityki do wildcarda `scripts/**` ani nie twórz kopii implementacji.
-Zaufanie pochodzi z niezależnie przekazanego SHA256 manifestu od K/operatora,
-nie z leżącego obok SHA256SUMS. Nie osłabia to istniejącego weryfikatora/recovery.
-
-Aktualne testy developera weryfikują źródłową selekcję i syntetyczne archiwum, nie
-Docker LIVE. Wymagane po integracji: wszystkie7profili, Spring21/27, offline po prepare,
-rzeczywiste GUI/ACK/Run/Tests/Stop/local completion/AI, Windows i WSL opisane oddzielnie oraz co najmniej
-jeden pełny LIVE ze **świeżo rozpakowanej paczki**. Dopiero finalF/niezależny odbiór,
-nie ten dokument ani plan, rozstrzyga TEST101–107 i AC101–112.
+Nową wersję sprawdzaj na osobnej instalacji i kopii zadania. W razie problemu
+zatrzymaj tylko własny serwer i potwierdź Stop jego Run; zachowaj nowe logi/dane.
+Poprzednia instalacja zostaje nietknięta. Nie kieruj starego programu na nowe dane,
+nie nadpisuj źródeł właściciela i nie stosuj globalnego prune/resetu historii.
