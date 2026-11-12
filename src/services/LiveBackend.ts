@@ -206,7 +206,13 @@ export class LiveBackend {
           canExecute:this.synced && !this.stopped,
           canSaveSettings:this.synced && !this.stopped && !this.preparing && !this.vetoPending && this.session.writeOwner==='STUDENT' && !this.savesHasConflict() } : null;
       }, requestId:id, maintenanceBlocked:()=>this.servicePreparation.snapshot().blocked, confirmedMutation:metadata=>this.releaseConfirmedRuntimeMutation(metadata), http: {
-        run:(body,signal)=>{this.retainRuntimeMutation('RUN',body);return this.http('/api/run','POST',body,true,signal);},
+        run:(body,signal)=>{
+          this.retainRuntimeMutation('RUN',body);
+          // Admission includes fresh readiness/capture and process dispatch, not an ordinary
+          // editor read. Use the explicitly selected task budget, with a readiness-sized floor.
+          const timeoutMs=this.wiring.runtime.snapshot().project?.settings.runProfiles.find(p=>p.kind===body.mode)?.timeoutMs ?? 30000;
+          return this.http('/api/run','POST',body,true,signal,Math.max(30000,timeoutMs));
+        },
         stop:(runId,body,signal)=>this.http(`/api/run/${encodeURIComponent(runId)}/stop`,'POST',body,true,signal),
         saveSettings:(body,signal)=>{this.retainRuntimeMutation('SAVE',body);return this.http('/api/project/settings','PUT',body,true,signal);},
       },
@@ -320,12 +326,12 @@ export class LiveBackend {
       }
     } catch { this.state.storageError = 'Nie można odczytać zapisanego draftu. Magazyn przeglądarki wymaga sprawdzenia.'; }
   }
-  private async http<T>(path: string, method = 'GET', body?: unknown, authenticate = true, signal?: AbortSignal): Promise<T> {
+  private async http<T>(path: string, method = 'GET', body?: unknown, authenticate = true, signal?: AbortSignal, timeoutMs = 5000): Promise<T> {
     const sourceMutation=method!=='GET'&&['/api/file','/api/project/open','/api/project/settings'].includes(path);
     if(sourceMutation){this.sourceRequests++;this.maintenanceSourceRevision++;}
     const controller = new AbortController();
     const abort=()=>controller.abort(); signal?.addEventListener('abort',abort,{once:true}); if(signal?.aborted)controller.abort();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await this.fetcher(`${this.baseUrl}${path}`, { method, signal: controller.signal, headers: {
         ...(authenticate ? { Authorization: `Bearer ${this.token ?? ''}` } : {}), ...(body ? { 'Content-Type': 'application/json' } : {})
@@ -342,7 +348,7 @@ export class LiveBackend {
       return await response.json() as T;
     } catch (error) {
       if (error instanceof HttpRejectedError) throw error;
-      if (controller.signal.aborted) throw new HttpDeadlineError('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
+      if (controller.signal.aborted) throw new HttpDeadlineError(`Brak odpowiedzi serwera (${timeoutMs/1000} s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.`);
       throw error;
     } finally { clearTimeout(timer); signal?.removeEventListener('abort',abort);if(sourceMutation){this.sourceRequests--;this.maintenanceSourceRevision++;} }
   }

@@ -51,6 +51,11 @@ export class RuntimeClientV2 {
   private state: RuntimeClientV2State = { project: null, execution: null, run: null, pending: null, error: null, reconciliationRequired: false };
   private listeners = new Set<() => void>();
   private operation: AbortController | null = null;
+  /** One dispatched RUN may observe its OWN newer states before the HTTP acceptance.
+   * This is local correlation under existing singleflight, never wire/process authority. */
+  private pendingRun: { operation: AbortController; request: RunRequestV2; authority: RuntimeAuthorityV2;
+    project: ProjectV2; previousRunId: string | null; runId: string | null;
+    valid: boolean; observedRevision: number } | null = null;
   private revision = 0;
   private disposed = false;
   private bound: RuntimeAuthorityV2 | null = null;
@@ -82,12 +87,32 @@ export class RuntimeClientV2 {
       value.workspaceVersion !== a.workspaceVersion || value.capabilities.execution.runtime.configurationGeneration !== a.configurationGeneration ||
       (run !== null && (!validateRunV2(run) || run.configurationGeneration !== a.configurationGeneration || run.profileId !== value.capabilities.execution.runtime.profileId || run.workspaceVersionAtStart > value.workspaceVersion))) return false;
     this.revision++;
+    const pending = this.pendingRun;
+    if (pending && pending.operation === this.operation) {
+      const own = equal(value, pending.project) && equal(a, pending.authority) && run !== null &&
+        this.matchesPendingRun(run as RunV2, pending);
+      // A later matching event cannot erase an intervening unrelated observation.
+      pending.valid &&= own;
+      if (own) { pending.runId = (run as RunV2).runId; pending.observedRevision = this.revision; }
+    }
     this.bound = clone(a);
     this.state = { ...this.state, project: clone(value), execution: clone(value.capabilities.execution), run: clone(run as RunV2 | null), error: null }; this.publish(); return true;
   }
   invalidate(): void {
-    this.operation?.abort(); this.operation = null; this.bound = null; this.revision++;
+    this.operation?.abort(); this.operation = null; this.pendingRun = null; this.bound = null; this.revision++;
     this.state = { project: null, execution: null, run: null, pending: null, error: null, reconciliationRequired: false }; this.publish();
+  }
+  private matchesPendingRun(run: RunV2, pending: NonNullable<RuntimeClientV2['pendingRun']>): boolean {
+    return run.runId !== pending.previousRunId && (pending.runId === null || run.runId === pending.runId) &&
+      run.mode === pending.request.mode && run.configurationGeneration === pending.request.configurationGeneration &&
+      run.profileId === pending.project.capabilities.execution.runtime.profileId &&
+      run.workspaceVersionAtStart === pending.request.expectedWorkspaceVersion;
+  }
+  private ownsPendingRunObservation(operation: AbortController): boolean {
+    const pending = this.pendingRun;
+    return !!pending && pending.operation === operation && pending.valid && pending.runId !== null &&
+      pending.observedRevision === this.revision && equal(this.dependencies.current(), pending.authority) &&
+      equal(this.state.project, pending.project) && !!this.state.run && this.matchesPendingRun(this.state.run, pending);
   }
   private authority(): RuntimeAuthorityV2 {
     const a = this.dependencies.current(), bound = this.bound;
@@ -167,7 +192,7 @@ export class RuntimeClientV2 {
         const key = this.scope(a), entry = { mutation: { kind, requestId, projectId: a.projectId, sessionId: a.sessionId, clientId: a.clientId, expectedWorkspaceVersion: a.workspaceVersion }, inFlight: true };
         this.unresolved.set(key, entry); dispatch.sent = { key, entry };
       }), current = this.dependencies.current();
-      if (operation.signal.aborted || this.operation !== operation || revision !== this.revision || !current ||
+      if (operation.signal.aborted || this.operation !== operation || (revision !== this.revision && !(kind === 'RUN' && this.ownsPendingRunObservation(operation))) || !current ||
         Object.keys(a).some(key => a[key as keyof RuntimeAuthorityV2] !== current[key as keyof RuntimeAuthorityV2]))
         throw new Error('Odpowiedź dotyczy nieaktualnej sesji lub wersji. Odśwież stan; zachowano wpisane ustawienia.');
       accept(value, a);
@@ -183,11 +208,13 @@ export class RuntimeClientV2 {
       return false;
     } finally {
       if (dispatch.sent) dispatch.sent.entry.inFlight = false;
+      if (this.pendingRun?.operation === operation) this.pendingRun = null;
       if (this.operation === operation) { this.operation = null; this.state.pending = null; }
       this.publish();
     }
   }
   async run(mode: RunKind): Promise<boolean> {
+    let admission: RuntimeClientV2['pendingRun'] = null;
     return this.perform('RUN', async (a, signal, dispatched) => {
       const project = this.state.project;
       if (!project) throw new Error('LEGACY_RUN_PROFILE_REQUIRES_MIGRATION. Przygotuj i zapisz jawne ustawienia V2; ręczna edycja pozostaje dostępna.');
@@ -198,15 +225,34 @@ export class RuntimeClientV2 {
         expectedWorkspaceVersion: a.workspaceVersion, mode, configurationGeneration: a.configurationGeneration };
       if (!validateRunRequestV2(body)) throw new Error('Niepoprawne żądanie wykonania.');
       dispatched(body.requestId);
+      admission = { operation: this.operation!, request: clone(body), authority: clone(a), project: clone(project),
+        previousRunId: this.state.run?.runId ?? null, runId: null, valid: true, observedRevision: this.revision };
+      this.pendingRun = admission;
       return this.dependencies.http.run(body, signal);
     }, (value, a) => {
       if (!validateRunV2(value) || value.mode !== mode || value.configurationGeneration !== a.configurationGeneration ||
         value.profileId !== this.state.project!.capabilities.execution.runtime.profileId || value.workspaceVersionAtStart !== a.workspaceVersion)
         throw new Error('Odrzucono niezgodną odpowiedź wykonania. Odśwież stan przed ponowieniem.');
-      this.state.run = clone(value);
+      if (!admission || !admission.valid || (admission.runId !== null && !this.matchesPendingRun(value, admission)))
+        throw new Error('Odpowiedź nie potwierdza obserwowanego oryginalnego uruchomienia. Zachowano blokadę ponowienia.');
+      // HTTP is the original acceptance, not a later lifecycle projection. Do not rewind
+      // a newer streamed RUNNING/terminal state to its original QUEUED receipt.
+      if (admission.runId === null) this.state.run = clone(value);
     });
   }
   async stop(): Promise<boolean> {
+    if (this.operation) {
+      const pending = this.pendingRun, current = this.dependencies.current();
+      if (this.disposed || this.state.pending !== 'RUN' || !current?.connected || !current.canExecute ||
+          !busyRun(this.state.run) || !this.ownsPendingRunObservation(this.operation) || !pending) return false;
+      const unresolved = this.unresolved.get(this.scope(pending.authority));
+      if (!unresolved || unresolved.mutation.kind !== 'RUN' || unresolved.mutation.requestId !== pending.request.requestId) return false;
+      // Stop cancels only the local wait, NOT the server effect or its original result.
+      // The full request stays retained by the caller, and new RUN/SAVE stay fenced.
+      unresolved.inFlight = false;
+      this.operation = null; this.pendingRun = null; this.revision++;
+      pending.operation.abort();
+    }
     const run = this.state.run && clone(this.state.run);
     return this.perform('STOP', async (a, signal) => {
       if (!a.canExecute || !busyRun(run)) throw new Error('Brak aktywnego wykonania do zatrzymania.');
