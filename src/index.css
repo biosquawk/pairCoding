@@ -1,0 +1,44 @@
+@import "tailwindcss";
+
+/* Solarized Dark: one shared palette for panels, dialogs and controls. */
+@theme {
+  --color-zinc-950: #002b36;
+  --color-zinc-900: #073642;
+  --color-zinc-800: #164550;
+  --color-zinc-700: #285460;
+  --color-zinc-600: #586e75;
+  --color-zinc-500: #839496;
+  --color-zinc-400: #93a1a1;
+  --color-zinc-300: #acb8b8;
+  --color-zinc-200: #c2cccc;
+  --color-zinc-100: #eee8d5;
+  --color-zinc-50: #fdf6e3;
+  --color-blue-300: #87b7c5;
+  --color-blue-400: #5a9fb7;
+  --color-blue-500: #268bd2;
+  --color-blue-600: #216b85;
+  --color-blue-700: #23596b;
+  --color-blue-800: #164550;
+  --color-blue-900: #073642;
+  --color-blue-950: #002b36;
+  --color-purple-300: #92b4ad;
+  --color-purple-400: #70a99f;
+  --color-purple-500: #2aa198;
+  --color-purple-600: #287c76;
+  --color-purple-700: #285a58;
+  --color-purple-900: #123d42;
+  --color-purple-950: #073642;
+  --color-emerald-400: #9da84b;
+  --color-emerald-500: #859900;
+  --color-amber-400: #b58900;
+  --color-cyan-400: #2aa198;
+  --color-red-300: #d99b92;
+  --color-red-400: #cb766d;
+  --color-red-500: #dc322f;
+  --color-red-600: #a84942;
+  --color-red-700: #754239;
+  --color-red-950: #402c2e;
+  --color-rose-400: #cb766d;
+}
+:root { color-scheme: dark; background: #002b36; color: #93a1a1; }
+::selection { background: #285460; color: #eee8d5; }

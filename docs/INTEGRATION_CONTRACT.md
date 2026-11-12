@@ -1,0 +1,54 @@
+> **HISTORYCZNY dokument / dowody dokładnie ówczesnych rewizji.** Ten plik nie
+> opisuje bieżącego providera ani statusu wydania. Aktualne: [README](../README.md),
+> [Windows start (w tym raport §7)](../docs/windows-start.md). ETAP8 IMPLEMENTED /
+> PENDING_FINAL_QA; pełna kampania po implementacji9. Poniższe oryginalne wyniki,
+> w tym FAIL/NOT_RUN, pozostają bez zmian i nie są nowym PASS.
+
+# PairCoach v3 — integration contract, K, 2026-11-10
+
+Source: HUMAN 36e83cce-325e-4da4-b447-9faeb53e8816; full pasted-text-1.txt governs. Files 2/3 context only. Wire types in src/shared/protocol.ts copied verbatim from file 1. HTTP/WS payloads and statuses from file 1 §4.2/4.3, no renaming.
+
+## Decisions / boundaries
+- Preserve React UI, Monaco and simulator; LIVE default; MOCK only explicit. No silent fallback to mock.
+- Gemini provider per file 1 overrides Codex runtime adapter in context file 2. No OpenAI dependency required.
+- /dev/bootstrap outside /api: token bootstrap only on trusted loopback Host/Origin, no wildcard CORS; all /api authenticated; WS HELLO required before data. Production static frontend same origin 8080; dev allowed exact http://localhost:3000 and http://127.0.0.1:3000. Tokens never logged.
+- API LF, disk preserves CRLF/BOM; file limit applies UTF-8 bytes and <=1048576 chars. Relative POSIX paths allow nested slash but never traversal, devices, ADS or reparse links. Excluded .paircoach.
+- AC-001..024 fully specified in file1; AC025/026 cross-cutting specified §6. AC027 mentioned but no Given/When/Then in file1: retain contextual reference measurements separately, do not claim automatic extension or full acceptance without evidence. Windows is mandatory; Linux evidence never relabelled Windows.
+- Staged implementation/acceptance: GATE001 core+UI; GATE002 coach; GATE003 runners/recovery/report. Independent modules/tests may be prepared in parallel; do not enable autonomous edits before gate acceptance.
+- Original export has identical bytes to all 23 files tracked in frontend HEAD 2d535c4; export-only README is AI Studio boilerplate and retained in untouched source ZIP. Initial worktree changes were CRLF-only; K compared each before restoring exact HEAD bytes. No human semantic changes discarded. Detailed comparison outside repo in K draft.
+
+## Ownership
+P1 src/server/{WorkspaceService,WriteGate,SessionController,errors}.ts + tests/core/**; includes path safety, watcher, EOL, snapshots/journal (snapshot implementation Gate003). No HTTP server wiring.
+P2 src/services/** except simulator.ts ideally unchanged, src/components/**, src/App.tsx, src/types/paircoach.ts; tests/client/**. UI retained. No backend/package/config changes.
+P3 tests/qa/**, playwright.config.ts; AC matrix/evidence in own delivery. No product code/assertion weakening.
+P4 src/server/{Runner,ReportService,LanguageFeatureRegistry}.ts, scripts/**, docs/WINDOWS.md, tests/execution/**. No package/config changes (request K).
+P5 read-only review, evidence in own delivery; actual review-agent skill M mandatory.
+P6 src/server/CoachAdapter.ts, src/server/coach/**, tests/coach/**; coach context/schema/provider/control coordinator. No core/wiring/UI changes.
+K src/server/{index,http,transport}.ts, src/shared/**, package.json/package-lock.json, vite.config.ts, tsconfigs, integration tests/docs/release. K integrates commits, resolves integration changes explicitly and asks independent checks.
+
+## Internal API frozen for initial implementation
+Synchronous file critical sections ensure no await between epoch/version/disk check and atomic rename. Export named classes. All imports from ../shared/protocol (type-only where possible). Errors use AppError(status:number,code:string,message:string,currentVersion:number|null=null) from errors.ts.
+
+WorkspaceService constructor(rootPath:string, dataDir?:string). Public rootPath, dataDir, projectId, workspaceVersion, settings:Settings. Methods getDocument(path):Document; listFiles():FileEntry[]; getProject(sessionId:string):Project; updateSettings(settings):void; close():void; scanExternal():void. EventEmitter: 'external' payload EXTERNAL_FILE_SYNC; 'changed' {path,workspaceVersion,actor}. Gate owns mutations; low-level Workspace methods P1 internal. Snapshot API createSnapshot(label:string, paths?:string[]):Snapshot; listSnapshots():Snapshot[]; restoreSnapshot(snapshotId:string, paths:string[], auth:MutationAuth):Snapshot (backup first, gate authorization, journal/recovery; P1 to implement Gate003). Snapshot metadata/data immutable, stored dataDir outside visible task tree.
+
+SessionController constructor(workspace:WorkspaceService). Public state:Session; leaseClientId:string|null. Methods claimLease(clientId:string):boolean; releaseLease(clientId:string):void; assertClient(clientId:string,sessionId:string):void; getSession():Session (computed timer); start(limitMs:number|null,pauseOnHidden:boolean):Session; veto():Session (synchronous epoch bump first); acquireCoach(interventionId:string):number; releaseCoach():void; canCoach():boolean; setPresence(presence):void; timerAction(action,pauseOnHidden?):void; noteStudentEdit(path:string,content:string):void; noteNewFact(kind:'CHAT'|'RUN'):void; finish():void; close():void. EventEmitter 'state' Session, 'control' CONTROL_STATE payload, 'veto' void. Keep independent cooldown/manual/hidden states. noteStudentEdit after confirmed write; pause >=2sec and whitespace-normalized difference unlock cooldown. No timers leaking on close.
+
+WriteGate constructor(workspace:WorkspaceService,session:SessionController). MutationAuth = {clientId:string,sessionId:string,controlEpoch:number,actor:'STUDENT'|'COACH'}. write(input: MutationAuth & {path:string,baseVersion:number,content:string}):Document. mutate(input: MutationAuth & {operation:'CREATE'|'RENAME'|'DELETE',path:string,newPath:string|null,content:string|null,baseVersion:number|null}):void. Enforce lease/session/owner/epoch/version/disk/hash/safe path. COACH only code allowed (never tests/task/config; CODE_REVIEW only reviewNotesPath). Never give AI filesystem API directly. Snapshots restore via this gate-equivalent synchronous authorization, not bypass.
+
+Runner constructor(options:{rootPath:string,getWorkspaceVersion:()=>number,emit:(type:string,payload:unknown)=>void}). start(profile:RunProfile):Run; get(runId:string):Run; stop(runId:string):Promise<Run>; stopAll():Promise<void>; list():Run[]. Event RUN_STATE/output via emit; no auto-finish. Start QUEUED/RUNNING returns immediately, output tail bounded. Concurrent starts must reject or have safely distinct run/report freshness isolation.
+
+ReportService constructor(options:{dataDir:string,emit:(type:string,payload:unknown)=>void,generate?:(facts:FrozenFacts,signal:AbortSignal)=>Promise<string>}). FrozenFacts exported from module = {session:Session,snapshot:Snapshot,runs:Run[],chat:ChatEntry[],events:unknown[],[key:string]:unknown}. finish(reason:Report['reason'],facts:FrozenFacts):Report; get(sessionId:string):Report; retry(sessionId:string):Report; close():void. Persist immutable facts before returning PENDING; async injected generator, deterministic honest local facts fallback if no key. Failure/retry retains facts. Context instruction exact per file1; no reads of mutable workspace during generation.
+
+CoachAdapter constructor(options:{workspace:WorkspaceService,session:SessionController,gate:WriteGate,emit:(type:string,payload:unknown)=>void,onProposal:(decision:Extract<CoachDecision,{kind:'PROPOSE'}>)=>void,provider?:CoachProvider}). trigger(reason:'EDIT'|'CHAT'|'RUN'|'START'|'OVERTIME',message?:ChatEntry):void; controlReady(payload:{requestId:string,workspaceVersion:number,ready:boolean}):void; stepRendered(payload:{stepId:string,interventionId:string,documentVersion:number}):void; abort():void; close():void. Provider interface exported, no shell/fs powers; Gemini default + clearly named fallback without key. Veto listener aborts immediately; synchronous gate handles cutoff. Max1 request+latest context; version check after awaits; ACK handshake waits. P6 may propose exact additive hooks to K; no unsynchronized API changes.
+
+## Transport K
+K createPairCoachServer({rootPath?,dataDir?,token?,port?,enableCoach?}) returns {server,workspace,session,gate,listen():Promise<number>,close():Promise<void>} for real tests. Default 127.0.0.1:8080. bootstrap JSON {token}; GET session/project discover ids before HELLO. WS HELLO claims lease (same clientId reconnect ok; second rejected), every command validates envelope & payload; close revokes control. Global session seq per broadcast, snapshot resync supported. request/message IDs durable-in-session dedup maps: same payload returns prior result/ACK DUPLICATE; changed payload409. Shared veto dedup identity across HTTP/WS. No production test-only coach endpoints; tests inject provider in process.
+
+## Additive agreements (after initial delegation)
+- P1: SessionController.setAiStatus(status), mute(durationSeconds:number|null). canCoach requires RUNNING/FOCUSED/lease/consent/READY|THINKING and no manual pause/cooldown; initial G1 OFF.
+- P6: CoachAdapter.updateRun(run) for actual run facts; sensitiveValues:[token] supplied by wiring solely for exact secret redaction, never context/provider.
+- P4: Runner.setApprovedProfiles(profiles) fail-closed internally, K supplies current human settings before start. {runId} placeholder in approved args/report glob, env PAIRCOACH_RUN_ID. Static-report freshness requires pre-run comparison.
+- P3 factory: src/server/http.ts createPairCoachServer supports staticDir and devBootstrap, plus in-process coachFactory/executionFactory (no production fixture endpoint). UI built fixture can use same loopback origin; Vite3000 uses1278080.
+- HUMAN amendment 67ce0485-0556-4a4c-bf7c-6069b793ca59 resolves AC027 reference: include the contextual 100-trial Windows/Chromium metrics001..004 p95/max in required acceptance. Do not omit, or claim all001..027 PASS without evidence.
+- Linux toolchain absent from initial sandbox PATH; operator supplied shared Node22.22.2 (verified SHA25681925c0995b5c1427b5d538e6a90ca2fdc4daffb786b09af749beaf7369d4e90), independent Node22.22.0 download also checked official SHA256. All npm caches stay in permitted role paths. No global config change.
+- Initial package esbuild0.25 conflicts with Vite8.3 peer^0.27|^0.28 (npm ERESOLVE): K aligns direct esbuild^0.28.2 rather than force/legacy-peer-deps.

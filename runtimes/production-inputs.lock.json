@@ -1,0 +1,1178 @@
+{
+  "schemaVersion": 1,
+  "platform": "linux/amd64",
+  "readiness": "NOTREADY_UNTIL_HOST_RECEIPTS",
+  "images": {
+    "node": {
+      "reference": "node@sha256:7cc56ef285a8568121537d17b05e72128f01b89c54607b51acf084a50ef483f3",
+      "manifestSha256": "7cc56ef285a8568121537d17b05e72128f01b89c54607b51acf084a50ef483f3",
+      "configDigest": "sha256:e894118949319b479bfc3e16e545cb2f85b7a2194aa86ea9cd4e29538f2b13c3",
+      "env": [
+        "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "NODE_VERSION=22.22.0",
+        "YARN_VERSION=1.22.22"
+      ],
+      "declaredCompressedLayerBytes": 79425362,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+    },
+    "python": {
+      "reference": "python@sha256:8cdd496996889eef0a8a7921c152c0a4a9f18a26c7a5e7257d3c90b431891894",
+      "manifestSha256": "8cdd496996889eef0a8a7921c152c0a4a9f18a26c7a5e7257d3c90b431891894",
+      "configDigest": "sha256:63b467c66e26befa3ef52d69163d55129846c4f8adfaea6865c183a1c606ee95",
+      "env": [
+        "PATH=/usr/local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "GPG_KEY=7169605F62C751356D054A26A821E680E5FA6305",
+        "PYTHON_VERSION=3.13.9",
+        "PYTHON_SHA256=ed5ef34cda36cfa2f3a340f07cac7e7814f91c7f3c411f6d3562323a866c5c66"
+      ],
+      "declaredCompressedLayerBytes": 44159582,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+    },
+    "java11": {
+      "reference": "eclipse-temurin@sha256:3bfab378c70af35cb21b49f195f51059257cfed17758d1d2c02500c9f292cd5c",
+      "manifestSha256": "3bfab378c70af35cb21b49f195f51059257cfed17758d1d2c02500c9f292cd5c",
+      "configDigest": "sha256:1dd2897b408cdf343b7f8234c53fec6e7a065e8152d964b299ba1303d867d171",
+      "env": [
+        "PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "JAVA_HOME=/opt/java/openjdk",
+        "LANG=en_US.UTF-8",
+        "LANGUAGE=en_US:en",
+        "LC_ALL=en_US.UTF-8",
+        "JAVA_VERSION=jdk-11.0.33+10"
+      ],
+      "declaredCompressedLayerBytes": 208208675,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+    },
+    "java17": {
+      "reference": "eclipse-temurin@sha256:101376794254cc58a1aa952a35ade1709cbc0f5942d5da35e226009171dde46e",
+      "manifestSha256": "101376794254cc58a1aa952a35ade1709cbc0f5942d5da35e226009171dde46e",
+      "configDigest": "sha256:d50186d3f92436243242496e64af4c339ad6eb0ed4047446518e4acb7bdeb954",
+      "env": [
+        "PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "JAVA_HOME=/opt/java/openjdk",
+        "LANG=en_US.UTF-8",
+        "LANGUAGE=en_US:en",
+        "LC_ALL=en_US.UTF-8",
+        "JAVA_VERSION=jdk-17.0.21+9"
+      ],
+      "declaredCompressedLayerBytes": 212287838,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+    },
+    "java21": {
+      "reference": "eclipse-temurin@sha256:0b84a658e0d745af944a4e4d40454bac2b2fba5252cf0f2990573a8aa0cb83e1",
+      "manifestSha256": "0b84a658e0d745af944a4e4d40454bac2b2fba5252cf0f2990573a8aa0cb83e1",
+      "configDigest": "sha256:f3e45bf6b272bb0f154638ed12a6cce8ec0d49d74fc8bbfc75dbfc63419db245",
+      "env": [
+        "PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "JAVA_HOME=/opt/java/openjdk",
+        "LANG=en_US.UTF-8",
+        "LANGUAGE=en_US:en",
+        "LC_ALL=en_US.UTF-8",
+        "JAVA_VERSION=jdk-21.0.13+9"
+      ],
+      "declaredCompressedLayerBytes": 224618474,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+    },
+    "java27": {
+      "reference": "eclipse-temurin@sha256:de25c3be25d05d4e1f82d594fb3f3914271964361cb7cf20f3abf9d027c5ae72",
+      "manifestSha256": "de25c3be25d05d4e1f82d594fb3f3914271964361cb7cf20f3abf9d027c5ae72",
+      "configDigest": "sha256:ce6a5092920e2bc22459fefb6a94b9738267ee2485b658d6dd36b91ce3023da7",
+      "env": [
+        "PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "JAVA_HOME=/opt/java/openjdk",
+        "LANG=en_US.UTF-8",
+        "LANGUAGE=en_US:en",
+        "LC_ALL=en_US.UTF-8",
+        "JAVA_VERSION=jdk-27.0.1.0"
+      ],
+      "declaredCompressedLayerBytes": 151994529,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT",
+      "observedTools": [
+        {
+          "name": "java",
+          "version": "27.0.1.0.2"
+        },
+        {
+          "name": "javac",
+          "version": "27.0.1.0.2"
+        }
+      ],
+      "toolVersionEvidence": {
+        "scope": "ACTUAL_CONTAINER_BINARY_PROBE_NOT_UPSTREAM_ENV",
+        "source": "ROOT/sequential-review-20261111/prepare-only-bd0261-independent-readback/java27-failure-evidence/tool-mismatch.json",
+        "toolsSha256": "d8e11737095a0b43bcf64913d5f5175ef6048e201524f59f8b12cd199ee1dd05",
+        "upstreamEnvPreserved": "JAVA_VERSION=jdk-27.0.1.0 is literal upstream image config; it is not the java/javac binary version."
+      }
+    },
+    "maven": {
+      "reference": "maven@sha256:be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f",
+      "manifestSha256": "be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f",
+      "configDigest": "sha256:dde4eb343a1d41376cb3587b0bcab419c1f967fc1d241f43b5176e4126f005f0",
+      "env": [
+        "PATH=/opt/java/openjdk/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "JAVA_HOME=/opt/java/openjdk",
+        "LANG=en_US.UTF-8",
+        "LANGUAGE=en_US:en",
+        "LC_ALL=en_US.UTF-8",
+        "JAVA_VERSION=jdk-21.0.10+7",
+        "MAVEN_HOME=/usr/share/maven",
+        "MAVEN_CONFIG=/root/.m2"
+      ],
+      "declaredCompressedLayerBytes": 242414272,
+      "status": "OFFICIAL_METADATA_ONLY_NOT_PULLED_OR_BUILT"
+    }
+  },
+  "artifacts": [
+    {
+      "kind": "npm",
+      "name": "typescript",
+      "version": "5.9.3",
+      "url": "https://registry.npmjs.org/typescript/-/typescript-5.9.3.tgz",
+      "sha256": "10e108c9cf7d5f2879053dff18515fb405abf2ccef63eaaf017d9c571687a1d3",
+      "integrity": "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==",
+      "bytes": 4377468,
+      "files": [
+        {
+          "path": "LICENSE.txt",
+          "sha256": "a7d00bfd54525bc694b6e32f64c7ebcf5e6b7ae3657be5cc12767bce74654a47"
+        },
+        {
+          "path": "README.md",
+          "sha256": "73147458477d90cd6236627cdd9b0871df12e6e8a21d2d0fda6d1ad2826bdc0e"
+        },
+        {
+          "path": "SECURITY.md",
+          "sha256": "7b6976eec43edfa68b79a459dd089c56b7a395916dbf1a01bd11e6d86e12128f"
+        },
+        {
+          "path": "ThirdPartyNoticeText.txt",
+          "sha256": "1af3c68039c57e539422da82a4faada506ce6d0ea6f90e0b699d02dbcdb7a90c"
+        },
+        {
+          "path": "bin/tsc",
+          "sha256": "8d5fa5bd883fec0979fc2004f1fe1d99aef40570155d550eadc0b03b55513bf0"
+        },
+        {
+          "path": "bin/tsserver",
+          "sha256": "a088f0c3419bcb2f7b860ad42e4c9f25ead067eda70af6a10d0a7d453954aada"
+        },
+        {
+          "path": "lib/_tsc.js",
+          "sha256": "e8f349eabd48486bdb2bf9dc1a00c89d58297270c54b745838879e2859194419"
+        },
+        {
+          "path": "lib/_tsserver.js",
+          "sha256": "0efcc88cdf0593cc1dcc8b6afd605c7bed9eca6f648c70c8f0df8695114bf6d7"
+        },
+        {
+          "path": "lib/_typingsInstaller.js",
+          "sha256": "62a69c574365f1c81633b86b3214f9df860aad08843028dd5244b00aa7f1e190"
+        },
+        {
+          "path": "lib/cs/diagnosticMessages.generated.json",
+          "sha256": "5b30e58d35f877521e14c16551c86320b2ed19ddb70fe5f41841b561d27f18c2"
+        },
+        {
+          "path": "lib/de/diagnosticMessages.generated.json",
+          "sha256": "a4031a8028febc35f92ba317104878d93f02c1750e6ee16351c2270ab4dff517"
+        },
+        {
+          "path": "lib/es/diagnosticMessages.generated.json",
+          "sha256": "3c7844125e1f2a3a2227e16dd1fed75218a3454919706b34cd8a5da9d43cda22"
+        },
+        {
+          "path": "lib/fr/diagnosticMessages.generated.json",
+          "sha256": "9fc1836d7575840a8b7a63dacdedd99e90e4144c0bbe29a4b7fa78a86e0e8bf5"
+        },
+        {
+          "path": "lib/it/diagnosticMessages.generated.json",
+          "sha256": "a740fe2b2338d72a8d165fb8c7c22ac1393a18b6aa7f1ed6d45b79887867f98a"
+        },
+        {
+          "path": "lib/ja/diagnosticMessages.generated.json",
+          "sha256": "ae1a2d439bfb60b9fa32408bde0e9ec39840a33d621014fcb5b2fb4e69a606de"
+        },
+        {
+          "path": "lib/ko/diagnosticMessages.generated.json",
+          "sha256": "31b27d2d556fc037eeac1672f771bf940ec70afba342e977faa75a2fa292a8be"
+        },
+        {
+          "path": "lib/lib.d.ts",
+          "sha256": "a7297ff837fcdf174a9524925966429eb8e5feecc2cc55cc06574e6b092c1eaa"
+        },
+        {
+          "path": "lib/lib.decorators.d.ts",
+          "sha256": "8e7f8264d0fb4c5339605a15daadb037bf238c10b654bb3eee14208f860a32ea"
+        },
+        {
+          "path": "lib/lib.decorators.legacy.d.ts",
+          "sha256": "782dec38049b92d4e85c1585fbea5474a219c6984a35b004963b00beb1aab538"
+        },
+        {
+          "path": "lib/lib.dom.asynciterable.d.ts",
+          "sha256": "d7a3c8b952931daebdfc7a2897c53c0a1c73624593fa070e46bd537e64dcd20a"
+        },
+        {
+          "path": "lib/lib.dom.d.ts",
+          "sha256": "080941d9f9ff9307f7e27a83bcd888b7c8270716c39af943532438932ec1d0b9"
+        },
+        {
+          "path": "lib/lib.dom.iterable.d.ts",
+          "sha256": "2e80ee7a49e8ac312cc11b77f1475804bee36b3b2bc896bead8b6e1266befb43"
+        },
+        {
+          "path": "lib/lib.es2015.collection.d.ts",
+          "sha256": "dc2df20b1bcdc8c2d34af4926e2c3ab15ffe1160a63e58b7e09833f616efff44"
+        },
+        {
+          "path": "lib/lib.es2015.core.d.ts",
+          "sha256": "c57796738e7f83dbc4b8e65132f11a377649c00dd3eee333f672b8f0a6bea671"
+        },
+        {
+          "path": "lib/lib.es2015.d.ts",
+          "sha256": "45b7ab580deca34ae9729e97c13cfd999df04416a79116c3bfb483804f85ded4"
+        },
+        {
+          "path": "lib/lib.es2015.generator.d.ts",
+          "sha256": "515d0b7b9bea2e31ea4ec968e9edd2c39d3eebf4a2d5cbd04e88639819ae3b71"
+        },
+        {
+          "path": "lib/lib.es2015.iterable.d.ts",
+          "sha256": "0559b1f683ac7505ae451f9a96ce4c3c92bdc71411651ca6ddb0e88baaaad6a3"
+        },
+        {
+          "path": "lib/lib.es2015.promise.d.ts",
+          "sha256": "0dc1e7ceda9b8b9b455c3a2d67b0412feab00bd2f66656cd8850e8831b08b537"
+        },
+        {
+          "path": "lib/lib.es2015.proxy.d.ts",
+          "sha256": "ce691fb9e5c64efb9547083e4a34091bcbe5bdb41027e310ebba8f7d96a98671"
+        },
+        {
+          "path": "lib/lib.es2015.reflect.d.ts",
+          "sha256": "8d697a2a929a5fcb38b7a65594020fcef05ec1630804a33748829c5ff53640d0"
+        },
+        {
+          "path": "lib/lib.es2015.symbol.d.ts",
+          "sha256": "4ff2a353abf8a80ee399af572debb8faab2d33ad38c4b4474cff7f26e7653b8d"
+        },
+        {
+          "path": "lib/lib.es2015.symbol.wellknown.d.ts",
+          "sha256": "fb0f136d372979348d59b3f5020b4cdb81b5504192b1cacff5d1fbba29378aa1"
+        },
+        {
+          "path": "lib/lib.es2016.array.include.d.ts",
+          "sha256": "d15bea3d62cbbdb9797079416b8ac375ae99162a7fba5de2c6c505446486ac0a"
+        },
+        {
+          "path": "lib/lib.es2016.d.ts",
+          "sha256": "3facaf05f0c5fc569c5649dd359892c98a85557e3e0c847964caeb67076f4d75"
+        },
+        {
+          "path": "lib/lib.es2016.full.d.ts",
+          "sha256": "807e0e0bdc67605dd28efe18f20ab5fcd75d944ef95936120702335f9379094b"
+        },
+        {
+          "path": "lib/lib.es2016.intl.d.ts",
+          "sha256": "68d18b664c9d32a7336a70235958b8997ebc1c3b8505f4f1ae2b7e7753b87618"
+        },
+        {
+          "path": "lib/lib.es2017.arraybuffer.d.ts",
+          "sha256": "eb3d66c8327153d8fa7dd03f9c58d351107fe824c79e9b56b462935176cdf12a"
+        },
+        {
+          "path": "lib/lib.es2017.d.ts",
+          "sha256": "e44bb8bbac7f10ecc786703fe0a6a4b952189f908707980ba8f3c8975a760962"
+        },
+        {
+          "path": "lib/lib.es2017.date.d.ts",
+          "sha256": "38f0219c9e23c915ef9790ab1d680440d95419ad264816fa15009a8851e79119"
+        },
+        {
+          "path": "lib/lib.es2017.full.d.ts",
+          "sha256": "1d242d5c24cf285c88bc4fb93c5ff903de8319064e282986edeb6247ba028d5e"
+        },
+        {
+          "path": "lib/lib.es2017.intl.d.ts",
+          "sha256": "4de680d5bb41c17f7f68e0419412ca23c98d5749dcaaea1896172f06435891fc"
+        },
+        {
+          "path": "lib/lib.es2017.object.d.ts",
+          "sha256": "69ab18c3b76cd9b1be3d188eaf8bba06112ebbe2f47f6c322b5105a6fbc45a2e"
+        },
+        {
+          "path": "lib/lib.es2017.sharedmemory.d.ts",
+          "sha256": "a680117f487a4d2f30ea46f1b4b7f58bef1480456e18ba53ee85c2746eeca012"
+        },
+        {
+          "path": "lib/lib.es2017.string.d.ts",
+          "sha256": "2f11ff796926e0832f9ae148008138ad583bd181899ab7dd768a2666700b1893"
+        },
+        {
+          "path": "lib/lib.es2017.typedarrays.d.ts",
+          "sha256": "954296b30da6d508a104a3a0b5d96b76495c709785c1d11610908e63481ee667"
+        },
+        {
+          "path": "lib/lib.es2018.asyncgenerator.d.ts",
+          "sha256": "ac9538681b19688c8eae65811b329d3744af679e0bdfa5d842d0e32524c73e1c"
+        },
+        {
+          "path": "lib/lib.es2018.asynciterable.d.ts",
+          "sha256": "0a969edff4bd52585473d24995c5ef223f6652d6ef46193309b3921d65dd4376"
+        },
+        {
+          "path": "lib/lib.es2018.d.ts",
+          "sha256": "5e1c4c362065a6b95ff952c0eab010f04dcd2c3494e813b493ecfd4fcb9fc0d8"
+        },
+        {
+          "path": "lib/lib.es2018.full.d.ts",
+          "sha256": "95f1023b824c2c511c48f1201e2d1188bcb0ca1138a309a870b956d2e92e44ab"
+        },
+        {
+          "path": "lib/lib.es2018.intl.d.ts",
+          "sha256": "9e9fbd7030c440b33d021da145d3232984c8bb7916f277e8ffd3dc2e3eae2bdb"
+        },
+        {
+          "path": "lib/lib.es2018.promise.d.ts",
+          "sha256": "811ec78f7fefcabbda4bfa93b3eb67d9ae166ef95f9bff989d964061cbf81a0c"
+        },
+        {
+          "path": "lib/lib.es2018.regexp.d.ts",
+          "sha256": "717937616a17072082152a2ef351cb51f98802fb4b2fdabd32399843875974ca"
+        },
+        {
+          "path": "lib/lib.es2019.array.d.ts",
+          "sha256": "d7e7d9b7b50e5f22c915b525acc5a49a7a6584cf8f62d0569e557c5cfc4b2ac2"
+        },
+        {
+          "path": "lib/lib.es2019.d.ts",
+          "sha256": "68d73b4a11549f9c0b7d352d10e91e5dca8faa3322bfb77b661839c42b1ddec7"
+        },
+        {
+          "path": "lib/lib.es2019.full.d.ts",
+          "sha256": "08f6861df84fba9719c14d5adc3ba40be9f0c687639e6c4df3c05b9301b8ff94"
+        },
+        {
+          "path": "lib/lib.es2019.intl.d.ts",
+          "sha256": "74f7fa2d027d5b33eb0471c8e82a6c87216223181ec31247c357a3e8e2fddc5b"
+        },
+        {
+          "path": "lib/lib.es2019.object.d.ts",
+          "sha256": "71c37f4c9543f31dfced6c7840e068c5a5aacb7b89111a4364b1d5276b852557"
+        },
+        {
+          "path": "lib/lib.es2019.string.d.ts",
+          "sha256": "576711e016cf4f1804676043e6a0a5414252560eb57de9faceee34d79798c850"
+        },
+        {
+          "path": "lib/lib.es2019.symbol.d.ts",
+          "sha256": "89c1b1281ba7b8a96efc676b11b264de7a8374c5ea1e6617f11880a13fc56dc6"
+        },
+        {
+          "path": "lib/lib.es2020.bigint.d.ts",
+          "sha256": "d6d7ae4d1f1f3772e2a3cde568ed08991a8ae34a080ff1151af28b7f798e22ca"
+        },
+        {
+          "path": "lib/lib.es2020.d.ts",
+          "sha256": "5efce4fc3c29ea84e8928f97adec086e3dc876365e0982cc8479a07954a3efd4"
+        },
+        {
+          "path": "lib/lib.es2020.date.d.ts",
+          "sha256": "063600664504610fe3e99b717a1223f8b1900087fab0b4cad1496a114744f8df"
+        },
+        {
+          "path": "lib/lib.es2020.full.d.ts",
+          "sha256": "1305d1e76ca44e30fb8b2b8075fa522b83f60c0bcf5d4326a9d2cf79b53724f8"
+        },
+        {
+          "path": "lib/lib.es2020.intl.d.ts",
+          "sha256": "639e512c0dfc3fad96a84caad71b8834d66329a1f28dc95e3946c9b58176c73a"
+        },
+        {
+          "path": "lib/lib.es2020.number.d.ts",
+          "sha256": "368af93f74c9c932edd84c58883e736c9e3d53cec1fe24c0b0ff451f529ceab1"
+        },
+        {
+          "path": "lib/lib.es2020.promise.d.ts",
+          "sha256": "934019d7e3c81950f9a8426d093458b65d5aff2c7c1511233c0fd5b941e608ab"
+        },
+        {
+          "path": "lib/lib.es2020.sharedmemory.d.ts",
+          "sha256": "52ada8e0b6e0482b728070b7639ee42e83a9b1c22d205992756fe020fd9f4a47"
+        },
+        {
+          "path": "lib/lib.es2020.string.d.ts",
+          "sha256": "3bdefe1bfd4d6dee0e26f928f93ccc128f1b64d5d501ff4a8cf3c6371200e5e6"
+        },
+        {
+          "path": "lib/lib.es2020.symbol.wellknown.d.ts",
+          "sha256": "59fb2c069260b4ba00b5643b907ef5d5341b167e7d1dbf58dfd895658bda2867"
+        },
+        {
+          "path": "lib/lib.es2021.d.ts",
+          "sha256": "feecb1be483ed332fad555aff858affd90a48ab19ba7272ee084704eb7167569"
+        },
+        {
+          "path": "lib/lib.es2021.full.d.ts",
+          "sha256": "4a66df3ab5de5cfcda11538cffddd67ff6a174e003788e270914c1e0248483cf"
+        },
+        {
+          "path": "lib/lib.es2021.intl.d.ts",
+          "sha256": "965f36eae237dd74e6cca203a43e9ca801ce38824ead814728a2807b1910117d"
+        },
+        {
+          "path": "lib/lib.es2021.promise.d.ts",
+          "sha256": "af3dd424cf267428f30ccfc376f47a2c0114546b55c44d8c0f1d57d841e28d74"
+        },
+        {
+          "path": "lib/lib.es2021.string.d.ts",
+          "sha256": "995c005ab91a498455ea8dfb63aa9f83fa2ea793c3d8aa344be4a1678d06d399"
+        },
+        {
+          "path": "lib/lib.es2021.weakref.d.ts",
+          "sha256": "959d36cddf5e7d572a65045b876f2956c973a586da58e5d26cde519184fd9b8a"
+        },
+        {
+          "path": "lib/lib.es2022.array.d.ts",
+          "sha256": "3925a6c820dcb1a06506c90b1577db1fdbf7705d65b62b99dce4be75c637e26b"
+        },
+        {
+          "path": "lib/lib.es2022.d.ts",
+          "sha256": "ee7bad0c15b58988daa84371e0b89d313b762ab83cb5b31b8a2d1162e8eb41c2"
+        },
+        {
+          "path": "lib/lib.es2022.error.d.ts",
+          "sha256": "0a3d63ef2b853447ec4f749d3f368ce642264246e02911fcb1590d8c161b8005"
+        },
+        {
+          "path": "lib/lib.es2022.full.d.ts",
+          "sha256": "3cbad9a1ba4453443026ed38e4b8be018abb26565fa7c944376463ad9df07c41"
+        },
+        {
+          "path": "lib/lib.es2022.intl.d.ts",
+          "sha256": "8cdf8847677ac7d20486e54dd3fcf09eda95812ac8ace44b4418da1bbbab6eb8"
+        },
+        {
+          "path": "lib/lib.es2022.object.d.ts",
+          "sha256": "8444af78980e3b20b49324f4a16ba35024fef3ee069a0eb67616ea6ca821c47a"
+        },
+        {
+          "path": "lib/lib.es2022.regexp.d.ts",
+          "sha256": "b4b67b1a91182421f5df999988c690f14d813b9850b40acd06ed44691f6727ad"
+        },
+        {
+          "path": "lib/lib.es2022.string.d.ts",
+          "sha256": "3287d9d085fbd618c3971944b65b4be57859f5415f495b33a6adc994edd2f004"
+        },
+        {
+          "path": "lib/lib.es2023.array.d.ts",
+          "sha256": "df83c2a6c73228b625b0beb6669c7ee2a09c914637e2d35170723ad49c0f5cd4"
+        },
+        {
+          "path": "lib/lib.es2023.collection.d.ts",
+          "sha256": "436aaf437562f276ec2ddbee2f2cdedac7664c1e4c1d2c36839ddd582eeb3d0a"
+        },
+        {
+          "path": "lib/lib.es2023.d.ts",
+          "sha256": "27bdc30a0e32783366a5abeda841bc22757c1797de8681bbe81fbc735eeb1c10"
+        },
+        {
+          "path": "lib/lib.es2023.full.d.ts",
+          "sha256": "785921608325fa246b450f05b238f4b3ed659f1099af278ce9ebbc9416a13f1d"
+        },
+        {
+          "path": "lib/lib.es2023.intl.d.ts",
+          "sha256": "8e3c06ea092138bf9fa5e874a1fdbc9d54805d074bee1de31b99a11e2fec239d"
+        },
+        {
+          "path": "lib/lib.es2024.arraybuffer.d.ts",
+          "sha256": "87dc0f382502f5bbce5129bdc0aea21e19a3abbc19259e0b43ae038a9fc4e326"
+        },
+        {
+          "path": "lib/lib.es2024.collection.d.ts",
+          "sha256": "b1cb28af0c891c8c96b2d6b7be76bd394fddcfdb4709a20ba05a7c1605eea0f9"
+        },
+        {
+          "path": "lib/lib.es2024.d.ts",
+          "sha256": "8fd575e12870e9944c7e1d62e1f5a73fcf23dd8d3a321f2a2c74c20d022283fe"
+        },
+        {
+          "path": "lib/lib.es2024.full.d.ts",
+          "sha256": "b3e9cef4eed59f8a2249ed834ba4aabe9d0d4e9037d4679487fa17dad99004a3"
+        },
+        {
+          "path": "lib/lib.es2024.object.d.ts",
+          "sha256": "2fef54945a13095fdb9b84f705f2b5994597640c46afeb2ce78352fab4cb3279"
+        },
+        {
+          "path": "lib/lib.es2024.promise.d.ts",
+          "sha256": "ac77cb3e8c6d3565793eb90a8373ee8033146315a3dbead3bde8db5eaf5e5ec6"
+        },
+        {
+          "path": "lib/lib.es2024.regexp.d.ts",
+          "sha256": "56e4ed5aab5f5920980066a9409bfaf53e6d21d3f8d020c17e4de584d29600ad"
+        },
+        {
+          "path": "lib/lib.es2024.sharedmemory.d.ts",
+          "sha256": "4ece9f17b3866cc077099c73f4983bddbcb1dc7ddb943227f1ec070f529dedd1"
+        },
+        {
+          "path": "lib/lib.es2024.string.d.ts",
+          "sha256": "0a6282c8827e4b9a95f4bf4f5c205673ada31b982f50572d27103df8ceb8013c"
+        },
+        {
+          "path": "lib/lib.es5.d.ts",
+          "sha256": "c430d44666289dae81f30fa7b2edebf186ecc91a2d4c71266ea6ae76388792e1"
+        },
+        {
+          "path": "lib/lib.es6.d.ts",
+          "sha256": "df039a67536fe2acc3affdcbfb645892f842db36fe599e8e652e2f0c640a90d1"
+        },
+        {
+          "path": "lib/lib.esnext.array.d.ts",
+          "sha256": "1c9319a09485199c1f7b0498f2988d6d2249793ef67edda49d1e584746be9032"
+        },
+        {
+          "path": "lib/lib.esnext.collection.d.ts",
+          "sha256": "e3a2a0cee0f03ffdde24d89660eba2685bfbdeae955a6c67e8c4c9fd28928eeb"
+        },
+        {
+          "path": "lib/lib.esnext.d.ts",
+          "sha256": "2ab096661c711e4a81cc464fa1e6feb929a54f5340b46b0a07ac6bbf857471f0"
+        },
+        {
+          "path": "lib/lib.esnext.decorators.d.ts",
+          "sha256": "d4b1d2c51d058fc21ec2629fff7a76249dec2e36e12960ea056e3ef89174080f"
+        },
+        {
+          "path": "lib/lib.esnext.disposable.d.ts",
+          "sha256": "51ad4c928303041605b4d7ae32e0c1ee387d43a24cd6f1ebf4a2699e1076d4fa"
+        },
+        {
+          "path": "lib/lib.esnext.error.d.ts",
+          "sha256": "73f78680d4c08509933daf80947902f6ff41b6230f94dd002ae372620adb0f60"
+        },
+        {
+          "path": "lib/lib.esnext.float16.d.ts",
+          "sha256": "196cb558a13d4533a5163286f30b0509ce0210e4b316c56c38d4c0fd2fb38405"
+        },
+        {
+          "path": "lib/lib.esnext.full.d.ts",
+          "sha256": "bde31fd423cd93b0eff97197a3f66df7c93e8c0c335cbeb113b7ff1ac35c23f4"
+        },
+        {
+          "path": "lib/lib.esnext.intl.d.ts",
+          "sha256": "811c71eee4aa0ac5f7adf713323a5c41b0cf6c4e17367a34fbce379e12bbf0a4"
+        },
+        {
+          "path": "lib/lib.esnext.iterator.d.ts",
+          "sha256": "22adec94ef7047a6c9d1af3cb96be87a335908bf9ef386ae9fd50eeb37f44c47"
+        },
+        {
+          "path": "lib/lib.esnext.promise.d.ts",
+          "sha256": "60037901da1a425516449b9a20073aa03386cce92f7a1fd902d7602be3a7c2e9"
+        },
+        {
+          "path": "lib/lib.esnext.sharedmemory.d.ts",
+          "sha256": "c5239f5c01bcfa9cd32f37c496cf19c61d69d37e48be9de612b541aac915805b"
+        },
+        {
+          "path": "lib/lib.scripthost.d.ts",
+          "sha256": "cd034f499c6cdca722b60c04b5b1b78e058487a7085a8e0d6fb50809947ee573"
+        },
+        {
+          "path": "lib/lib.webworker.asynciterable.d.ts",
+          "sha256": "ca417afee74054e99d5a8252b35bef26ca6e2942d67d343fce6b42fc9f432993"
+        },
+        {
+          "path": "lib/lib.webworker.d.ts",
+          "sha256": "6d08cde2bfb6ff909efbf7cb7d6d55be412cf4b9f48fd0430185986973fa91f5"
+        },
+        {
+          "path": "lib/lib.webworker.importscripts.d.ts",
+          "sha256": "80e18897e5884b6723488d4f5652167e7bb5024f946743134ecc4aa4ee731f89"
+        },
+        {
+          "path": "lib/lib.webworker.iterable.d.ts",
+          "sha256": "d6c6331ce67c41b2ad5bfb0c8c022403980b479a377a44da8f16b61120418f66"
+        },
+        {
+          "path": "lib/pl/diagnosticMessages.generated.json",
+          "sha256": "0645575abe920de1ee4cf3f2f70c7abc7f6691daa01cf1e9ad6b1ce53917c9ff"
+        },
+        {
+          "path": "lib/pt-br/diagnosticMessages.generated.json",
+          "sha256": "34a649eb937cd70fe7b15663c2e5479e753d42df0e5c2933636789b60c2c939d"
+        },
+        {
+          "path": "lib/ru/diagnosticMessages.generated.json",
+          "sha256": "29bb8ea9d44f55bb7acdedfac0a57865ea40552f004d0d6e3b96746ac76666cc"
+        },
+        {
+          "path": "lib/tr/diagnosticMessages.generated.json",
+          "sha256": "9466915f3e0cdb2625495bbe9c02c8b7ef9e3543fffae957ba034655563abf65"
+        },
+        {
+          "path": "lib/tsc.js",
+          "sha256": "2cffde0b8c6760dfb0b5b0382bbb7e00ba6a8b2d981b9205b256a700a481d983"
+        },
+        {
+          "path": "lib/tsserver.js",
+          "sha256": "e3ccfeec65ec5c470b8ffc5611878a31182650c7e8a062c38a719f83b523edcb"
+        },
+        {
+          "path": "lib/tsserverlibrary.d.ts",
+          "sha256": "73b15a0b7cf5c6df9076b9408c5ce682f11813453bf54c54cb284f075b5224cf"
+        },
+        {
+          "path": "lib/tsserverlibrary.js",
+          "sha256": "7ca9b464de80a5382d9ccfed2b224323bc0274c8de61bf0464e89ee824677c76"
+        },
+        {
+          "path": "lib/typesMap.json",
+          "sha256": "4143fb8b1c5d4421dfa19a4b80ddf2da375fc0835a349c3b18519fda5955e1d9"
+        },
+        {
+          "path": "lib/typescript.d.ts",
+          "sha256": "e134052a6b1ded61693b4037f615dc72f14e2881e79c1ddbff6c514c8a516b05"
+        },
+        {
+          "path": "lib/typescript.js",
+          "sha256": "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675"
+        },
+        {
+          "path": "lib/typingsInstaller.js",
+          "sha256": "2d48a038523ea7c626fa2796a30fa5fdc07612ea5fab83544423009d7683a213"
+        },
+        {
+          "path": "lib/watchGuard.js",
+          "sha256": "471200d4bc555ef8d8429358bdca2a68ea7c9bfff6c853b5b048d2512fe4092a"
+        },
+        {
+          "path": "lib/zh-cn/diagnosticMessages.generated.json",
+          "sha256": "6bd4ae6aea0991f6b73c46ec79ebb643b280a07e4808be363b07d01d2f6d399d"
+        },
+        {
+          "path": "lib/zh-tw/diagnosticMessages.generated.json",
+          "sha256": "c35cf732ff01539090a3622b7a07f7bb4cadb28f6f13048b366012c458329be1"
+        },
+        {
+          "path": "package.json",
+          "sha256": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6"
+        }
+      ]
+    },
+    {
+      "kind": "npm",
+      "name": "fast-xml-parser",
+      "version": "5.3.0",
+      "url": "https://registry.npmjs.org/fast-xml-parser/-/fast-xml-parser-5.3.0.tgz",
+      "sha256": "16bab283ce3acb1a58ee260179aab983c2e37eceff81d955ea1009bf012a5763",
+      "integrity": "sha512-gkWGshjYcQCF+6qtlrqBqELqNqnt4CxruY6UVAWWnqb3DQ6qaNFEIKqzYep1XzHLM/QtrHVCxyPOtTk4LTQ7Aw==",
+      "bytes": 154942,
+      "files": [
+        {
+          "path": "CHANGELOG.md",
+          "sha256": "a6b457e4908c4fd7a5fa8521b8c7f1faf168f598cdec77a349c6dcce78cc476c"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "7883225d5e84a6bbb9b170c3d891b4bf6d6259cee869c86bd86381a927071745"
+        },
+        {
+          "path": "README.md",
+          "sha256": "58b7e2edc994358731520b2759a5a32b99b95ac7db7520dee4fdf4a23e66a433"
+        },
+        {
+          "path": "lib/fxbuilder.min.js",
+          "sha256": "0f5f0426599bee28cd06543f0b7e737f5fe9341d2cb3889aae6c5c3bfed77d13"
+        },
+        {
+          "path": "lib/fxbuilder.min.js.map",
+          "sha256": "7df542062908300357d31bd7850223c121d3dcc3b650b6db53daeb8296bcabaa"
+        },
+        {
+          "path": "lib/fxp.cjs",
+          "sha256": "9fc49224e5b6585dff8aeaeed3bbf0d3f0ce5d743b86feb48da4d2ae3c611307"
+        },
+        {
+          "path": "lib/fxp.d.cts",
+          "sha256": "3f80bb396fc19baa4e672397f2766424961bf40250200f48ec66506f88e4e81e"
+        },
+        {
+          "path": "lib/fxp.min.js",
+          "sha256": "961254092722dca7fd102894b832adb8a5abcb4c108f834e2ad9db29daf43dfb"
+        },
+        {
+          "path": "lib/fxp.min.js.map",
+          "sha256": "9d810bf09afd6a665335c4f4e1b4e010289c59f5e72f8511e216f0286a99f2cc"
+        },
+        {
+          "path": "lib/fxparser.min.js",
+          "sha256": "343db646b8d225c8c4a27753e42c39769492e69384a9b2d3a9c4d4341f3f3963"
+        },
+        {
+          "path": "lib/fxparser.min.js.map",
+          "sha256": "8d35133db8c965e29daf38a74707b9c954eaf5e1f53f5b8f4c3608d11da03908"
+        },
+        {
+          "path": "lib/fxvalidator.min.js",
+          "sha256": "c1a4c1a5e3bba8f16d1808bedce8b5dacb1853aee34ac46d3f10536afc50dc15"
+        },
+        {
+          "path": "lib/fxvalidator.min.js.map",
+          "sha256": "8f1207b8ff208c557ebe2401d9e0ede0fee1f14f45b0857c2a359497705c0fd0"
+        },
+        {
+          "path": "package.json",
+          "sha256": "ca4e23ca5119e376981f3924273fbae237ff6f124c19409b18e3f0d8697096be"
+        },
+        {
+          "path": "src/cli/cli.js",
+          "sha256": "8f5e6ebdc7cd90fa77a5e835fec6a57f399f82ec5eb0dd277b26415a83e29c48"
+        },
+        {
+          "path": "src/cli/man.js",
+          "sha256": "3780acda8a91a1a0fc4ca789acd50b3e1f22dc86e892ddf02765d3a5c33985fe"
+        },
+        {
+          "path": "src/cli/read.js",
+          "sha256": "5276d01f9e03dfe20d13996dc60aaf99d7eb2f9090030a82cd78e5e922b44188"
+        },
+        {
+          "path": "src/fxp.d.ts",
+          "sha256": "e570f076ec6896bd5d12c7763055ee590f721d440416278ee0fad52685e78965"
+        },
+        {
+          "path": "src/fxp.js",
+          "sha256": "2ec24c2f5eed2a3a97ed586786efef3fcfee7d30ea96059f274e54fabc076458"
+        },
+        {
+          "path": "src/ignoreAttributes.js",
+          "sha256": "40bdf3ab37f544b9f8ea7e474114f489a77ed3247e0be597b9e83e01688e8c80"
+        },
+        {
+          "path": "src/util.js",
+          "sha256": "734191d9a526da404afc433788c3735ecdf73fa6d375b345f24be16e61a2b9b8"
+        },
+        {
+          "path": "src/v6/CharsSymbol.js",
+          "sha256": "e037787fbc37aa0309937b3b41e4a76e118167ba384e83fbc49e04f94740aedb"
+        },
+        {
+          "path": "src/v6/EntitiesParser.js",
+          "sha256": "46af8c3930678f7d90e343347096d2c1b72568df531fdd2681c05372a6f6de14"
+        },
+        {
+          "path": "src/v6/OptionsBuilder.js",
+          "sha256": "598488b9aeb43a87b94115be3d2e3ff82815505eeeb6cb98703994d7cb6df805"
+        },
+        {
+          "path": "src/v6/OutputBuilders/BaseOutputBuilder.js",
+          "sha256": "40a14b214d90ae04af43a20395bb697d2143b7c16172af767f7aa75262c170a5"
+        },
+        {
+          "path": "src/v6/OutputBuilders/JsArrBuilder.js",
+          "sha256": "602eac4c61fcdbcd3a802e7edc30c7ccaffb755075c64b571a88b0d7cdac9779"
+        },
+        {
+          "path": "src/v6/OutputBuilders/JsMinArrBuilder.js",
+          "sha256": "c764e4134bea3c4179780f741ecf6f3a1a1038135f924bc270bca39c6926a7e6"
+        },
+        {
+          "path": "src/v6/OutputBuilders/JsObjBuilder.js",
+          "sha256": "45d73bf70f60bbcca09fb606665ab2229b2049ab456e3e73f605705c9315bba1"
+        },
+        {
+          "path": "src/v6/OutputBuilders/ParserOptionsBuilder.js",
+          "sha256": "aeff197c50a66fa414cc9d3c07980f54cdbc032cb91dbcaf3f6de8ddf497e233"
+        },
+        {
+          "path": "src/v6/Report.js",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "src/v6/TagPath.js",
+          "sha256": "c3201f12a399d0c2d6932e0b2ab0ffe11d59b25d8cbfad888139a6f8493c3574"
+        },
+        {
+          "path": "src/v6/TagPathMatcher.js",
+          "sha256": "424002a4c4cbaba5b739bc2008fe9c7e4523a63865acabe26f2f46167c236464"
+        },
+        {
+          "path": "src/v6/XMLParser.js",
+          "sha256": "88fb4e635c00a613ef1558d32d49538ff010659676a124044e7aaebca4f71997"
+        },
+        {
+          "path": "src/v6/Xml2JsParser.js",
+          "sha256": "f29463c843327731271f8240ed87146704954958ad124f623b7789c056dbabd0"
+        },
+        {
+          "path": "src/v6/XmlPartReader.js",
+          "sha256": "0b5d19de5039d3fd16c091d5a60a8ccb36335748ea44e55bac5a27e59051aa55"
+        },
+        {
+          "path": "src/v6/XmlSpecialTagsReader.js",
+          "sha256": "9c2b765ad9131a1a1d71d699cdaf69ae547ad4534c6f76169657f06c623e05cd"
+        },
+        {
+          "path": "src/v6/inputSource/BufferSource.js",
+          "sha256": "ba2df3ffe9b67d5d37c1729ede6870972207964719fd638eb63b8fdf6a334a57"
+        },
+        {
+          "path": "src/v6/inputSource/StringSource.js",
+          "sha256": "5e9eb312fc320fb87a07424c98e439c4637b80d168879230c21f5435d35cb140"
+        },
+        {
+          "path": "src/v6/valueParsers/EntitiesParser.js",
+          "sha256": "f6fc852c9d8af68c356ca2736e2df3ac6708bf41d3a19ec9b02172014a623595"
+        },
+        {
+          "path": "src/v6/valueParsers/booleanParser.js",
+          "sha256": "5bf8e1b9e11068b3e25b384a217b71c576b344224cb50d90b98ce2e63062aa2d"
+        },
+        {
+          "path": "src/v6/valueParsers/booleanParserExt.js",
+          "sha256": "ce154fbe652ba2de46b2083e8c99a58c4a0e337558f8c36330a04188cc4a38e1"
+        },
+        {
+          "path": "src/v6/valueParsers/currency.js",
+          "sha256": "f653f705032ce04e9d12749a4bc28dada74fff0e24192205e3d8a9d32e88428f"
+        },
+        {
+          "path": "src/v6/valueParsers/join.js",
+          "sha256": "19d179c90a52654c50e4eea52ce86c5ea4a72f90106d5afdfc86bc3b574e2eae"
+        },
+        {
+          "path": "src/v6/valueParsers/number.js",
+          "sha256": "50165c7d0f33534911f7ef9ee3ee7a1531786ee12aba89186e90fb601ab0d2e8"
+        },
+        {
+          "path": "src/v6/valueParsers/trim.js",
+          "sha256": "99e6101bbc04ad8882480e2c4c85aafac0dd6d25b42e00033ca8ccd1157a1c7e"
+        },
+        {
+          "path": "src/validator.js",
+          "sha256": "20e6327e041ad08ccd2b73a6430f2bd5a756d7e86e3f36d30b00e7848ca6cca1"
+        },
+        {
+          "path": "src/xmlbuilder/json2xml.js",
+          "sha256": "8558a9f26b1462939f8bffb64c2ba015a5f8c9d91d70b1129144fd31898968b9"
+        },
+        {
+          "path": "src/xmlbuilder/orderedJs2Xml.js",
+          "sha256": "fa9f0566a0b50e81e0615cc9c8f40e16593392d4525bef4aa2b588e857ccd284"
+        },
+        {
+          "path": "src/xmlbuilder/prettifyJs2Xml.js",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "path": "src/xmlparser/DocTypeReader.js",
+          "sha256": "4ee80e4ab7a3a1f69abaebca3573945d7b232ebb9a38f5774e56c3743298302a"
+        },
+        {
+          "path": "src/xmlparser/OptionsBuilder.js",
+          "sha256": "4aa99805a757f1cab45ba7627b67442951b9a1e0d87cb4777b8662d867093fc6"
+        },
+        {
+          "path": "src/xmlparser/OrderedObjParser.js",
+          "sha256": "3ccdedfcc029be0af5e643c5e725e8b13cff3a6f32330c519e0a4004dc67ff55"
+        },
+        {
+          "path": "src/xmlparser/XMLParser.js",
+          "sha256": "5d3f3976b2c5559406b1e3cb473c1e81dca459db1d57b4b8ff21c8a99af40366"
+        },
+        {
+          "path": "src/xmlparser/node2json.js",
+          "sha256": "19f517e2ef25eb573a94fd8ca50f06a5ac37bf65d2d2f75b6d0454fef65bc3dd"
+        },
+        {
+          "path": "src/xmlparser/xmlNode.js",
+          "sha256": "c08f85bf51155b53f135f82226097096bba5b60816f7886984732bf2cc47f617"
+        }
+      ]
+    },
+    {
+      "kind": "npm",
+      "name": "strnum",
+      "version": "2.1.1",
+      "url": "https://registry.npmjs.org/strnum/-/strnum-2.1.1.tgz",
+      "sha256": "8098c0a5fa86506ffe38e8bbeca8501d489e185440f713bd9dd80303d9fafd59",
+      "integrity": "sha512-7ZvoFTiCnGxBtDqJ//Cu6fWtZtc7Y3x+QOirG15wztbdngGSkht27o2pyGWrVy0b4WAy3jbKmnoK6g5VlVNUUw==",
+      "bytes": 6201,
+      "files": [
+        {
+          "path": ".github/SECURITY.md",
+          "sha256": "e4ca375e757fa170584e21c4c66eb102facfbe4639a3f2402c18d7da1330d488"
+        },
+        {
+          "path": ".vscode/launch.json",
+          "sha256": "298b957f7e41a31bc42faae88b823cb5dc040e590218292acfb2dc1ad6ca09f5"
+        },
+        {
+          "path": "CHANGELOG.md",
+          "sha256": "e93520be20310d0547e61d38279a6cecf37c6bfcda84bdafd35c370e99dc4fc4"
+        },
+        {
+          "path": "LICENSE",
+          "sha256": "2aa16be0f4fad003a352a955a43314e9d1d8deef7034060a82ac9c49f32b81e2"
+        },
+        {
+          "path": "README.md",
+          "sha256": "1171532bc60cb826b00b1a1bf6a5fa259778c5b0dbc7761a7fb9cc3225d6103c"
+        },
+        {
+          "path": "algo.stflow",
+          "sha256": "abb48981a7639591d8583675be7de480f48dbfb2405242df74aacf896d2b3f36"
+        },
+        {
+          "path": "package.json",
+          "sha256": "012702c6811faa8ae3e1717851603b9f7b981e03ead43a586171d6ac15634ab2"
+        },
+        {
+          "path": "strnum.js",
+          "sha256": "4c70c42f6ea6afe74a3e02f7ced66733d9688bae07eb484021db0f2023abe3c9"
+        },
+        {
+          "path": "strnum.test.js",
+          "sha256": "f9066563ca8d974f1ea5058b2eaa9610f6441c3bd20b67ee3b50e1f787bc7fbe"
+        },
+        {
+          "path": "test.js",
+          "sha256": "780f82b5bb40295864f3e14bc59f0ca6c35848d4bae85a1a1570200a3f21203c"
+        }
+      ]
+    },
+    {
+      "kind": "wheel",
+      "name": "pytest",
+      "version": "8.4.2",
+      "filename": "pytest-8.4.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/a8/a4/20da314d277121d6534b3a980b29035dcd51e6744bd79075a6ce8fa4eb8d/pytest-8.4.2-py3-none-any.whl",
+      "sha256": "872f880de3fc3a5bdc88a11b39c9710c3497a547cfa9320bc3c5e62fbf272e79",
+      "bytes": 365750,
+      "requiresDist": [
+        "colorama>=0.4; sys_platform == \"win32\"",
+        "exceptiongroup>=1; python_version < \"3.11\"",
+        "iniconfig>=1",
+        "packaging>=20",
+        "pluggy<2,>=1.5",
+        "pygments>=2.7.2",
+        "tomli>=1; python_version < \"3.11\"",
+        "argcomplete; extra == \"dev\"",
+        "attrs>=19.2; extra == \"dev\"",
+        "hypothesis>=3.56; extra == \"dev\"",
+        "mock; extra == \"dev\"",
+        "requests; extra == \"dev\"",
+        "setuptools; extra == \"dev\"",
+        "xmlschema; extra == \"dev\""
+      ]
+    },
+    {
+      "kind": "wheel",
+      "name": "iniconfig",
+      "version": "2.1.0",
+      "filename": "iniconfig-2.1.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/2c/e1/e6716421ea10d38022b952c159d5161ca1193197fb744506875fbb87ea7b/iniconfig-2.1.0-py3-none-any.whl",
+      "sha256": "9deba5723312380e77435581c6bf4935c94cbfab9b1ed33ef8d238ea168eb760",
+      "bytes": 6050,
+      "requiresDist": null
+    },
+    {
+      "kind": "wheel",
+      "name": "packaging",
+      "version": "25.0",
+      "filename": "packaging-25.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/20/12/38679034af332785aac8774540895e234f4d07f7545804097de4b666afd8/packaging-25.0-py3-none-any.whl",
+      "sha256": "29572ef2b1f17581046b3a2227d5c611fb25ec70ca1ba8554b24b0e69331a484",
+      "bytes": 66469,
+      "requiresDist": null
+    },
+    {
+      "kind": "wheel",
+      "name": "pluggy",
+      "version": "1.6.0",
+      "filename": "pluggy-1.6.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl",
+      "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+      "bytes": 20538,
+      "requiresDist": [
+        "pre-commit; extra == \"dev\"",
+        "tox; extra == \"dev\"",
+        "pytest; extra == \"testing\"",
+        "pytest-benchmark; extra == \"testing\"",
+        "coverage; extra == \"testing\""
+      ]
+    },
+    {
+      "kind": "wheel",
+      "name": "pygments",
+      "version": "2.19.2",
+      "filename": "pygments-2.19.2-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/c7/21/705964c7812476f378728bdf590ca4b771ec72385c533964653c68e86bdc/pygments-2.19.2-py3-none-any.whl",
+      "sha256": "86540386c03d588bb81d44bc3928634ff26449851e99741617ecb9037ee5ec0b",
+      "bytes": 1225217,
+      "requiresDist": [
+        "colorama>=0.4.6; extra == \"windows-terminal\""
+      ]
+    }
+  ],
+  "language": {
+    "readiness": "NOTREADY_UNTIL_ACTUAL_BUILT_IMAGE_TOOL_RECEIPTS",
+    "source": "P1_2 frozen5a10b46fe74b8d956591a6ebb484f07d2509c27f upstream.lock+requirements (historical serverJVM21 corrected by actual AB receipts)",
+    "jdt": {
+      "imageLockKey": "jdt-runtime-27",
+      "version": "1.63.0",
+      "sourceCommit": "d98abba8f04cf041542d9ebb6df0d472a1395606",
+      "serverJvm": 27,
+      "serverExecutable": "/opt/jdk27/bin/java",
+      "launcher": "/opt/jdt/plugins/org.eclipse.equinox.launcher_1.8.0.v20260804-1928.jar",
+      "configuration": "/opt/jdt/config_linux",
+      "targets": {
+        "11": "/opt/jdk11",
+        "17": "/opt/jdk17",
+        "21": "/opt/java/openjdk",
+        "27": "/opt/jdk27"
+      }
+    },
+    "pylsp": {
+      "imageLockKey": "pylsp-runtime-3.13",
+      "python": "/usr/local/bin/python",
+      "argv": [
+        "-m",
+        "pylsp"
+      ],
+      "PYTHONPATH": "/opt/pylsp",
+      "pythonVersion": "3.13.9",
+      "version": "1.12.2",
+      "jedi": "0.19.2",
+      "pyflakes": "3.2.0"
+    },
+    "artifacts": [
+      {
+        "kind": "jdt",
+        "name": "jdt-language-server",
+        "version": "1.63.0",
+        "url": "https://download.eclipse.org/jdtls/milestones/1.63.0/jdt-language-server-1.63.0-202610191322.tar.gz",
+        "filename": "jdt.tar.gz",
+        "sha256": "b1f2abe0b3cccb462cf64fb4a5587c7d09df60cf8be7748b152cbd89d018bdc4",
+        "bytes": 51143565
+      },
+      {
+        "name": "python-lsp-server",
+        "version": "1.12.2",
+        "url": "https://files.pythonhosted.org/packages/cb/e7/28010a326ef591e1409daf9d57a47de94156c147ad1befe74d8196d82729/python_lsp_server-1.12.2-py3-none-any.whl",
+        "filename": "python_lsp_server-1.12.2-py3-none-any.whl",
+        "sha256": "750116459449184ba20811167cdf96f91296ae12f1f65ebd975c5c159388111b",
+        "kind": "language-wheel",
+        "bytes": 74773
+      },
+      {
+        "name": "python-lsp-jsonrpc",
+        "version": "1.1.2",
+        "url": "https://files.pythonhosted.org/packages/cb/d9/656659d5b5d5f402b2b174cd0ba9bc827e07ce3c0bf88da65424baf64af8/python_lsp_jsonrpc-1.1.2-py3-none-any.whl",
+        "filename": "python_lsp_jsonrpc-1.1.2-py3-none-any.whl",
+        "sha256": "7339c2e9630ae98903fdaea1ace8c47fba0484983794d6aafd0bd8989be2b03c",
+        "kind": "language-wheel",
+        "bytes": 8805
+      },
+      {
+        "name": "jedi",
+        "version": "0.19.2",
+        "url": "https://files.pythonhosted.org/packages/c0/5a/9cac0c82afec3d09ccd97c8b6502d48f165f9124db81b4bcb90b4af974ee/jedi-0.19.2-py2.py3-none-any.whl",
+        "filename": "jedi-0.19.2-py2.py3-none-any.whl",
+        "sha256": "a8ef22bde8490f57fe5c7681a3c83cb58874daf72b4784de3cce5b6ef6edb5b9",
+        "kind": "language-wheel",
+        "bytes": 1572278
+      },
+      {
+        "name": "parso",
+        "version": "0.8.5",
+        "url": "https://files.pythonhosted.org/packages/16/32/f8e3c85d1d5250232a5d3477a2a28cc291968ff175caeadaf3cc19ce0e4a/parso-0.8.5-py2.py3-none-any.whl",
+        "filename": "parso-0.8.5-py2.py3-none-any.whl",
+        "sha256": "646204b5ee239c396d040b90f9e272e9a8017c630092bf59980beb62fd033887",
+        "kind": "language-wheel",
+        "bytes": 106668
+      },
+      {
+        "name": "pyflakes",
+        "version": "3.2.0",
+        "url": "https://files.pythonhosted.org/packages/d4/d7/f1b7db88d8e4417c5d47adad627a93547f44bdc9028372dbd2313f34a855/pyflakes-3.2.0-py2.py3-none-any.whl",
+        "filename": "pyflakes-3.2.0-py2.py3-none-any.whl",
+        "sha256": "84b5be138a2dfbb40689ca07e2152deb896a65c3a3e24c251c5c62489568074a",
+        "kind": "language-wheel",
+        "bytes": 62725
+      },
+      {
+        "name": "pycodestyle",
+        "version": "2.12.1",
+        "url": "https://files.pythonhosted.org/packages/3a/d8/a211b3f85e99a0daa2ddec96c949cac6824bd305b040571b82a03dd62636/pycodestyle-2.12.1-py2.py3-none-any.whl",
+        "filename": "pycodestyle-2.12.1-py2.py3-none-any.whl",
+        "sha256": "46f0fb92069a7c28ab7bb558f05bfc0110dac69a0cd23c61ea0040283a9d78b3",
+        "kind": "language-wheel",
+        "bytes": 31284
+      },
+      {
+        "name": "pluggy",
+        "version": "1.6.0",
+        "url": "https://files.pythonhosted.org/packages/54/20/4d324d65cc6d9205fabedc306948156824eb9f0ee1633355a8f7ec5c66bf/pluggy-1.6.0-py3-none-any.whl",
+        "filename": "pluggy-1.6.0-py3-none-any.whl",
+        "sha256": "e920276dd6813095e9377c0bc5566d94c932c33b27a3e3945d8389c374dd4746",
+        "kind": "language-wheel",
+        "bytes": 20538
+      },
+      {
+        "name": "docstring-to-markdown",
+        "version": "0.17",
+        "url": "https://files.pythonhosted.org/packages/56/7b/af3d0da15bed3a8665419bb3a630585756920f4ad67abfdfef26240ebcc0/docstring_to_markdown-0.17-py3-none-any.whl",
+        "filename": "docstring_to_markdown-0.17-py3-none-any.whl",
+        "sha256": "fd7d5094aa83943bf5f9e1a13701866b7c452eac19765380dead666e36d3711c",
+        "kind": "language-wheel",
+        "bytes": 23479
+      },
+      {
+        "name": "ujson",
+        "version": "5.11.0",
+        "url": "https://files.pythonhosted.org/packages/fe/a3/292551f936d3d02d9af148f53e1bc04306b00a7cf1fcbb86fa0d1c887242/ujson-5.11.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+        "filename": "ujson-5.11.0-cp313-cp313-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl",
+        "sha256": "837da4d27fed5fdc1b630bd18f519744b23a0b5ada1bbde1a36ba463f2900c03",
+        "kind": "language-wheel",
+        "bytes": 57363
+      },
+      {
+        "name": "importlib-metadata",
+        "version": "8.7.0",
+        "url": "https://files.pythonhosted.org/packages/20/b0/36bd937216ec521246249be3bf9855081de4c5e06a0c9b4219dbeda50373/importlib_metadata-8.7.0-py3-none-any.whl",
+        "filename": "importlib_metadata-8.7.0-py3-none-any.whl",
+        "sha256": "e5dd1551894c77868a30651cef00984d50e1002d06942a7101d34870c5f02afd",
+        "kind": "language-wheel",
+        "bytes": 27656
+      },
+      {
+        "name": "typing-extensions",
+        "version": "4.15.0",
+        "url": "https://files.pythonhosted.org/packages/18/67/36e9267722cc04a6b9f15c7f3441c2363321a3ea07da7ae0c0707beb2a9c/typing_extensions-4.15.0-py3-none-any.whl",
+        "filename": "typing_extensions-4.15.0-py3-none-any.whl",
+        "sha256": "f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548",
+        "kind": "language-wheel",
+        "bytes": 44614
+      },
+      {
+        "name": "zipp",
+        "version": "3.23.0",
+        "url": "https://files.pythonhosted.org/packages/2e/54/647ade08bf0db230bfea292f893923872fd20be6ac6f53b2b936ba839d75/zipp-3.23.0-py3-none-any.whl",
+        "filename": "zipp-3.23.0-py3-none-any.whl",
+        "sha256": "071652d6115ed432f5ce1d34c336c0adfd6a884660d1e9712a256d3d3bd4b14e",
+        "kind": "language-wheel",
+        "bytes": 10276
+      }
+    ]
+  },
+  "operatorLane": {
+    "ID": "a2c520c9-d3f1-425a-852d-0621cd8b7ce3",
+    "ServerVersion": "29.7.2",
+    "OSType": "linux",
+    "Architecture": "x86_64"
+  }
+}

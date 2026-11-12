@@ -1,0 +1,38 @@
+{
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.StrategyDemo"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.StrategyDemoTest"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.StrategyDemo"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.StrategyDemoTest"
+          ]
+        }
+      }
+    }
+  ]
+}
