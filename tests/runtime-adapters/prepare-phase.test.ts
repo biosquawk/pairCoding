@@ -20,12 +20,12 @@ test('offline cleanup re-inspects and removes verified final ID, never name; mis
  }
  for(const bad of [undefined,{...state(),Id:'name'},{...state(),State:{Running:true,ExitCode:1}}])assert.throws(()=>cleanupOfflineFixture(bad,image,()=>{throw Error('must not inspect');}),/initial/);
 });
-test('explicit PREPARE_ONLY freezes seven profiles/nine caches plus two language images; 18 offline fixtures remain separate final phase',()=>{
+test('explicit PREPARE_ONLY freezes seven profiles/nine caches with no language images; 18 offline fixtures remain separate final phase',()=>{
  const p=buildOperatorPlan('/not-created/prepare-phase'),f=buildOperatorPlan(p.operatorRoot,'FINAL_QA_OFFLINE');
  assert.equal(p.phase,'PREPARE_ONLY');assert.equal(p.offlineFixtureContainers,0);assert.equal(p.jobs.length,9);assert.equal(new Set(p.jobs.map((j:any)=>j.profile.id)).size,7);
  assert.equal(p.maxHeavyConcurrency,1);assert.equal(p.maxElapsedMs,2700000);assert.equal(p.maxCommandMs,480000);
  assert.equal(f.phase,'FINAL_QA_OFFLINE');assert.equal(f.offlineFixtureContainers,18);assert.deepEqual(p.jobs,f.jobs);assert.deepEqual(p.sourceInventory,f.sourceInventory);
- assert.equal(p.language.jdt.serverJvm,27);assert.equal(p.language.pylsp.pythonVersion,'3.13.9');
+ assert.deepEqual(p.language,[]);assert.ok(p.jobs.every(j=>j.profile.language.provider==='builtin' && j.profile.language.imageLockKey===null));
  assert.deepEqual(p,buildOperatorPlan(p.operatorRoot));assert.throws(()=>buildOperatorPlan(p.operatorRoot,'skip-tests'),/phase/);
  // No root access, download, Docker or write is reached for tampered phase/source/fixture.
  for(const field of ['phase','sourceInventory','jobs']) {const bad:any=structuredClone(p);bad[field]=field==='phase'?'skip-tests':[];assert.throws(()=>executeOperatorPlan(bad));}

@@ -68,7 +68,7 @@ test('real synthetic Git -> ZIP exact closure -> trusted archive -> verified dis
     ['runtime:prepare', 'node scripts/runtime-prepare-cli.mjs'],
     ['server', 'tsx src/server/index.ts'],
     ['start', 'tsx src/server/index.ts'],
-    ['test', 'tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"'],
+    ['test', 'node scripts/runtime-test.mjs'],
     ['typecheck', 'tsc --noEmit'],
   ]);
   assert.deepEqual(manifest.sourceVerification.recoveryTests, ['tests/snapshots/snapshot-crash.test.ts']);

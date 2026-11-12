@@ -54,12 +54,11 @@ export function loadRuntimeConfiguration(options: { configPath: string; environm
     if (!validateRuntimeConfigV1(config)) throw Error('Invalid runtime config schema');
     const catalog = jsonFile(path.resolve(base, config.runtimeCatalog));
     const imageLock = jsonFile(path.resolve(base, config.imageLock));
-    if (!validateRuntimeCatalog(catalog) || !validateImageLock(imageLock) || !validateCatalogImageReferences(catalog, imageLock)) throw Error('Invalid catalog, tool versions or image lock references');
-    // Defence in depth until the centrally owned shared semantic correction is integrated.
-    if (catalog.profiles.some(p => p.language.provider === 'builtin' && !['node','typescript'].includes(p.adapterFamily))) throw Error('Builtin language worker is restricted to JS/TS');
+    if (!validateRuntimeCatalog(catalog) || !validateImageLock(imageLock)) throw Error('Invalid catalog, tool versions or image lock references');
     const profileId = options.environment?.PAIRCOACH_RUNTIME_PROFILE ?? config.activeProfile;
     const profile = catalog.profiles.find(p => p.id === profileId);
     if (!profile) return freeze({ configurationGeneration, resolved: null, problem: runtimeProblem('RUNTIME_PROFILE_UNKNOWN', 'Selected runtime profile is not in the approved catalog.', 'Select an existing profile in paircoach.runtime.json or PAIRCOACH_RUNTIME_PROFILE, then restart.') });
+    if (!validateCatalogImageReferences(catalog,imageLock,profile.id)) throw Error('Selected image pins or supplied tool references are invalid');
     const workspace = options.explicitWorkspaceRoot ?? options.environment?.PAIRCOACH_WORKSPACE_DIR ?? config.workspaceRoot;
     if (!workspace || /[\x00-\x1f\x7f]/.test(workspace)) throw Error('Invalid workspace root');
     const resolved: ResolvedRuntime = { configurationGeneration, configPath, workspaceRoot: path.resolve(base, workspace), config, catalog, imageLock,

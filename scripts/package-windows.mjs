@@ -61,6 +61,7 @@ const runtimeScripts = [
   'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
   'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
+  'runtime-test.mjs', 'runtime-test-policy.mjs',
 ].map(name => `scripts/${name}`);
 // Private inert test-support source, NOT a public prepare/npm/HTTP entry point.
 // Conditional: old source compositions without these regressions need no operator module.
@@ -116,7 +117,7 @@ function commandClosure(pkg, paths) {
     start: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
     'dev:full': ['concurrently --kill-others "npm run server" "npm run dev"', ['src/server/index.ts', 'vite.config.ts', 'index.html'], ['concurrently', 'tsx', 'vite']],
     typecheck: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
-    test: ['tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"', ['playwright.config.ts', ...(runtimeTestImporters.some(p => paths.has(p)) ? [runtimeTestSupport] : [])], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
+    test: ['node scripts/runtime-test.mjs', ['scripts/runtime-test.mjs', 'scripts/runtime-test-policy.mjs', 'playwright.config.ts', ...(runtimeTestImporters.some(p => paths.has(p)) ? [runtimeTestSupport] : [])], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
   };
   if (!pkg.scripts || typeof pkg.scripts !== 'object' || Array.isArray(pkg.scripts)) throw new Error('Brak poprawnych npm scripts.');
   for (const name of ['clean', 'build', 'start', 'typecheck', 'runtime:prepare']) {

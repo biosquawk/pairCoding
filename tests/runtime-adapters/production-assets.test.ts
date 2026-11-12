@@ -30,7 +30,7 @@ test('offline smoke does not turn missing/zero/skipped/malformed/failure JUnit i
  for(const xml of ['<testsuite tests="0"/>','<testsuite tests="1"><testcase><skipped/></testcase></testsuite>','<testsuite tests="1"><testcase><failure/></testcase></testsuite>','<notJUnit/>','<!DOCTYPE x><testsuite tests="0"/>','<testsuite>'])assert.throws(()=>junitSmoke(parse(xml),false));
 });
 test('language production recipe preserves real JVM27 bootstrap and independent JDK11/17/21/27, exact frozen12 Python wheel hashes',()=>{
- const plan=buildOperatorPlan(root),lock=JSON.parse(readFileSync('runtimes/production-inputs.lock.json','utf8'));
+ const lock=JSON.parse(readFileSync('runtimes/production-inputs.lock.json','utf8')),plan={language:lock.language}; // historical recipe, not active operator plan
  assert.equal(plan.language.jdt.serverJvm,27);assert.equal(plan.language.jdt.serverExecutable,'/opt/jdk27/bin/java');
  assert.deepEqual(plan.language.jdt.targets,{'11':'/opt/jdk11','17':'/opt/jdk17','21':'/opt/java/openjdk','27':'/opt/jdk27'});
  assert.equal(plan.language.pylsp.PYTHONPATH,'/opt/pylsp');assert.equal(plan.language.pylsp.version,'1.12.2');

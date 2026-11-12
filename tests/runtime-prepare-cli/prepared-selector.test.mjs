@@ -5,13 +5,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-// Pin PAIRCOACH_TEST_FROZEN_CONSUMER_ROOT to the reviewed immutable consumer export (31ef).
-// Consumer is deliberately NOT copied into the CLI's older base or replaced by a selector mock.
+// Active consumer test: same installed candidate, not an unrelated historical export.
 import { measuredImageEntry } from '../../scripts/runtime-prepare-cli.mjs';
-const frozen = process.env.PAIRCOACH_TEST_FROZEN_CONSUMER_ROOT;
-assert.ok(frozen && path.isAbsolute(frozen), 'Explicit frozen consumer export required');
-const { PreparedRuntimeResolver } = await import(pathToFileURL(path.join(frozen, 'src/server/runtime-coordinator/PreparedRuntimeResolver.ts')).href);
-const { validateImageLock } = await import(pathToFileURL(path.join(frozen, 'src/shared/validation-v2.ts')).href);
+import { PreparedRuntimeResolver } from '../../src/server/runtime-coordinator/PreparedRuntimeResolver.ts';
+import { validateImageLock } from '../../src/shared/validation-v2.ts';
 const hash = b => createHash('sha256').update(b).digest('hex');
 const dependencyHash = files => hash(JSON.stringify(files.filter(f => f.path === 'package.json'))); // UNIT policy, not producer implementation.
 const profile = { id: 'javascript-node', label: 'Node', adapterFamily: 'node', imageLockKey: 'node', expectedTools: [{ name: 'node', version: '22.22.0' }],

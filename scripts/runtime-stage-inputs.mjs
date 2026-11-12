@@ -38,9 +38,9 @@ export async function stageInputs(output,{lock=JSON.parse(readPrivate(path.join(
  const publish=receiptWriter(path.join(root,'download-journal')),receipt={status:'STARTED_NOT_PREPARED',scope:'Exact official downloads only; no Docker/tool execution',artifacts:[]};let publicationFailed=false;
  const save=()=>{try{return publish(receipt);}catch(e){publicationFailed=true;throw e;}};save();
  try {
-  for(const sub of ['stage','stage/tools','stage/tools/node_modules','stage/wheels','stage/language'])make(path.join(root,sub));
+  for(const sub of ['stage','stage/tools','stage/tools/node_modules','stage/wheels'])make(path.join(root,sub));
   const seen=new Map();let total=0;
-  for(const a of [...lock.artifacts,...lock.language.artifacts]) {
+  for(const a of lock.artifacts) {
    if(seen.has(a.url)){if(seen.get(a.url)!==a.sha256)throw new Error('Conflicting duplicate URL');continue;}seen.set(a.url,a.sha256);
    if(total+a.bytes>192*1024*1024)throw new Error('Total artifact budget');const bytes=await download(a,fetcher);total+=bytes.length;
    if(a.kind==='npm') {
@@ -49,9 +49,9 @@ export async function stageInputs(output,{lock=JSON.parse(readPrivate(path.join(
     for(const [rel,data] of npmFiles(bytes,a.files)) {const parts=rel.split('/');if(parts.some(p=>!p||p==='.'||p==='..'))throw new Error('Unsafe npm path');let dir=dest;
      for(const part of parts.slice(0,-1)){dir=path.join(dir,part);if(!fs.existsSync(dir))make(dir);canonicalDirectory(dir);}put(path.join(dest,rel),data);
     }
-   }else if(['wheel','language-wheel'].includes(a.kind)) {
+   }else if(a.kind==='wheel') {
     if(path.basename(a.filename)!==a.filename || !/^[A-Za-z0-9_.-]+\.whl$/.test(a.filename))throw new Error('Wheel path');put(path.join(root,'stage/wheels',a.filename),bytes);
-   }else if(a.kind==='jdt'&&a.filename==='jdt.tar.gz')put(path.join(root,'stage/language/jdt.tar.gz'),bytes);
+   }
    else throw new Error('Unknown artifact');
    receipt.artifacts.push({name:a.name,sha256:a.sha256,bytes:bytes.length});save();
   }

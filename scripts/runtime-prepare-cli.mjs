@@ -11,7 +11,6 @@ import { dependencyHash } from './runtime-dependencies.mjs';
 import { validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, prepare, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
 import { createImageRetention, imagePin, imageCommandOutput } from './runtime-image-retention.mjs';
 import { stageInputs } from './runtime-stage-inputs.mjs';
-import { prepareLanguageImages } from './runtime-language-prepare.mjs';
 
 const installed = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -167,6 +166,7 @@ export async function buildPublicPreparePlan(argv) {
   check(api.validateRuntimeCatalog(catalog), 'Invalid installed approved catalog');
   const profile = catalog.profiles.find(p => p.id === args.profile);
   check(profile, 'Unknown approved profile');
+  check(profile.language.provider==='builtin' && profile.language.imageLockKey===null && profile.language.serverJvm===null, 'Lightweight prepare requires a local builtin profile, not remote language resources');
   const directories = [...new Set(settings.value.runProfiles.map(p => p.task.workingDirectory))];
   check(directories.length === 1, 'Different per-mode workingDirectory values need separately bound outputs; use one explicit task directory for this CLI');
   const lock = json(path.join(installed, 'runtimes/production-inputs.lock.json'));
@@ -236,26 +236,7 @@ export function measuredImageEntry(key, imageTag, observed, expectedImageId, too
   // Prepared receipts bind this approved selector; genuine manifest/config identities remain separate.
   return { key, image: imageTag, imageId: observed.Id, digest, tools: tools.map(({ name, version }) => ({ name, version })) };
 }
-function languageTools(item, kind, profile, lock) {
-  check(item?.status === 'BUILT_TOOLS_CHECKED_NOT_LSP_FUNCTIONAL_ACCEPTANCE' && Array.isArray(item.tools), 'NOTREADY: language tool probes incomplete');
-  for (const probe of item.tools) check(probe.status === 'TOOL_PROBE_PASS_REMOVED' && /^[a-f0-9]{64}$/.test(probe.container?.Id) && probe.container.State?.Running === false && probe.container.State.ExitCode === 0 && probe.container.Config?.Image === item.observedImage.Id && probe.container.Config.Labels?.['paircoach.installation'] === 'stage09-runtime-assets' && probe.container.Config.Labels?.['paircoach.role'] === 'language-tool-probe', 'NOTREADY: language probe terminal/image ownership mismatch');
-  if (kind === 'java') {
-    const probes = ['jdt-server-java', ...[11, 17, 21, 27].map(r => 'target-javac-' + r)];
-    check(item.tools.length === probes.length && new Set(item.tools.map(p => p.name.replace('paircoach-stage09-language-', ''))).size === probes.length, 'NOTREADY: Java language probe inventory');
-    return probes.map(name => {
-      const p = item.tools.find(p => p.name === 'paircoach-stage09-language-' + name);
-      check(p, 'NOTREADY: Java probe missing');
-      const version = (p.stdout + p.stderr).trim().match(name === 'jdt-server-java' ? /version "([^"]+)"/ : /^javac (\S+)/)?.[1];
-      check(version && version === p.version && (name !== 'jdt-server-java' || version === profile.language.serverJvm), 'NOTREADY: actual Java language version differs');
-      return { name: name === 'jdt-server-java' ? 'java' : name, version };
-    });
-  }
-  check(item.tools.length === 1, 'NOTREADY: Python language probe inventory');
-  const p = item.tools[0], actual = JSON.parse(p.stdout);
-  check(equal(actual, p.inventory) && actual.python === lock.language.pylsp.pythonVersion && lock.language.artifacts.filter(a => a.kind === 'language-wheel').every(a => actual.packages?.[a.name] === a.version), 'NOTREADY: actual Python language inventory differs');
-  return [{ name: 'python', version: actual.python }, ...['python-lsp-server', 'jedi', 'pyflakes'].map(name => ({ name, version: actual.packages[name] }))];
-}
-async function artifacts(plan, prepared, language, run, api, lock) {
+async function artifacts(plan, prepared, run, api) {
   check(prepared.status === 'PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION' && equal(prepared.request, plan.request) && equal(prepared.engine, run.engine), 'NOTREADY: prepared request/status/engine correlation differs');
   check(equal({ toolchainHash: prepared.toolchainHash, dispatcherFiles: prepared.dispatcherFiles }, resolvePreparedToolchainIdentity(plan.request)), 'NOTREADY: installed producer identity differs');
   const cache = path.join(plan.preparedRuntime, 'cache', plan.profile.adapterFamily, prepared.toolchainHash, plan.dependencySha256);
@@ -273,12 +254,6 @@ async function artifacts(plan, prepared, language, run, api, lock) {
   check(prepared.observedImage?.Id === prepared.imageId, 'NOTREADY: captured runtime configId differs');
   const observed = inspect(prepared.imageId);
   const images = [measuredImageEntry(plan.profile.imageLockKey, plan.request.imageTag, observed, prepared.imageId, tools)];
-  if (plan.languageRequired !== null) {
-    const kind = plan.profile.language.provider === 'jdt' ? 'java' : 'python', item = language.find(i => i.key === plan.languageRequired);
-    check(item && equal(item.engine, run.engine), 'NOTREADY: language image/engine missing');
-    const observed = inspect(item.observedImage?.Id);
-    images.push(measuredImageEntry(plan.languageRequired, item.imageTag, observed, item.observedImage.Id, languageTools(item, kind, plan.profile, lock)));
-  }
   const imageLock = { schemaVersion: 1, images }, catalog = { schemaVersion: 1, profiles: [plan.profile] };
   const runtimeConfig = { schemaVersion: 1, activeProfile: plan.profile.id, workspaceRoot: plan.project, runtimeCatalog: 'catalog.json', imageLock: 'images.lock.json', languageFeatures: { completion: true, diagnostics: true }, execution: { backend: 'docker', pullPolicy: 'never' } };
   check(api.validateImageLock(imageLock) && api.validateRuntimeCatalog(catalog) && api.validateCatalogImageReferences(catalog, imageLock) && api.validateRuntimeConfigV1(runtimeConfig), 'NOTREADY: generated existing-schema artifacts failed validation');
@@ -338,19 +313,10 @@ export async function executePublicPreparePlan(plan, dependencies = {}, required
     retention.add(imagePin(receipt.engine, prepared.imageInspect, receipt.prepareReceipt));
     check(Array.isArray(prepared.imageRetention?.pins), 'Producer retained prior-pin set missing');
     for (const entry of prepared.imageRetention.pins) retention.add(entry.pin);
-    const lock = json(path.join(installed, 'runtimes/production-inputs.lock.json'));
-    if (plan.languageRequired !== null) {
-      const kinds = plan.profile.language.provider === 'jdt' ? ['java'] : ['python'];
-      (dependencies.prepareLanguageImages ?? prepareLanguageImages)(path.join(plan.output, 'assets'), lock, { run: (args, ...rest) => {
-        if (args[0] !== 'build') return run(args, ...rest);
-        const tag = args[args.indexOf('--tag') + 1]; retention.beforeBuild(tag);
-        const result = run(args); retention.afterBuild(tag); return result;
-      }, save, receipt }, kinds);
-    }
     budget(); await assertOriginal(plan, api);
     // Missing OCI/evidence is an explicit NOTREADY, never a synthetic digest or usable config.
     let generated;
-    try { generated = await artifacts(plan, prepared, receipt.language, run, api, lock); }
+    try { generated = await artifacts(plan, prepared, run, api); }
     catch (e) { receipt.status = 'NOTREADY'; receipt.problem = e.message; save(); return { schemaVersion: 1, status: receipt.status, output: plan.output, receipt: path.join(plan.output, 'receipt.json'), preparedRuntime: plan.preparedRuntime, runtimeConfig: null, problem: e.message }; }
     retention.verifyAll();
     receipt.measuredArtifacts = generated; receipt.status = 'MEASURED_ARTIFACTS_PENDING_PUBLICATION'; save();

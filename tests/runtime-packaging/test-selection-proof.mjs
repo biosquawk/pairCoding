@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-export const testCommand = 'tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"';
+export const testCommand = 'node scripts/runtime-test.mjs';
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 export function proveSelection({ source, evidence, native = false }) {
   source = fs.realpathSync(source);
@@ -28,11 +28,14 @@ export function proveSelection({ source, evidence, native = false }) {
     fs.mkdirSync(path.dirname(dest), { recursive: true }); fs.writeFileSync(dest, bytes);
   };
   write('package.json', JSON.stringify({ name: 'selection-only', private: true, type: 'module', scripts: { test: testCommand } }, null, 2) + '\n');
+  for (const script of ['runtime-test.mjs','runtime-test-policy.mjs']) write('scripts/'+script, fs.readFileSync(path.join(source,'scripts',script)));
   const expected = ['ts', 'mjs'].flatMap(extension => [
     `tests/root.test.${extension}`, `tests/shallow/leaf.test.${extension}`,
     `tests/deep/one/two/leaf.test.${extension}`, `tests/space dir/spaced file.test.${extension}`,
   ]).sort();
   const excluded = [
+    'tests/language-runtime/retired.test.ts', 'tests/language-runtime/retired.test.mjs',
+    'tests/language-bounded-stage-integration/retired.test.ts',
     'tests/support/helper.ts', 'tests/support/helper.mjs', 'tests/not-a-test.ts',
     'tests/not-a-test.mjs', 'tests/root.test.js', 'examples/shallow/example.test.ts',
     'examples/shallow/example.test.mjs', 'test/outside.test.ts', 'test/outside.test.mjs',

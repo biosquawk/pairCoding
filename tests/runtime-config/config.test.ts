@@ -55,10 +55,10 @@ test('missing/unknown config, host backend, mutable image, tools mismatch fail c
   f.write('images.lock.json', { schemaVersion: 1, images: [{ ...image('node'), imageId: 'latest' }] }); assert.equal(f.load().resolved, null);
   f.write('images.lock.json', { schemaVersion: 1, images: [{ ...image('node'), tools: [{ name: 'node', version: 'wrong' }] }] }); assert.equal(f.load().resolved, null);
 });
-test('missing lock keys and Python builtin are rejected even on frozen shared base', t => {
+test('missing lock keys remain rejected; local Python builtin no longer needs language images', t => {
   const f = fixture(t);
   f.write('catalog.json', { schemaVersion: 1, profiles: [{ ...profile(), imageLockKey: 'absent' }] }); assert.equal(f.load().resolved, null);
-  f.write('catalog.json', { schemaVersion: 1, profiles: [{ ...profile(), adapterFamily: 'python' }] }); assert.equal(f.load().resolved, null);
+  f.write('catalog.json', { schemaVersion: 1, profiles: [{ ...profile(), adapterFamily: 'python' }] }); assert.equal(f.load().resolved?.profile.language.provider, 'builtin');
 });
 test('symlink and oversized config files fail without echoing config secrets', t => {
   const f = fixture(t); fs.unlinkSync(f.configPath); fs.symlinkSync(path.join(f.root, 'secret-json'), f.configPath);
