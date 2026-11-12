@@ -14,25 +14,30 @@ export const DEFAULT_RUNTIME_CONFIG_PATH = fileURLToPath(new URL('../../../pairc
 export interface RuntimeStartupArguments {
   readonly runtimeConfigPath: string;
   readonly preparedRuntimeRoots: readonly string[];
+  /** Trusted operator selection only. Absence never means implicit discovery/readiness. */
+  readonly languageReceiptPath?: string;
 }
 export class RuntimeStartupArgumentError extends Error {
   readonly code = 'INVALID_STARTUP_ARGUMENTS';
   readonly status = 400;
-  constructor() { super('Use --runtime-config <absolute-file> at most once and --prepared-runtime <absolute-outputRoot> at most 16 times. Select distinct canonical, non-overlapping output directories.'); }
+  constructor() { super('Use --runtime-config <absolute-file> at most once and --prepared-runtime <absolute-outputRoot> at most 16 times, optionally --language-receipt <absolute-file> at most once. Select distinct canonical, non-overlapping output directories.'); }
 }
 const invalid = (): never => { throw new RuntimeStartupArgumentError(); };
 const validPath = (value: unknown): value is string => typeof value === 'string' && value.length > 0 &&
   value.length <= 1024 && !/[\x00-\x1f\x7f]/.test(value);
 /** Pure argument validation. No path existence/realpath lookup or new environment/config surface. */
 export function parseRuntimeStartupArguments(argv: readonly string[]): RuntimeStartupArguments {
-  if (!Array.isArray(argv) || argv.length > 34) invalid();
+  if (!Array.isArray(argv) || argv.length > 36) invalid();
   let runtimeConfigPath = DEFAULT_RUNTIME_CONFIG_PATH, selectedConfig = false;
   const preparedRuntimeRoots: string[] = [];
+  let languageReceiptPath: string | undefined;
   for (let i = 0; i < argv.length; i += 2) {
     const flag = argv[i], value = argv[i + 1];
     if (!validPath(value) || !path.isAbsolute(value)) invalid();
     if (flag === '--runtime-config' && !selectedConfig) {
       runtimeConfigPath = path.normalize(value); selectedConfig = true;
+    } else if (flag === '--language-receipt' && languageReceiptPath === undefined) {
+      languageReceiptPath = path.normalize(value);
     } else if (flag === '--prepared-runtime' && preparedRuntimeRoots.length < 16) {
       // Match the resolver's public selector syntax; it still owns the actual trust checks.
       if (path.normalize(value) !== value || path.resolve(value) !== value || value.includes(',')) invalid();
@@ -43,7 +48,8 @@ export function parseRuntimeStartupArguments(argv: readonly string[]): RuntimeSt
   if (new Set(preparedRuntimeRoots.map(key)).size !== preparedRuntimeRoots.length) invalid();
   for (const a of preparedRuntimeRoots) for (const b of preparedRuntimeRoots)
     if (a !== b && key(b).startsWith(key(a).replace(/[\\/]$/, '') + path.sep)) invalid();
-  return Object.freeze({ runtimeConfigPath, preparedRuntimeRoots: Object.freeze(preparedRuntimeRoots) });
+  return Object.freeze({ runtimeConfigPath, preparedRuntimeRoots: Object.freeze(preparedRuntimeRoots),
+    ...(languageReceiptPath === undefined ? {} : { languageReceiptPath }) });
 }
 export interface RuntimeStartup {
   readonly arguments: RuntimeStartupArguments;
