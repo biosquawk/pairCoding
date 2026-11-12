@@ -117,10 +117,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   let chat:ChatEntry[] = [], proposals:Proposal[] = [], report:Report|null = null, lastRun:Run|null = null;
   const facts:unknown[] = [];
   let seq = 0, closing = false, transitioning = false, persistingFinish = false;
+  let controlPreparing = false; // Existing CONTROL_PREPARE is not represented by Session.writeOwner yet.
   let coach:CoachService|undefined, execution:ExecutionServices|undefined;
   let reports:ExecutionServices['reports']|undefined;
   let runtimeExecution: ReturnType<typeof createRuntimeExecution> | undefined;
-  const peers = new Map<WebSocket,{id:string;clientId:string|null; authenticated:boolean; alive:boolean; count:number; since:number; queued:number; queue:Promise<void>; handshakeGeneration:string|null;leaseSession:SessionController|null}>();
+  const peers = new Map<WebSocket,{id:string;clientId:string|null; authenticated:boolean; refreshing:boolean; readinessDeferred:boolean; alive:boolean; count:number; since:number; queued:number; queue:Promise<void>; handshakeGeneration:string|null;leaseSession:SessionController|null}>();
   const server = http.createServer((req,res) => { void handleHttp(req,res); });
   server.requestTimeout = 10000; server.headersTimeout = 10000; server.maxHeadersCount = 64;
   const wss = new WebSocketServer({ noServer:true, maxPayload: 6*1024*1024, perMessageDeflate:false });
@@ -135,6 +136,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   function emit(type:string,payload:unknown,messageId?:string) {
     if (closing) return;
     if (type==='SESSION_REPORT' && (payload as Report).sessionId!==session.state.sessionId) return;
+    if(type==='CONTROL_PREPARE')controlPreparing=true;
+    if(type==='CONTROL_STATE')controlPreparing=false;
     const message = envelope(type,payload,messageId), encoded = JSON.stringify(message);
     if (['COACH_STEP_EDIT','CONTROL_STATE'].includes(type)) facts.push(clone(message));
     if (type==='RUN_STATE') {
@@ -147,23 +150,28 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if (ws.bufferedAmount > 8*1024*1024) { ws.close(1013,'Slow consumer'); continue; }
       ws.send(encoded);
     }
+    // A full snapshot resets the existing client's PREPARE/step cache. Publish readiness
+    // only after the actual control handoff has settled, never over an in-flight intervention.
+    if(type==='CONTROL_STATE' && session.state.writeOwner==='STUDENT')queueMicrotask(()=>{
+      for(const [ws,peer] of peers)if(peer.readinessDeferred)refreshReadiness(ws);
+    });
     // Coach updates can publish more frames. Send this sequence before reentering emit.
     if (type==='RUN_STATE' && (payload as Run).finishedAt) {
       coach?.updateRun?.(clone(payload as Run));
       if(!transitioning && !coach?.updateRun) {session.noteNewFact('RUN');coach?.trigger('RUN');}
     }
   }
-  async function getProject():Promise<ProjectV2> {
-    return readProject();
+  async function getProject(measureReadiness=true):Promise<ProjectV2> {
+    return readProject(measureReadiness);
   }
-  async function readProject(): Promise<ProjectV2> {
+  async function readProject(measureReadiness:boolean): Promise<ProjectV2> {
     const bound = startup, core = currentCore();
     const assertCurrent = () => {
       if (startup !== bound || closing || transitioning) fail(409, 'PROJECT_STATE_CHANGED', 'Project binding changed during the read. Preserve drafts and synchronize.');
     };
     const project = await readRuntimeProject({ core, sessionId:core.session.state.sessionId, configuration:bound.configuration,
       readiness:options.runtimeReadiness ?? runtimeExecution?.readiness ?? { execution:{ readiness:async()=> { throw binding?.runtimeError ?? Error('Execution composition unavailable'); } }, probe:bound.prepared },
-      assertCurrent, readLanguage:()=>languageProjection(bound) });
+      measureReadiness, assertCurrent, readLanguage:()=>languageProjection(bound) });
     if(binding?.runtimeError && core.readSettings().settings !== null) {
       const problem = {code:'RUNTIME_STATE_UNAVAILABLE',message:'Execution state or owned Docker client configuration cannot be safely initialized.',
         recovery:'Place the runtime configuration outside original/prepared sources, retain prior ownership and repair the private canonical runtime state. Manual editing remains available.',retryable:true};
@@ -282,11 +290,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(!validateMutationOutcomeV2(response)) throw Error('Actual reconcile result violates the frozen contract');
     return response;
   }
-  async function getBundle():Promise<SessionBundleV2> {
-    return readBundle();
+  async function getBundle(measureReadiness=false):Promise<SessionBundleV2> {
+    return readBundle(measureReadiness);
   }
-  async function readBundle():Promise<SessionBundleV2> {
-    const bound=startup, settingsHash=currentCore().readSettings().sourceSha256, project=await getProject();
+  async function readBundle(measureReadiness:boolean):Promise<SessionBundleV2> {
+    const bound=startup, settingsHash=currentCore().readSettings().sourceSha256, project=await getProject(measureReadiness);
     if(startup!==bound) fail(409,'PROJECT_STATE_CHANGED','Project binding changed.');
     const state = session.getSession();
     const activePath = state.activeFilePath || workspace.settings.taskFilePath;
@@ -297,7 +305,56 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(languageProjection(bound).providerGeneration!==project.capabilities.language.providerGeneration)fail(409,'PROJECT_STATE_CHANGED','Local provider configuration changed during snapshot.');
     return {session:state,project,activeDocument,proposals:clone(proposals),lastRun:clone(currentRuntimeRun()),report:clone(report),chat:clone(chat),languageBootstrap:binding?.bootstrap()??null};
   }
-  async function snapshot() { const bundle=await getBundle(); emit('SESSION_SNAPSHOT',bundle); }
+  /** Read-only, one in-flight measurement per authenticated peer. Never holds the source
+   * FIFO across a probe or queues CODE_CHANGED/Veto behind readiness. No cached authority. */
+  function refreshReadiness(ws:WebSocket) {
+    const peer=peers.get(ws), bound=startup;
+    if(!peer?.authenticated || peer.refreshing)return;
+    if(controlPreparing || session.state.writeOwner!=='STUDENT'){peer.readinessDeferred=true;return;}
+    const generation=peer.handshakeGeneration;
+    const current=()=>{
+      if(peers.get(ws)!==peer || !peer.authenticated || peer.handshakeGeneration!==generation ||
+          startup!==bound || closing || transitioning || ws.readyState!==WebSocket.OPEN)return false;
+      try {
+        const core=currentCore();
+        core.session.assertClient(peer.clientId!,core.session.state.sessionId);
+        binding!.clients.assertBound(peer.clientId!,core.session.state.sessionId);
+        return true;
+      } catch { return false; }
+    };
+    peer.refreshing=true;peer.readinessDeferred=false;
+    void (async()=>{
+      while(current()) {
+        // Retain SAME FIFO admission, then release before expensive runtime I/O.
+        await bound.core!.workspace._withQueuedMutation(async()=>{});
+        if(!current())return;
+        const core=currentCore(), version=core.workspace.workspaceVersion,
+          hash=core.readSettings().sourceSha256, epoch=core.session.state.controlEpoch;
+        const changed=()=>core.workspace.workspaceVersion!==version || core.readSettings().sourceSha256!==hash || core.session.state.controlEpoch!==epoch;
+        try {
+          const bundle=await getBundle(true);
+          if(!current())return;
+          if(controlPreparing || core.session.state.writeOwner!=='STUDENT'){peer.readinessDeferred=true;return;}
+          // An intervening edit/settings/Veto may invalidate a measured projection, never
+          // the original edit ACK. Re-read only on witnessed source/control change.
+          if(changed() || bundle.session.lastServerSeq!==core.session.state.lastServerSeq)continue;
+          emit('SESSION_SNAPSHOT',bundle);return;
+        } catch(error) {
+          if(current() && (error as {code?:string}).code==='PROJECT_STATE_CHANGED' && changed())continue;
+          if(current())emit('ERROR',apiError(error));
+          return; // A failed read grants nothing; a later refresh/reconnect retries.
+        }
+      }
+    })().catch(error=>{if(current())emit('ERROR',apiError(error));}).finally(()=>{
+      peer.refreshing=false;
+      if(peers.get(ws)===peer && peer.authenticated && peer.handshakeGeneration!==generation)refreshReadiness(ws);
+      else if(peer.readinessDeferred && current() && !controlPreparing && session.state.writeOwner==='STUDENT')refreshReadiness(ws);
+    });
+  }
+  function refreshConnectedReadiness() { for(const [ws,peer] of peers)if(peer.authenticated)refreshReadiness(ws); }
+  async function snapshot() { const bundle=await getBundle(); emit('SESSION_SNAPSHOT',bundle);
+    if(bundle.project.capabilities.execution.runtime.problem?.code==='RUNTIME_READINESS_PENDING')refreshConnectedReadiness();
+  }
   function postProposal(decision:Extract<CoachDecision,{kind:'PROPOSE'}>) {
     // Defense in depth for stale/injected CoachService implementations bypassing the adapter.
     if(decision.proposalKind==='GENERATE_TESTS') {
@@ -569,7 +626,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(url.pathname!=='/api/project/open') currentCore();
       if(req.method==='GET') {
         let value:unknown;
-        if(url.pathname==='/api/project') value=await getProject();
+        if(url.pathname==='/api/project') {
+          // Explicit measured read for operators/manual refresh; editor bootstrap is cheap.
+          if(url.search && (url.searchParams.size!==1 || url.searchParams.get('readiness')!=='actual'))
+            fail(400,'VALIDATION_ERROR','Use no query for editor state or readiness=actual for a measured runtime read.');
+          value=await getProject(url.searchParams.get('readiness')==='actual');
+        }
         else if(url.pathname==='/api/session') value=session.getSession();
         else if(url.pathname==='/api/file') value=workspace.getDocument(url.searchParams.get('path')||'');
         else if(url.pathname==='/api/snapshots') value=workspace.listSnapshots();
@@ -584,7 +646,9 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         } else if(/^\/api\/run\/[A-Za-z0-9._:-]+$/.test(url.pathname)) {
           if(!execution && !runtimeExecution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.'); value=(execution?.runner ?? runtimeExecution!.runner).get(url.pathname.split('/')[3]);
         } else fail(404,'NOT_FOUND','Nieznany endpoint.');
-        respond(res,200,value);return;
+        respond(res,200,value);
+        if(url.pathname==='/api/project' && (value as ProjectV2).capabilities.execution.runtime.problem?.code==='RUNTIME_READINESS_PENDING')refreshConnectedReadiness();
+        return;
       }
       if(req.method==='POST' && url.pathname==='/api/runtime/service-network/prepare') {
         const body:unknown=await readBody(req);
@@ -636,7 +700,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           try {
             // Reserve transition BEFORE awaiting construction/recovery. GET/snapshot refuses mixed bindings.
             if(startup.core && path.resolve(body.rootPath)===startup.core.workspace.rootPath) {
-              session.claimLease(body.clientId); binding!.clients.bind(body.clientId,session.state.sessionId); transitioning=false; return await getProject();
+              session.claimLease(body.clientId); binding!.clients.bind(body.clientId,session.state.sessionId); transitioning=false; return await getProject(false);
             }
             next=await makeCore(body.rootPath);
             const nextCore=requireRuntimeWorkspace(next);
@@ -648,7 +712,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             await stopRuntimeForTransition();
             if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
             const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
-            startup=next;({workspace,session,gate}=nextCore);binding=prepared;
+            startup=next;({workspace,session,gate}=nextCore);binding=prepared;controlPreparing=false;
             ({ledger,proposalOutcomes}=makeLedgers());adopted=true;
             previousLedger.retire();previousProposals.retire();
             chat=[];proposals=[];report=null;lastRun=null;facts.length=0;
@@ -657,13 +721,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             binding.activate();
             for(const [ws,p] of peers) {p.authenticated=false;p.handshakeGeneration=null;ws.close(1012,'Project changed; reconnect');}
             transitioning=false;
-            return await getProject();
+            return await getProject(false);
           } finally {
             try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.stopAll();await prepared.dispose();}else next.close();}}
             finally {transitioning=false;}
           }
         }
-        if(url.pathname==='/api/file') { await gate.mutateAsync({...body,actor:'STUDENT'});await snapshot();return getProject(); }
+        if(url.pathname==='/api/file') { await gate.mutateAsync({...body,actor:'STUDENT'});await snapshot();return getProject(false); }
         if(url.pathname==='/api/session/start') { const state=session.start(body.limitMs,body.pauseOnHidden);coach?.trigger('START');return clone(state); }
         if(stopMatch) { if(!execution && !runtimeExecution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.');return (execution?.runner ?? runtimeExecution!.runner).stop(url.pathname.split('/')[3]); }
         if(url.pathname==='/api/session/finish') { assertVersion(body.expectedWorkspaceVersion); return finish(body.reason); }
@@ -717,7 +781,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     } catch(error) { socket.write(`HTTP/1.1 ${(error as any)?.status||403} Forbidden\r\nConnection: close\r\n\r\n`);socket.destroy(); }
   });
   wss.on('connection',(ws)=>{
-    const peer={id:randomUUID(),clientId:null as string|null,authenticated:false,alive:true,count:0,since:Date.now(),queued:0,queue:Promise.resolve(),handshakeGeneration:null,leaseSession:null as SessionController|null};peers.set(ws,peer);
+    const peer={id:randomUUID(),clientId:null as string|null,authenticated:false,refreshing:false,readinessDeferred:false,alive:true,count:0,since:Date.now(),queued:0,queue:Promise.resolve(),handshakeGeneration:null,leaseSession:null as SessionController|null};peers.set(ws,peer);
     const helloDeadline=setTimeout(()=>{if(!peer.authenticated) ws.close(1008,'HELLO required');},3000);
     ws.on('pong',()=>{peer.alive=true;});
     ws.on('message',(data)=>{
@@ -760,7 +824,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         // Revoke a prior same-client peer BEFORE any new snapshot/control publication.
         for(const [old,p] of peers) if(old!==ws && p.clientId===message.clientId) {p.authenticated=false;p.handshakeGeneration=null;old.close(1012,'Replaced by reconnect');}
         // A reconnect invalidates any old in-flight coach intervention, never replays steps.
-        coach?.abort();session.releaseCoach();session.clearEditorView();peer.clientId=message.clientId;
+        coach?.abort();session.releaseCoach();controlPreparing=false;session.clearEditorView();peer.clientId=message.clientId;
         // Revoke immediately, then await the SAME real root FIFO before reading a snapshot.
         // Reading inside another held capture is correctly WORKSPACE_BUSY, not a cached bootstrap.
         await helloBinding.core!.workspace._withQueuedMutation(async()=>{});
@@ -768,7 +832,9 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         binding?.connectLocal(helloGeneration);
         const bundle=await getBundle();
         if(!peers.has(ws) || ws.readyState!==WebSocket.OPEN || peer.handshakeGeneration!==helloGeneration || startup!==helloBinding || closing) return;
-        peer.authenticated=true;emit('SESSION_SNAPSHOT',bundle);return;
+        peer.authenticated=true;emit('SESSION_SNAPSHOT',bundle);
+        if(bundle.project.capabilities.execution.runtime.problem?.code==='RUNTIME_READINESS_PENDING')refreshReadiness(ws);
+        return;
       }
       if(!peer.authenticated || message.clientId!==peer.clientId) {ws.close(1008,'HELLO required');return;}
       const admitted=startup, admittedGate=gate,admittedOwner=binding!;

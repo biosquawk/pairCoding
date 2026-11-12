@@ -3,7 +3,7 @@ import type { SettingsV2Store, SettingsReadResult } from '../settings-v2';
 import type { WorkspaceService } from '../WorkspaceService';
 import type { RuntimeConfiguration, RuntimeReadinessDependencies } from '../runtime-config';
 import { aggregateRuntimeReadiness } from '../runtime-config';
-import type { ProjectV2, SettingsV2 } from '../../shared/runtime-v2';
+import type { ExecutionView, ProjectV2, SettingsV2 } from '../../shared/runtime-v2';
 import type { LanguageView } from '../../shared/language-v2';
 import { validateLanguageView, validateSettingsV2, validateV2WireShape } from '../../shared/validation-v2';
 import { AppError } from '../errors';
@@ -48,19 +48,34 @@ export function applyRuntimeSettingsMetadata(workspace: WorkspaceService, form: 
   workspace.settings = { ...structuredClone(metadata), runProfiles: [] };
 }
 /** Coherent read for the actual HTTP/WS coordinator. Readiness always consumes Store.settings,
- * NOT form/project.settings. Caller supplies the actual language authority, never a READY stub.
+ * NOT form/project.settings. Editor-only reads never call runtime ports or grant Run.
+ * Caller supplies the actual language authority, never a READY stub.
  */
 export async function readRuntimeProject(options: {
   core: Core;
   sessionId: string;
   configuration: RuntimeConfiguration;
   readiness: RuntimeReadinessDependencies;
+  /** Omit for an actual measurement; false is a nonauthoritative editor projection. */
+  measureReadiness?: boolean;
   readLanguage(): LanguageView;
   assertCurrent(): void;
 }): Promise<ProjectV2> {
   options.assertCurrent();
   const { core, configuration } = options, before = readRuntimeProjectSettings(core), version = core.workspace.workspaceVersion;
-  const execution = await aggregateRuntimeReadiness(configuration, before.source.settings, options.readiness);
+  let execution: ExecutionView;
+  if (options.measureReadiness !== false || configuration.problem !== null || before.source.settings === null) {
+    // Configuration/settings errors are synchronous in the existing aggregator (zero ports).
+    execution = await aggregateRuntimeReadiness(configuration, before.source.settings, options.readiness);
+  } else {
+    const selected = configuration.resolved;
+    const problem = { code: 'RUNTIME_READINESS_PENDING', message: 'Execution readiness has not been measured for this editor snapshot.',
+      recovery: 'Keep editing. The connected session will receive the actual runtime readiness separately.', retryable: true };
+    execution = { runtime: { profileId: selected?.profile.id ?? null, label: selected?.profile.label ?? '',
+      configurationGeneration: configuration.configurationGeneration, taskFields: structuredClone(selected?.profile.taskFields ?? []),
+      state: 'PREPARE_REQUIRED', problem },
+      modes: { RUN_MAIN: { canRun: false, problem }, RUN_TESTS: { canRun: false, problem } } };
+  }
   options.assertCurrent();
   const after = core.settingsStore.read();
   if (core.workspace.workspaceVersion !== version || after.sourceSha256 !== before.source.sourceSha256 || after.kind !== before.source.kind) return changed();
