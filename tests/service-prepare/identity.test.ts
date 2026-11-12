@@ -11,7 +11,7 @@ test('own tab keeps clientId across reload, another tab never adopts global orig
   };
   try {
     const first=create(tab1);const again=create(tab1);assert.equal(first.id,again.id);
-    local.setItem(storageKey,JSON.stringify({version:1,clientId:first.id,entries:[]}));
+    local.setItem(storageKey,JSON.stringify({version:1,clientId:first.id,entries:[{projectId:'p1',phase:'UNKNOWN',receipt:null,request:{requestId:'original',clientId:first.id,sessionId:'s1',expectedWorkspaceVersion:1,configurationGeneration:'cfg1',controlEpoch:0}}]}));
     const other=create(tab2);assert.notEqual(other.id,first.id);
     assert.match((other.client as any).live.servicePreparation.snapshot().message,/innego klienta/);
     assert.equal((other.client as any).live.servicePreparation.snapshot().canPrepare,false);

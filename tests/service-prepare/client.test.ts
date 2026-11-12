@@ -84,7 +84,7 @@ for(const failure of ['write','readback','malformed','foreign-client','other-tab
   const f=await fixture(t,{storage});
   if(failure==='write')storage.failSet=true;if(failure==='readback')storage.failReadback=true;
   if(failure==='other-tab')storage.data.set(storageKey,JSON.stringify({version:1,clientId:'c1',entries:[]}));
-  if(failure==='foreign-client') {f.live.close();storage.data.set(storageKey,JSON.stringify({version:1,clientId:'foreign',entries:[]}));const foreign=await fixture(t,{storage});assert.equal(await foreign.live.prepareRuntimeEnvironment(),false);assert.equal(foreign.posts().length,0);return;}
+  if(failure==='foreign-client') {f.post=async()=>{throw Error('retained foreign original');};await f.live.prepareRuntimeEnvironment();f.live.close();const original=storage.getItem(storageKey);const foreign=await fixture(t,{storage,clientId:'foreign'});assert.equal(await foreign.live.prepareRuntimeEnvironment(),false);assert.equal(foreign.posts().length,0);assert.equal(storage.getItem(storageKey),original);return;}
   assert.equal(await f.live.prepareRuntimeEnvironment(),false);assert.equal(f.posts().length,0);
   f.live.saveFileContent('main.txt','still editable');assert.equal(f.live.getState().files[0].content,'still editable');
 });

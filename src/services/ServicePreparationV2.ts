@@ -62,8 +62,11 @@ export class ServicePreparationV2 {
       if(priorError)throw priorError;
       if(!storage)throw Error('Brak trwałego magazynu przeglądarki. Przygotowanie zablokowane; ręczna edycja dostępna.');
       this.raw=storage.getItem(key);const saved=decode(this.raw);
-      if(saved&&saved.clientId!==clientId)throw Error('Zapis przygotowania należy do innego klienta. Nie nadpisano oryginału.');
-      if(saved)this.store=structuredClone(saved);
+      if(saved&&saved.clientId!==clientId&&saved.entries.length>0)throw Error('Zapis przygotowania należy do innego klienta. Nie nadpisano oryginału.');
+      // A validated empty history retains no original and conveys no client authority.
+      // Keep our OWN identity, without writing on open; persist() still compares the
+      // exact observed raw bytes before admitting our first explicitly requested original.
+      if(saved?.clientId===clientId)this.store=structuredClone(saved);
     } catch(error) {this.fault=String(error instanceof Error?error.message:error);}
   }
   private entry(a:Authority|null) {return a&&a.clientId===this.store.clientId?this.store.entries.find(e=>e.projectId===a.projectId):undefined;}
