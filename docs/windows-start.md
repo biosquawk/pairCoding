@@ -1,9 +1,9 @@
 # PairCoach MVP2 — Windows: instalacja i praca
 
-> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
-> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
-> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
-> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+> **Lightweight: IMPLEMENTED / PENDING_FINAL_QA.** To opis bieżącego kandydata,
+> nie odbiór ani wydanie. Docker/polyglot i publiczne prepare są zaimplementowane;
+> native Windows/PowerShell oraz świeży ZIP wymagają rzeczywistych dowodów
+> na finalnym SHA. Ten dokument nie nadaje im statusu PASS.
 
 MVP2 rozszerza MVP1 o snapshot/recovery, Run/Test i raport. Ten dokument opisuje
 obsługę, **nie zastępuje odbioru**. Przed dystrybucją K wiąże instrukcję, ZIP
@@ -18,7 +18,10 @@ Wymagane: Windows, PowerShell, Node.js **>=22.22.0** z npm, Edge/Chrome,
 internet do instalacji i AI oraz natywny `codex.exe` zalogowany na **Twoim**
 koncie. Nie kopiuj node_modules z WSL ani auth.json. Nie potrzebujesz dodatkowego
 klucza API dla wariantu Codex z logowaniem ChatGPT. Dla obecnej ścieżki Node nie instaluj dodatkowych usług Thalamusa ani toolchainów.
-Przyszłe wymagania Docker/polyglot ETAP9 będą miały osobny kontrakt i dowody.
+Dla Lightweight Docker/polyglot po instalacji wykonaj aktualny
+[przewodnik](windows-polyglot.md#2-nowa-prywatna-kopia-przykładu-i-pełne-ustawienia):
+prywatna kopia przykładu → publiczny `runtime:prepare` → publiczny start z config.
+Poniższe syntetyczne zadanie nie zastępuje tego przepływu ani jego odbioru.
 
 Z katalogu dostawy K skopiuj **razem** ZIP, `manifest.json` i `SHA256SUMS` do
 nowego folderu w Eksploratorze. Otwórz w nim PowerShell. Porównaj zaufany hash
@@ -107,10 +110,16 @@ $env:PAIRCOACH_DATA_DIR = $data
 $env:PAIRCOACH_COACH_PROVIDER = 'codex'
 $env:PAIRCOACH_CODEX_EXE = $codex
 $env:NODE_ENV = 'development'
+# Tylko ta sesja PowerShell; nie zatrzymuj uslug na 8080/8081.
+$env:PAIRCOACH_HTTP_PORT = '18080'
+if (Get-NetTCPConnection -State Listen -LocalPort 18080 -ErrorAction SilentlyContinue) { throw 'Port 18080 zajety: nie zatrzymuj obcego procesu' }
 npm.cmd start
 ```
 
-Pozostaw okno otwarte. Otwórz **http://127.0.0.1:8080/** w jednej karcie Edge.
+Pozostaw okno otwarte. Otwórz dokładny URL wypisany przez serwer
+(tu **http://127.0.0.1:18080/**) w jednej karcie Edge. Bez `PAIRCOACH_HTTP_PORT`
+domyślny port nadal wynosi8080. Nie ma flagi `--port`; dozwolone wartości
+i odmowy opisuje [przewodnik §4](windows-polyglot.md#4-start-i-zmiana-profilu).
 To normalny LIVE, bez `?mock=1`, DevSimulatorBar i bez DevTools. UI pochodzi
 z `dist/` tego samego serwera. `npm run preview` nie uruchamia backendu.
 Nie zmieniaj NODE_ENV na production: standardowy start używa lokalnego
@@ -160,15 +169,17 @@ kopię **całego workspace i data** po zatrzymaniu. Nie aktualizuj w miejscu.
 
 Przy ponownym starcie otwórz PowerShell w istniejącym `$app`, ustaw ponownie
 PAIRCOACH_WORKSPACE_DIR, PAIRCOACH_DATA_DIR, PAIRCOACH_COACH_PROVIDER=codex,
-PAIRCOACH_CODEX_EXE i NODE_ENV tak jak powyżej, potem `npm.cmd start`.
+PAIRCOACH_CODEX_EXE, NODE_ENV i lokalny PAIRCOACH_HTTP_PORT=18080 tak jak
+powyżej, potem `npm.cmd start`. Po zakończeniu usuń nadpisanie tylko z tej sesji:
+`Remove-Item Env:PAIRCOACH_HTTP_PORT -ErrorAction SilentlyContinue`.
 **Nie wykonuj ponownie tworzenia plików zadania**. Po restarcie sprawdź zgodę AI
 w ustawieniach; nie zakładaj trwałości sesji/timera lub ustawień.
 
 Jeżeli nowa wersja zawiedzie, zatrzymaj tylko własny proces, zachowaj nowe dane
 i drafty, wróć do starej instalacji z jej odpowiednią kopią danych. Nie nadpisuj
 nowszej pracy starszą. Nie usuwaj `.paircoach`, plików recovery ani danych
-witryny przeglądarki „dla naprawy”. W razie zajętego portu8080 nie zabijaj obcego
-procesu; zgłoś konflikt. W feedbacku podaj commit z manifestu, wersje Node/Codex,
+witryny przeglądarki „dla naprawy”. W razie zajętego wybranego portu nie zabijaj obcego
+procesu; zgłoś konflikt lub wybierz inny wolny dozwolony port według §4 przewodnika. W feedbacku podaj commit z manifestu, wersje Node/Codex,
 krótką czynność i błąd, bez tokenów, kluczy i prywatnych logów.
 
 Dokumentacja OpenAI: [logowanie](https://developers.openai.com/codex/auth),

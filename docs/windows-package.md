@@ -1,11 +1,11 @@
 # PairCoach MVP2 — archiwum exact Git, nie deklaracja odbioru
 
-> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
-> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
-> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
-> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+> **Lightweight: IMPLEMENTED / PENDING_FINAL_QA.** To opis bieżącego kandydata,
+> nie odbiór ani wydanie. Docker/polyglot i publiczne prepare są zaimplementowane;
+> native Windows/PowerShell oraz świeży ZIP wymagają rzeczywistych dowodów
+> na finalnym SHA. Ten dokument nie nadaje im statusu PASS.
 
-Bieżący zakres ETAP8: aktualne docs, weryfikator Windows i skończona selekcja pakietera. Package/lock/core
+Bieżący zakres: Lightweight Docker/polyglot, aktualne docs, weryfikator Windows i skończona selekcja pakietera. Package/lock/core
 nie są zmieniane przez pakowanie. Instrukcja dotyczy MVP2 po wznowieniu przez
 HUMAN dae99189; stare odroczenie G3/19/100 dotyczyło **tylko MVP1**, nie MVP2.
 Przygotowanie jest **NOT_FINAL**, dopóki K nie rozliczy pełnego właściwego zakresu.
@@ -76,12 +76,12 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run clean` | Istniejący scripts/clean.mjs usuwa tylko dist; nie dowody/dane sesji. |
 | `npm.cmd run build` | Vite: index/config/src → dist; nie samodzielny EXE. |
 | `npm.cmd run lint`, `npm.cmd run typecheck` | TypeScript + tsconfig/src. |
-| `npm.cmd start`, `npm.cmd run server` | tsx src/server/index.ts; backend, po build serwuje UI. |
+| `npm.cmd start`, `npm.cmd run server` | tsx src/server/index.ts; backend, po build serwuje UI. Lokalny `PAIRCOACH_HTTP_PORT=18080` wybiera wolny port zamiast domyślnego8080; publiczne flagi runtime jak w windows-polyglot §4. |
 | `npm.cmd run dev` | Vite3000, nie samodzielna integracja backendu. |
 | `npm.cmd run dev:full` | concurrently + server/dev; development. |
 | `npm.cmd run preview` | Najpierw build; frontend preview bez API, nie odbiór produktu. |
-| `npm.cmd run runtime:prepare -- …` | `node scripts/runtime-prepare-cli.mjs`; jawny projekt/profil i NOWY prywatny output według [przewodnika](windows-polyglot.md#2-jawne-prepare-bez-domyślnego-wykonania). Domyślnie `PLAN_ONLY`, nie gotowość; osobne `--execute` wymaga przyjętej spójnej rewizji i pinów/Docker. Nie uruchamia go pakieter. |
-| `npm.cmd test` | Źródła obu rodzin są w ZIP; `node scripts/runtime-test.mjs`. Teraz tylko izolowany dowód selekcji; pełne wykonanie na spójnej rewizji po implementacji9, nie podczas smoke. |
+| `npm.cmd run runtime:prepare -- …` | `node scripts/runtime-prepare-cli.mjs`; jawny projekt/profil i NOWY prywatny output według [przewodnika](windows-polyglot.md#3-publiczne-przygotowanie-wybranego-środowiska). Domyślnie `PLAN_ONLY`, nie gotowość; osobne `--execute` wymaga przyjętej spójnej rewizji i pinów/Docker. Nie uruchamia go pakieter. |
+| `npm.cmd test` | Źródła obu rodzin są w ZIP; `node scripts/runtime-test.mjs`. Teraz tylko izolowany dowód selekcji; pełne wykonanie wymaga spójnej rewizji i właściwego środowiska, nie jest częścią samego pakowania. |
 
 Paczka zachowuje wszystkie wybrane testy i ich zależności. Obok15skryptów runtime
 publicznego przepływu skończona allowlista dopuszcza pojedynczy prywatny test-support
@@ -127,7 +127,9 @@ nieznany script/brak clean odrzucone przed utworzeniem wyniku.
 ## 4. Osobne wyniki i dystrybucja
 
 Po finalacceptedSHA: **windows-zip-smoke.md** → odrębny Windows katalog i port
-18082 (nie live8080), świeży ZIP→ci→clean→build→proces/HTTP→GUI/ACK→Run/Test→
+18080 przez lokalny `PAIRCOACH_HTTP_PORT` (bez zmian8080/8081). Dla Lightweight
+wykonaj publiczny `runtime:prepare` i start z config według windows-polyglot §2–6.
+Świeży ZIP→ci→clean→build→proces/HTTP→GUI/ACK→Run/Test→
 finish/report→restore/restart. P3/ROOT rozliczają swoje nowe G3/19 i AC027/100;
 nie uruchamiamy ich ponownie ani nie uznajemy za zaliczone przez helpera.
 Nie powtarzamy odebranych G1/G2/29 lub native60821/21+3/3 na niezmienionym kodzie.

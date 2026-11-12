@@ -24,12 +24,16 @@ async function fixture(t: TestContext) {
   const seed = 'value = 0\n';
   fs.writeFileSync(path.join(root, 'main.py'), seed);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# AC011\n');
+  fs.mkdirSync(path.join(root, '.paircoach'));
+  fs.writeFileSync(path.join(root, '.paircoach', 'settings.json'), JSON.stringify({
+    schemaVersion: 2, taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md',
+    runProfiles: [], aiConsent: true, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'],
+  }));
   let context!: ServiceContext;
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0,
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0,
     devBootstrap: true, enableCoach: true,
     coachFactory: ctx => {
       context = ctx;
-      ctx.workspace.updateSettings({ ...ctx.workspace.settings, aiConsent: true });
       ctx.session.setAiStatus('READY');
       return { trigger() {}, controlReady() {}, stepRendered() {}, abort() {}, close() {} };
     },

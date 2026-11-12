@@ -319,16 +319,18 @@ Po potwierdzonym wygenerowaniu konfiguracji, w tym samym PowerShell:
 ```powershell
 $runtimeConfig = (Resolve-Path -LiteralPath (Join-Path $executeOut 'runtime-config.json')).Path
 $preparedRoot = (Resolve-Path -LiteralPath (Join-Path (Join-Path $executeOut 'jobs') $profile)).Path
+$env:PAIRCOACH_HTTP_PORT = '18080'
+if (Get-NetTCPConnection -State Listen -LocalPort 18080 -ErrorAction SilentlyContinue) { throw 'Port 18080 zajety: nie zatrzymuj obcego procesu' }
 npm.cmd start -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot
 ```
 
 W WSL:
 
 ```bash
-npm start -- --runtime-config "$executeOut/runtime-config.json" --prepared-runtime "$executeOut/jobs/$profile"
+PAIRCOACH_HTTP_PORT=18080 npm start -- --runtime-config "$executeOut/runtime-config.json" --prepared-runtime "$executeOut/jobs/$profile"
 ```
 
-Pozostaw serwer uruchomiony i otwórz wypisany adres loopback (standardowo8080).
+Pozostaw serwer uruchomiony i otwórz wypisany adres loopback (tu18080; domyślnie8080).
 Nie zatrzymuj innej usługi zajmującej port. Jeśli 8080 jest zajęty, przed tą samą
 komendą publicznego startu ustaw w tym PowerShell `$env:PAIRCOACH_HTTP_PORT = '18080'`
 (WSL: poprzedź powyższe `npm start` przez `PAIRCOACH_HTTP_PORT=18080`). Wybierz rzeczywiście wolny port;
@@ -462,7 +464,8 @@ Następnie wykonaj bez zmian blok PowerShell §3 (publiczny `runtime:prepare`,
 log i kontrola wyniku), a po potwierdzonym prepare blok PowerShell §4
 (publiczny `npm.cmd start` z wygenerowanym config i `jobs/<profile>`).
 To zwykły start z paczki, nie zewnętrzny helper operatora.
-Użyj wolnego8080 lub jawnego `PAIRCOACH_HTTP_PORT` z §4; nie zatrzymuj obcej usługi.
+Użyj wolnego18080 przez lokalny `PAIRCOACH_HTTP_PORT` z §4; nie zatrzymuj
+obcych usług na8080/8081. Bez nadpisania domyślny port pozostaje8080.
 
 W GUI wykonaj §5: Tests **FAILED** na celowym błędzie → popraw tylko kod
 `2 - 3` na `2 + 3` → ACK → świeże Tests **PASSED** z testCount>0 → jawne
