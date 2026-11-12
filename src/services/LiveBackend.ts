@@ -467,9 +467,15 @@ export class LiveBackend {
   private sessionState(session: Wire.Session) {
     this.replaceFinishSession(session.sessionId);
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
-    if(this.session && (session.sessionId!==this.session.sessionId || session.controlEpoch!==this.session.controlEpoch || session.writeOwner!==this.session.writeOwner)) this.wiring.sourceChanged();
+    const authorityChanged=!this.session || session.sessionId!==this.session.sessionId ||
+      session.controlEpoch!==this.session.controlEpoch || session.writeOwner!==this.session.writeOwner;
+    if(this.session && authorityChanged) this.wiring.sourceChanged();
     this.session = session;
-    this.wiring.authoritativeState(session.controlEpoch);
+    // VIEW_CHANGED/timer/presence publications do not change editor authority. Clearing a
+    // current completion here races its keyboard acceptance with our own view ACK.
+    // Real ownership/epoch changes still invalidate synchronously; same-epoch PREPARE
+    // cannot acquire a new grant from an unrelated session-state publication.
+    if(authorityChanged) this.wiring.authoritativeState(session.controlEpoch);
     this.state.controlEpoch = session.controlEpoch; this.state.workspaceVersion = session.workspaceVersion;
     this.state.coachMode = session.coachMode; this.state.aiStatus = session.aiStatus;
     this.state.sessionStatus = session.timer.status; this.state.pauseOnHidden = session.timer.pauseOnHidden;
