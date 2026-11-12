@@ -306,19 +306,59 @@ Port wyłącznie 127.0.0.1, health, twardy Stop i orphan recovery pozostają obo
 
 ## 2b. Spring: jawne przygotowanie sieci TEJ SAMEJ instalacji
 
-Po przygotowaniu runtime i starcie **rzeczywistego** serwera otwórz ten sam projekt
-i zwiąż klienta/sesję zwykłym uwierzytelnionym HELLO. Nie ma tu nowego przycisku GUI,
-komendy npm ani endpointu readiness. Jest istniejąca jawna operacja maintenance:
-**`POST /api/runtime/service-network/prepare`**, do rzeczywistego adresu loopback serwera,
-`Content-Type: application/json`, z istniejącym lokalnym `Authorization: Bearer …`
-i zasadami Host/Origin. Używaj autoryzowanego transportu tej aplikacji; nie pozyskuj tokenu
-z logu, nie wysyłaj go na zewnątrz i nie twórz nowej sesji tylko dla tej operacji.
+**SOURCE CHECKPOINT, nie aktualnie zintegrowane/wydane GUI.** Poniższa ścieżka opiera się
+na źródłowo przyjętym przez K frontendzie **`e3965caf75f0e2900dd498667092b670fb314421`**
+i istniejącym checkpointcie backendu **`6d098bf22e0f1d4cd21043b4abed068146600e0c`**.
+Nie jest to osobny odbiór historycznego b63 ani całego backendu. Do wykonania potrzebna
+jest wskazana przez K spójna integracja; nie wnioskuj z tego opisu, że uruchomione GUI
+już zawiera te kontrolki. Nie trzeba nowego backendu, nagłówka ani zgody właściciela.
 
-Przed wysłaniem odczytaj aktualne powiązanie klienta, sessionId/controlEpoch oraz
-workspaceVersion/configurationGeneration z rzeczywistego projektu i WS HELLO/STATE_SYNC.
-Identyfikator requestId pochodzi z tej jawnej operacji związanego klienta. Zachowaj trwale
-**całe oryginalne ciało z requestId** przed wysłaniem. Poniżej typy pól, **nie gotowy JSON
-z przykładowymi UUID** — nie zgaduj ID, nie używaj timestamp ani identyfikatorów z innej sesji:
+Po przygotowaniu runtime i starcie **rzeczywistego** serwera otwórz ten sam projekt
+w **„LIVE — lokalny backend”**. Rozwiń **„Środowisko: …”** i w sekcji
+**„Środowisko wykonania”** kliknij **„Przygotuj środowisko”**. To jawne przygotowanie
+sieci instalacji, nie prepare obrazów ani uruchomienie programu/testów. Nie wpisuj
+tokenów, ID ani poleceń API: klient korzysta z bieżącego uwierzytelnionego powiązania
+projektu/sesji i sam trwale zachowuje całe oryginalne żądanie przed wysłaniem.
+
+- **„Przygotowanie / uzgadnianie…”** oznacza operację w toku; nie wysyłaj drugiego żądania.
+- Po utracie lub niepoprawnej odpowiedzi **„Przygotowanie niepotwierdzone — gotowość
+  wymaga bieżącego odczytu.”** nie oznacza READY. Zachowaj magazyn tej karty.
+  Tylko osobne jawne kliknięcie **„Dokończ przygotowanie”** wysyła dokładnie oryginalne
+  sześć pól, także **ten sam clientId/requestId**, bez ich aktualizowania do nowej sesji.
+  Jeśli oryginał wcześniej nie dotarł do serwera (prior MISSING), może nastąpić
+  **pierwsze przygotowanie**; istniejący prior jest uzgadniany przez read-first ledger
+  i bieżący readback, bez ponownego tworzenia. To nie wyłącznie odczyt statusu.
+  Reconnect, render, timer ani błąd fetch nie wysyłają POST automatycznie.
+- Po ścisłym potwierdzeniu `PREPARED` klient wykonuje świeży uwierzytelniony
+  **`GET /api/project`**. Dopiero komunikat **„Przygotowanie potwierdzone. Odczytano
+  bieżącą gotowość; sprawdź osobno program i testy poniżej.”** potwierdza ten odczyt,
+  nie sukces Spring. Sprawdź oddzielnie **„Uruchom program”** i **„Uruchom testy”**,
+  ich dostępność i powody. `PREPARED` **nie oznacza READY** obu trybów. Błędny, stary
+  lub nieudany odczyt pozostawia oryginał i stan niepotwierdzony.
+
+Istniejące **„Sprawdź wynik operacji”** w pasku aplikacji dotyczy nieznanego Run/zapisu,
+**nie** tego przygotowania. Nie zastępuj nim „Dokończ przygotowanie”. Przycisk przygotowania
+może być niedostępny do synchronizacji, rozliczenia sterowania/Veto, zapisu/konfliktu,
+bieżącego Run lub innej operacji; przeczytaj powód przy przycisku. Przy nieznanym wyniku
+nowy Run/zapis ustawień pozostaje zablokowany; Stop znanego wykonania jest oddzielny.
+Brak trwałego magazynu/tożsamości karty blokuje przygotowanie; ręczna edycja pozostaje dostępna.
+
+Po **ukończonym** przygotowaniu poprawna pusta historia (`entries: []`) nie jest UNKNOWN:
+nowa uwierzytelniona karta zachowuje **własny clientId** i może uruchomić program/testy,
+zapisać ustawienia oraz jawnie przygotować środowisko, o ile pozostałe warunki na to pozwalają.
+Samo otwarcie nie zmienia historii ani nie wysyła POST; nowy oryginał jest zapisywany
+pod własną tożsamością dopiero przed jawnym wysłaniem, z porównaniem poprzednio
+odczytanych bajtów (compare-before-write/CAS) i pełnym readbackiem.
+**Niepusty obcy zapis UNKNOWN/ABSENT, także z receipt, pozostaje niezmienny i blokujący**:
+nie przejmuj starego clientId ani oryginału, nie czyść storage i nie zmieniaj requestId,
+aby ominąć odmowę. Niepoprawny zapis, quota, zmiana przez inną kartę lub błąd readback
+pozostają fail-closed; pusta historia nie jest wyjątkiem od tych kontroli.
+
+Kontrakt transportu poniżej służy odczytowi, nie ręcznemu składaniu żądania:
+**`POST /api/runtime/service-network/prepare`** do rzeczywistego loopback serwera,
+`Content-Type: application/json`, istniejący `Authorization: Bearer …` i zasady Host/Origin.
+Nie pozyskuj tokenu z logu, nie wysyłaj go na zewnątrz i nie twórz zastępczej sesji.
+Klient utrwala całe ciało i kontynuuje z **identycznym oryginalnym requestem**:
 
 ```typescript
 // POST body: DOKLADNIE te szesc pol; stringi musza przejsc istniejace validId.
@@ -335,10 +375,8 @@ type RuntimeNetworkPrepareRequest = {
 Nie dodawaj installationId, network/name, engineId, ścieżek ani flag Docker.
 Przy aktywnym/nieuzgodnionym Run, pending mutations, nieaktualnej wersji/config/epoce,
 kontroli innej niż STUDENT lub zakończonym/zastąpionym bindingu operacja odmawia.
-Najpierw rozlicz tę konkretną operację/właściciela i zsynchronizuj bieżący stan;
-nie zmieniaj guardów. Maintenance nie uruchamia się samo ze startup, Run, settings
-ani odczytu gotowości. Serwer dobiera oryginalny layout i dokładny engine przed efektem.
-
+Nie zmieniaj guardów. Maintenance nie uruchamia się samo ze startup, Run, settings
+ani odczytu gotowości. Serwer sprawdza binding/wersję/config/epokę i dobiera oryginalny layout/engine przed efektem.
 Sukces HTTP200 ma **dokładnie siedem pól** (`PreparedServiceNetwork`):
 
 ```typescript
@@ -354,18 +392,15 @@ type PreparedServiceNetwork = {
 ```
 
 Odpowiedź pokazuje prawdziwą **TĘ SAMĄ installationId** serwera i sieć
-`paircoach-${installationId}-service`, z utrwalonym dowodem lokalnego internal bridge.
-Obca sieć, sama zgodna nazwa bez receipt albo zmieniona tożsamość/engine nie wystarcza.
-Nie generuj drugiej installationId, nie kasuj installation/journal i nie wykonuj
-ręcznego `docker network create`. `PREPARED` **nie oznacza READY** aplikacji ani Spring.
-
-Utrata odpowiedzi/restart/`SERVICE_NETWORK_OUTCOME_UNKNOWN`: zachowaj stan i oryginalne
-ciało. Uzgodnienie następuje tą samą trasą z **identycznym oryginalnym requestem**,
-przez read-first ledger i bieżący readback; to nie zgoda na ponowne create/nowy requestId.
+`paircoach-${installationId}-service`, z utrwalonym dowodem lokalnego internal bridge
+(**`Internal===true` i `Driver==='bridge'`**). Obca sieć, sama nazwa bez receipt, zmieniona
+tożsamość/engine ani wbudowany external bridge nie wystarczają. Nie generuj drugiej installationId,
+nie kasuj installation/journal i nie wykonuj ręcznego `docker network create`.
+`SERVICE_NETWORK_OUTCOME_UNKNOWN`, timeout lub503 nie dowodzą braku efektu;
 `IDEMPOTENCY_CONFLICT` wymaga oryginalnego ciała, nie poprawiania go pod starym ID.
-Dopiero `SERVICE_NETWORK_NOT_DISPATCHED` / `SERVICE_NETWORK_ABSENCE_CONFIRMED`
-potwierdza brak bridge dla oryginału; osobno jawna NOWA operacja wymaga świeżego
-powiązanego stanu. Nie traktuj timeout/503 jako dowodu braku zasobu i nie rób blind retry.
+Wyłącznie czytelne potwierdzenie dokładnego `SERVICE_NETWORK_NOT_DISPATCHED` /
+`SERVICE_NETWORK_ABSENCE_CONFIRMED` dopuszcza osobne nowe kliknięcie
+**„Przygotuj środowisko”** z aktualnym powiązanym stanem. Nie rób blind retry.
 
 ## 2c. Odczytaj gotowość, nie twórz jej odczytem
 
