@@ -56,7 +56,7 @@ const text = b => b.toString('utf8').trim();
 const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
 // Finite source contract. These are source inputs, never prepared images, caches or receipts.
 const runtimeScripts = [
-  'runtime-prepare-cli.mjs', 'runtime-prepare.mjs', 'runtime-language-prepare.mjs',
+  'runtime-prepare-cli.mjs', 'runtime-prepare-control.mjs', 'runtime-prepare.mjs', 'runtime-language-prepare.mjs',
   'runtime-operator.mjs', 'runtime-stage-inputs.mjs', 'runtime-files.mjs',
   'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
@@ -88,7 +88,7 @@ const runtimeAssets = [
   'examples/spring-counter/src/test/java/demo/CounterApplicationTest.java',
 ];
 const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
-const sourceRequired = [...new Set([...top, ...runtimeRequired, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'])];
+const sourceRequired = [...new Set([...top, ...runtimeRequired, 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'])];
 const runtimeScriptSet = new Set(runtimeScripts);
 // Finite source formats within the three product source roots, not arbitrary binary/runtime data.
 const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||

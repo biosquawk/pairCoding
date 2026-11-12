@@ -33,8 +33,8 @@ export type JavaRelease = 11 | 17 | 21 | 27;
 export interface RuntimeProfile {
   id: Id; label: string; adapterFamily: AdapterFamily; imageLockKey: Id;
   expectedTools: ToolVersion[];
-  /** Null for non-Java; actual pom effective release MUST agree, never silently rewritten. */
-  /** Legacy name: selected container JDK identity, not Maven targetRelease. */
+  /** Null for non-Java. Legacy name: selected container JDK identity, not Maven targetRelease.
+   * Maven target comes from the validated POM and is never silently rewritten. */
   compilerRelease: JavaRelease | null;
   analysis: { languageLevel: string; preview: boolean };
   language: { provider: 'builtin' | 'jdt' | 'pylsp' | 'off'; imageLockKey: Id | null; serverJvm: string | null };

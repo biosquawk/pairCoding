@@ -23,15 +23,16 @@ export function npmFiles(compressed,expected) {
  }
  if(offset>tar.length || files.size!==expected.length)throw new Error('Incomplete npm inventory');return files;
 }
-async function download(a,fetcher) {
+async function download(a,fetcher,signal) {
  const u=new URL(a.url);if(u.protocol!=='https:' || !['registry.npmjs.org','files.pythonhosted.org','download.eclipse.org'].includes(u.hostname) || u.username || u.password || u.hash || u.search)throw new Error('Unapproved public artifact URL');
  if(!Number.isSafeInteger(a.bytes)||a.bytes<=0||a.bytes>128*1024*1024)throw new Error('Download budget');
- const response=await fetcher(a.url,{redirect:'error',signal:AbortSignal.timeout(45000)});
+ const response=await fetcher(a.url,{redirect:'error',signal:signal?AbortSignal.any([signal,AbortSignal.timeout(45000)]):AbortSignal.timeout(45000)});
  if(!response.ok || response.url && new URL(response.url).hostname!==u.hostname)throw new Error('Download status/redirect');
  let length=0;const chunks=[];for await(const chunk of response.body){length+=chunk.length;if(length>a.bytes)throw new Error('Download exceeds declared bytes');chunks.push(Buffer.from(chunk));}
  const bytes=Buffer.concat(chunks);if(length!==a.bytes || sha(bytes)!==a.sha256)throw new Error('Artifact bytes/hash differ');return bytes;
 }
-export async function stageInputs(output,{lock=JSON.parse(readPrivate(path.join(repo,'runtimes/production-inputs.lock.json'),4*1024*1024).bytes),fetcher=fetch}={}) {
+export async function stageInputs(output,{lock=JSON.parse(readPrivate(path.join(repo,'runtimes/production-inputs.lock.json'),4*1024*1024).bytes),fetcher=fetch,signal,onProgress=()=>{}}={}) {
+ signal?.throwIfAborted();
  const root=path.resolve(output);canonicalDirectory(path.dirname(root));fs.mkdirSync(root,{mode:0o700});canonicalDirectory(root);
  const make=d=>{canonicalDirectory(path.dirname(d));fs.mkdirSync(d,{mode:0o700});canonicalDirectory(d);};
  const put=(p,bytes)=>{canonicalDirectory(path.dirname(p));const fd=fs.openSync(p,'wx',0o600);try{fs.writeFileSync(fd,bytes);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}if(!readPrivate(p,128*1024*1024).bytes.equals(bytes))throw new Error('Staged readback differs');};
@@ -42,7 +43,7 @@ export async function stageInputs(output,{lock=JSON.parse(readPrivate(path.join(
   const seen=new Map();let total=0;
   for(const a of lock.artifacts) {
    if(seen.has(a.url)){if(seen.get(a.url)!==a.sha256)throw new Error('Conflicting duplicate URL');continue;}seen.set(a.url,a.sha256);
-   if(total+a.bytes>192*1024*1024)throw new Error('Total artifact budget');const bytes=await download(a,fetcher);total+=bytes.length;
+   if(total+a.bytes>192*1024*1024)throw new Error('Total artifact budget');onProgress({phase:"download",text:a.name});signal?.throwIfAborted();const bytes=await download(a,fetcher,signal);signal?.throwIfAborted();total+=bytes.length;
    if(a.kind==='npm') {
     if(!/^[a-z0-9-]+$/.test(a.name) || 'sha512-'+createHash('sha512').update(bytes).digest('base64')!==a.integrity)throw new Error('Npm name/integrity');
     const dest=path.join(root,'stage/tools/node_modules',a.name);make(dest);

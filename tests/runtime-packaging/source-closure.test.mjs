@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import { requiredFiles as oldRequired, allowedSource, verifyAndCopy, verifyCopiedInputs } from '../../scripts/verify-source-revision.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const scripts = ['prepare-cli','prepare','language-prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates','image-retention','test','test-policy'].map(n => `scripts/runtime-${n}.mjs`);
+const scripts = ['prepare-cli','prepare-control','prepare','language-prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates','image-retention','test','test-policy'].map(n => `scripts/runtime-${n}.mjs`);
 const assets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json', 'runtimes/pin-status.json',
   'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
@@ -156,3 +156,15 @@ for(const [label,mutate,expected] of [
   assert.throws(()=>verifyAndCopy({source:f.root,revision:f.revision,destination:dest,trustedManifest:out,manifestSha256:sha(fs.readFileSync(out))}),expected);
   assert.equal(fs.existsSync(dest),false);
 });
+
+// Required dependencies added by this delta: actual transport source and neutral identity source.
+for (const required of ['scripts/runtime-prepare-control.mjs','src/server/runtimeIdentity.ts']) {
+  test('closure rejects omitted mandatory prepare/identity dependency: '+required,t=>{
+    assert.ok(oldRequired.includes(required),'verifier must explicitly require '+required);
+    const f=fixture(t);fs.unlinkSync(path.join(f.root,required));f.revision=f.commit();
+    const destination=path.join(f.base,'never-missing');
+    pack(f,['--dry-run'],1);
+    assert.throws(()=>verifyAndCopy({source:f.root,revision:f.revision,destination}),/MISSING_REQUIRED_FILE/);
+    assert.equal(fs.existsSync(destination),false);
+  });
+}

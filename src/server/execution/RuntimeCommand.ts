@@ -19,6 +19,7 @@ export const RUNTIME_DISPATCHER='/opt/paircoach/runtime-task.mjs';
 export interface RuntimeTaskSpec {
   schemaVersion:1;
   family:AdapterFamily;
+  /** Selected JDK identity; targetRelease is independently read from the Maven POM. */
   release:JavaRelease|null;
   preview:boolean;
   runId:string;
