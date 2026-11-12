@@ -1,5 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import type { RunV2 } from '../../shared/runtime-v2';
+import type { ExecutionPlan } from '../execution/ports';
+import type { RetainedRunPolicy } from './RuntimeExecution';
 import type { SettingsTransactionIdentity } from '../settings-v2';
 import { AppError } from '../errors';
 import { JournalLease } from './JournalLease';
@@ -14,7 +17,22 @@ export type MutationOutcome<T> = { state: 'UNKNOWN'; result: null } |
   { state: 'COMMITTED'; result: T } | { state: 'DEFINITIVELY_ABORTED'; result: null };
 export type DefinitiveOutcome<T> = Exclude<MutationOutcome<T>, { state: 'UNKNOWN' }>;
 export interface SettingsResultStage<T> { identity: SettingsTransactionIdentity; result: T }
-type RecordBody = { version: 1; identity: MutationIdentity; fingerprint: string; outcome: MutationOutcome<unknown>; settingsStage?: SettingsResultStage<unknown> };
+export interface RunAdmissionStage { result: RunV2; plan: ExecutionPlan; policy: RetainedRunPolicy }
+const RUN_PROTOCOL = 'ORIGINAL_RUN_ADMISSION_V1';
+type RecordBody = { version: 1; identity: MutationIdentity; fingerprint: string; outcome: MutationOutcome<unknown>;
+  settingsStage?: SettingsResultStage<unknown>; runProtocol?: typeof RUN_PROTOCOL; runStage?: RunAdmissionStage };
+const validRunStage = (body: RecordBody): boolean => {
+  if (body.runProtocol !== undefined && (body.identity.kind !== 'RUN' || body.runProtocol !== RUN_PROTOCOL)) return false;
+  if (body.runStage === undefined) return true;
+  const s = body.runStage, payload = body.identity.payload as Record<string, unknown> | null;
+  return body.runProtocol === RUN_PROTOCOL && !!payload && !!s.result && !!s.plan && !!s.policy &&
+    s.result.status === 'QUEUED' && s.result.runId === s.plan.ownership?.runId &&
+    s.plan.input?.projectId === body.identity.projectId && s.plan.input.sessionId === body.identity.sessionId &&
+    s.result.configurationGeneration === payload.configurationGeneration && s.result.mode === payload.mode &&
+    s.result.workspaceVersionAtStart === payload.expectedWorkspaceVersion &&
+    typeof s.policy.managedCacheRoot === 'string' && path.isAbsolute(s.policy.managedCacheRoot) &&
+    (s.policy.serviceNetwork === null || typeof s.policy.serviceNetwork === 'string');
+};
 const validStage = (body: RecordBody): boolean => {
   const s = body.settingsStage;
   if (!s) return true;
@@ -87,7 +105,7 @@ export class DurableMutationJournal {
       const body = stored.body as RecordBody;
       if (!body || body.version !== 1 || stored.sha256 !== sha256(canonical(body)) ||
           body.fingerprint !== sha256(canonical(body.identity)) || this.key(body.identity) + '.json' !== name ||
-          !validStage(body) || !body.outcome || !['UNKNOWN','COMMITTED','DEFINITIVELY_ABORTED'].includes(body.outcome.state) ||
+          !validStage(body) || !validRunStage(body) || !body.outcome || !['UNKNOWN','COMMITTED','DEFINITIVELY_ABORTED'].includes(body.outcome.state) ||
           (body.outcome.state !== 'COMMITTED' && body.outcome.result !== null)) throw Error('Invalid mutation journal record');
       this.records.set(name.slice(0, -5), body); this.bytes += bytes.length;
     }
@@ -139,15 +157,48 @@ export class DurableMutationJournal {
     const prior = this.existing(this.key(original), original);
     return prior?.settingsStage ? snapshot(prior.settingsStage) as SettingsResultStage<T> : null;
   }
+  /** INTERNAL original RUN acceptance. Durable before execution.start, not process-success proof.
+   * Only the operation-specific protocol may stage this record; the original plan/policy survives
+   * final settlement so startup can join the REAL executor journal without reading later config. */
+  stageRun(original: MutationIdentity, stage: RunAdmissionStage): void {
+    this.assertOwner();
+    const identity = snapshot(original), key = this.key(identity), prior = this.existing(key, identity);
+    const body: RecordBody = { ...prior!, runStage: snapshot(stage) };
+    if (!prior || prior.outcome.state !== 'UNKNOWN' || prior.runStage || !this.activeEffects || !validRunStage(body))
+      fail('INVALID_RUN_STAGE', 'Original RUN acceptance must be staged once before execution.start.');
+    this.settle(key, body);
+  }
+  readRunReservation(original: MutationIdentity): { protocol: boolean; stage: RunAdmissionStage | null } {
+    this.assertOwner();
+    const prior = this.existing(this.key(original), original);
+    return { protocol: prior?.runProtocol === RUN_PROTOCOL, stage: prior?.runStage ? snapshot(prior.runStage) : null };
+  }
+  /** Exact inventory for startup join; never a synthesized plan/current configuration lookup. */
+  runAdmissions(): { identity: MutationIdentity; stage: RunAdmissionStage }[] {
+    this.assertOwner();
+    return [...this.records.entries()].flatMap(([key, cached]) => {
+      const record = this.existing(key, cached.identity)!;
+      return record.runStage ? [{ identity: snapshot(record.identity), stage: snapshot(record.runStage) }] : [];
+    });
+  }
+  /** The exclusive reservation itself records this protocol BEFORE the callback can execute.
+   * Missing stage proves no execution.start ONLY for this protocol after active-effect exclusion. */
+  executeRun<T>(original: MutationIdentity, effect: () => Promise<DefinitiveOutcome<T>>): Promise<MutationOutcome<T>> {
+    if (original.kind !== 'RUN') throw Error('RUN protocol requires a RUN identity');
+    return this.executeEffect(original, effect, RUN_PROTOCOL);
+  }
   /** Reservation is durable before the callback; callback MUST NOT return abort after an uncertain effect. */
-  async execute<T>(original: MutationIdentity, effect: () => Promise<DefinitiveOutcome<T>>): Promise<MutationOutcome<T>> {
+  execute<T>(original: MutationIdentity, effect: () => Promise<DefinitiveOutcome<T>>): Promise<MutationOutcome<T>> {
+    return this.executeEffect(original, effect);
+  }
+  private async executeEffect<T>(original: MutationIdentity, effect: () => Promise<DefinitiveOutcome<T>>, protocol?: typeof RUN_PROTOCOL): Promise<MutationOutcome<T>> {
     const identity = snapshot(original), key = this.key(identity);
     const admission = await this.serial.run(() => {
       this.assertOwner();
       const prior = this.existing(key, identity);
       if (prior) return { admitted: false, outcome: snapshot(prior.outcome) as MutationOutcome<T> };
       if ([...this.records.values()].some(r => r.outcome.state === 'UNKNOWN')) fail('MUTATION_PENDING', 'An unresolved mutation fences new RUN/SAVE admission.');
-      this.reserve(key, this.record(identity, { state: 'UNKNOWN', result: null }));
+      this.reserve(key, { ...this.record(identity, { state: 'UNKNOWN', result: null }), ...(protocol ? { runProtocol: protocol } : {}) });
       this.activeEffects++;
       return { admitted: true, outcome: null };
     });
@@ -165,7 +216,7 @@ export class DurableMutationJournal {
     return this.serial.run(() => {
       try {
         this.assertOwner(); this.existing(key, identity);
-        this.settle(key, this.record(identity, outcome));
+        this.settle(key, { ...this.records.get(key)!, outcome: snapshot(outcome) });
         return snapshot(outcome);
       } finally { this.activeEffects--; }
     });
@@ -207,7 +258,7 @@ export class DurableMutationJournal {
             (outcome.state !== 'COMMITTED' && outcome.result !== null)) throw Error('Invalid recovery proof');
       } catch { return { state: 'UNKNOWN', result: null }; }
       this.assertOwner(); this.existing(key, identity);
-      if (outcome.state !== 'UNKNOWN') this.settle(key, this.record(identity, outcome));
+      if (outcome.state !== 'UNKNOWN') this.settle(key, { ...this.records.get(key)!, outcome: snapshot(outcome) });
       return snapshot(outcome);
     });
   }

@@ -8,14 +8,18 @@ import { DurableRunJournal } from '../execution/DurableRunJournal';
 import { copyAcknowledgedInput, readRunSourceInventory } from '../execution/ImmutableInput';
 import { createTaskRuntimeAdapterRegistry } from '../runtime-adapters';
 import type { DockerTransport } from '../execution/DockerTransport';
-import type { ExecutionHandle, ExecutionPort, ExecutionReadiness, PlanContext } from '../execution/ports';
-import type { RuntimeProfile, RunRequestV2, ModeReadiness, SettingsV2 } from '../../shared/runtime-v2';
+import type { ExecutionHandle, ExecutionPlan, ExecutionPort, ExecutionReadiness, PlanContext } from '../execution/ports';
+import type { RuntimeProfile, RunRequestV2, RunV2, ModeReadiness, SettingsV2 } from '../../shared/runtime-v2';
 import type { RuntimeConfiguration, RuntimeReadinessDependencies } from '../runtime-config';
 import { AppError } from '../errors';
 import { canonical } from './storage';
 import type { RuntimeWorkspace } from './RuntimeWorkspace';
 import type { RuntimeExecutionLayout } from './RuntimeExecutionLayout';
 import type { PreparedRuntimeResolver, VerifiedPreparedCache, PreparedRuntimeSelection } from './PreparedRuntimeResolver';
+
+/** Original private execution policy. Kept with the original admission, not later config. */
+export interface RetainedRunPolicy { managedCacheRoot: string; serviceNetwork: string | null }
+export type OriginalRunAdmission = (run: RunV2, plan: ExecutionPlan, policy: RetainedRunPolicy) => void;
 
 export interface RuntimeExecutionOptions {
   core: RuntimeWorkspace;
@@ -102,7 +106,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   const runner = new Runner({ execution: port, getWorkspaceVersion: () => core.workspace.workspaceVersion,
     emit: options.emit, persistTerminal: (handle, outcome) => retained(handle).persistTerminal(handle, outcome) });
   const dependencies: RuntimeReadinessDependencies = { execution: port, probe: prepared };
-  async function start(original: RunRequestV2) {
+  async function start(original: RunRequestV2, admitOriginal?: OriginalRunAdmission) {
     const request = structuredClone(original); check();
     core.session.assertClient(request.clientId, request.sessionId);
     const runtime = configuration.resolved, source = core.readSettings();
@@ -119,8 +123,14 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         throw new AppError(409, 'RUN_INPUT_CHANGED', 'Workspace or settings changed during Run admission.');
     };
     assertCurrent();
+    let retainedPolicy: RetainedRunPolicy | undefined;
     return runner.start({ projectId: core.workspace.projectId, request, profile: runtime.profile,
       runProfile: run, adapter: adapters.get(runtime.profile), assertCurrent,
+      admitOriginal: (result, plan) => {
+        assertCurrent();
+        if (!retainedPolicy) throw Error('No original captured execution policy');
+        admitOriginal?.(result, plan, structuredClone(retainedPolicy));
+      },
       capture: async runId => {
         let selected: VerifiedPreparedCache | undefined;
         let retainedLease: { assertCurrent(): void } | undefined;
@@ -146,6 +156,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         const ownership = { installationId: layout.installationId, runId, profileId: runtime.profile.id,
           engineId: selected.engineId, imageId: selected.image.imageId,
           containerName: `paircoach-${layout.installationId}-${runtime.profile.id}-${runId}` };
+        retainedPolicy = { managedCacheRoot: selected.outputRoot, serviceNetwork: options.serviceNetwork };
         byRun.set(runId, executorFor(selected, runtime.profile));
         return { ownership, input, profile: runtime.profile, lockedImage: selected.image, caches: selected.caches } satisfies PlanContext;
       },

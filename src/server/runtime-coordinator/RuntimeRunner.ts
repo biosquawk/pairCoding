@@ -15,6 +15,9 @@ export interface RuntimeRunAdmission {
   capture(runId: string): Promise<PlanContext>;
   /** Revalidate current project/session/configuration/settings AFTER each awaited pre-start step. */
   assertCurrent(): void;
+  /** Synchronous durable original QUEUED acceptance, after final validated immutable plan,
+   * before ANY execution.start. Throwing must prevent the process invocation. Internal only. */
+  admitOriginal?(run: RunV2, plan: ExecutionPlan): void;
 }
 export interface RuntimeRunnerOptions {
   execution: ExecutionPort;
@@ -93,6 +96,10 @@ export class RuntimeRunner {
         plan.mode===request.mode && plan.timeoutMs===runProfile.timeoutMs,'Adapter substituted approved plan authority.');
       job.plan=freeze(snapshot(plan));
       if (job.requested) throw new AppError(409,'RUN_CANCELLED_BEFORE_START','Run was cancelled before any process start.');
+      admission.assertCurrent();
+      admission.admitOriginal?.(snapshot(job.run), snapshot(job.plan));
+      // No await between original acceptance and attemptedStart. Acceptance is not a claim
+      // that a process started/finished; later/current Run state is a separate projection.
       // Set before calling the port. A rejected/lost start is NOT proof that no container was created.
       job.attemptedStart=true; job.starting=true;
       let handle: ExecutionHandle;
