@@ -12,6 +12,7 @@ import {fixture} from '../runtime-language-binding/fixture';
 import {createPairCoachServer} from '../../src/server/http';
 import {CoachAdapter} from '../../src/server/CoachAdapter';
 import type {CoachContext} from '../../src/server/coach/context';
+import {validateV2WireShape} from '../../src/shared/validation-v2';
 import {until} from './http-language-owner-fixture';
 const barrier=()=>{let release!:()=>void;return {promise:new Promise<void>(r=>{release=r;}),release:()=>release()};};
 
@@ -38,7 +39,7 @@ async function heldInitialCapture(t:TestContext) {
   let ws:WebSocket|undefined;cleanup=async()=>{f.driver.unreachable=false;ws?.terminate();await app.close();};
   const port=await app.listen(),sessionId=app.session.state.sessionId,frames:any[]=[];
   ws=new WebSocket(`ws://127.0.0.1:${port}/ws/session`);ws.on('message',b=>frames.push(JSON.parse(b.toString())));await once(ws,'open');
-  const send=(type:string,payload:unknown)=>{const id=randomUUID();ws!.send(JSON.stringify({protocolVersion:'3.0',messageId:id,clientId,sessionId,type,payload}));return id;};
+  const send=(type:string,payload:unknown)=>{const id=randomUUID(),message={protocolVersion:'3.0',messageId:id,clientId,sessionId,type,payload};assert.ok(validateV2WireShape('ClientMessage',message),JSON.stringify(message));ws!.send(JSON.stringify(message));return id;};
   const wait=async(check:(m:any)=>boolean)=>{await until(()=>frames.some(check),'Actual coach admission frame '+check);return frames.find(check);};
   send('HELLO',{token,lastServerSeq:0});const snapshot=await wait(m=>m.type==='SESSION_SNAPSHOT');await entered.promise;
   assert.ok(snapshot.payload.languageBootstrap);assert.throws(()=>app.workspace.listFiles(),{code:'WORKSPACE_BUSY'},'The actual initial language capture owns the SAME FIFO');
@@ -63,8 +64,8 @@ test('HTTP immediate START waits real initial language source capture; after rel
 
 test('HTTP latest CHAT revokes pending START read at SAME peer/epoch; release cannot call stale provider, only latest explicit request',async t=>{
   const f=await heldInitialCapture(t);await f.start();const epoch=f.app.session.state.controlEpoch;
-  const first=f.send('CHAT_MESSAGE',{text:'first pending request'});await f.wait(m=>m.type==='ACK'&&m.payload.replyTo===first);
-  const latest=f.send('CHAT_MESSAGE',{text:'latest pending request'});await f.wait(m=>m.type==='ACK'&&m.payload.replyTo===latest);
+  const first=f.send('CHAT_MESSAGE',{text:'first pending request',path:null,documentVersion:null,selection:null});assert.equal((await f.wait(m=>m.type==='ACK'&&m.payload.replyTo===first)).payload.status,'OK');
+  const latest=f.send('CHAT_MESSAGE',{text:'latest pending request',path:null,documentVersion:null,selection:null});assert.equal((await f.wait(m=>m.type==='ACK'&&m.payload.replyTo===latest)).payload.status,'OK');
   assert.equal(f.admissions[0].aborted,true);assert.equal(f.admissions.length,1,'Waiting read keeps singleflight until settlement');
   assert.equal(f.reads,0);assert.equal(f.contexts.length,0);assert.equal(f.app.session.state.controlEpoch,epoch);
   f.held.release();await until(()=>f.contexts.length===1,'Only latest queued request reaches provider');
