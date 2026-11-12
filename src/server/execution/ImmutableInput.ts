@@ -139,6 +139,10 @@ export async function copyAcknowledgedInput(options: CopyInputOptions): Promise<
       const fd=await fs.open(dest,'wx',0o444);
       try{
         await fd.writeFile(bytes);
+        // open's mode is filtered by umask (077 would leave 0400). Restore the
+        // intended nonowner-readable, never-writable mode on this exclusive new
+        // copy's descriptor only; never chmod the source or a retained run path.
+        if (process.platform !== 'win32') await fd.chmod(0o444);
         await fd.sync();
       }finally{
         await fd.close();
