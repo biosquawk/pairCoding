@@ -189,7 +189,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
   const save=()=>{check(!publicationFailed,'publication previously failed; no retry');try{publish(receipt);}catch(e){publicationFailed=true;stopped=true;throw e;}}; save();
   const endpoint=process.platform==='win32'?'npipe:////./pipe/docker_engine':'unix:///var/run/docker.sock';
   const engineArgs=['info','--format','{"ID":{{json .ID}},"ServerVersion":{{json .ServerVersion}},"OSType":{{json .OSType}},"Architecture":{{json .Architecture}}}'];
-  const knownPins=new Map(plan.initialRequiredPins.map(pin=>[pin.observedImage.Id,pin]));
+  const knownPins=new Map(plan.initialRequiredPins.map(pin=>[pin.observedImage.Id,pin])), completedBuilds=new Set(), measuredJobs=new Map();
   let engineChecked=false,lastEngine=null;
   const wrappedSpawn=(exe,argv,options)=>{
     check(!stopped,'transport stopped; no later dispatch'); assertCommandBudget(receipt.commands.length,deadline);
@@ -229,13 +229,18 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
       check(raw && Buffer.byteLength(raw.stdout??'')+Buffer.byteLength(raw.stderr??'')<=plan.limits.perCommandOutputBytes,'per-command output ceiling');
       Object.assign(entry,{status:raw.error||raw.signal||raw.status===null?'UNKNOWN_RETAIN_AND_RECONCILE':'RETURNED',exit:raw.status,signal:raw.signal??null,error:raw.error?.message??null,stdout:raw.stdout??'',stderr:raw.stderr??'',finishedAtMs:Date.now()}); save();
       check(!raw.error && !raw.signal && Date.now()<deadline,'UNKNOWN/elapsed command; retain/reconcile');
+      if(command==='build' && raw.status===0) completedBuilds.add(activeJob.id);
       if(command==='info') {lastEngine=JSON.parse(raw.stdout);check(raw.status===0 && equal(lastEngine,plan.engine),'actual engine changed');engineChecked=true;}
       else if(command==='image' && raw.status===0) {
         const values=JSON.parse(raw.stdout); check(Array.isArray(values)&&values.length===1,'exact one image readback');
         if(knownPins.has(args[2])) m.assertImagePin(knownPins.get(args[2]),values[0]);
-        if(activeJob && args[2]===activeJob.request.imageTag && builds===receipt.jobs.length) {
+        if(activeJob && args[2]===activeJob.request.imageTag && completedBuilds.has(activeJob.id)) {
           const pin=m.imagePin(plan.engine,values[0],'measured new Pure '+activeJob.id);
-          check(!plan.initialRequiredPins.some(p=>p.observedImage.Id===pin.observedImage.Id),'new Pure ID must not substitute an old/Spring pin');
+          // Content-addressed reuse is legitimate ONLY after this job's successful actual build.
+          // Preserve immutable equality for every existing ID; never infer authority from an alias.
+          if(knownPins.has(pin.observedImage.Id)) m.assertImagePin(knownPins.get(pin.observedImage.Id),values[0]);
+          if(measuredJobs.has(activeJob.id)) m.assertImagePin(measuredJobs.get(activeJob.id),values[0]);
+          else measuredJobs.set(activeJob.id,pin);
           if(!knownPins.has(pin.observedImage.Id)) {check(knownPins.size<11,'11 immutable ID ceiling');knownPins.set(pin.observedImage.Id,pin);}
         }
       } else if(command==='inspect' && raw.status===0) {
@@ -264,6 +269,7 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
     // Check ALL pins and known original mutable refs BEFORE ANY tag, not interleaved retain.
     for(const pin of plan.initialRequiredPins) m.assertImagePin(pin,oneImage(pin.observedImage.Id));
     const p=json(plan.options.proposalFile);
+    receipt.requiredImageBindings=[...p.preserveRun.map(j=>({role:'RUN',job:j.job,pin:j.pin,receipt:j.leafReceipt})),...p.preserveLanguage.map(j=>({role:'LANGUAGE',job:j.key,pin:j.pin,receipt:j.receipt}))];save();
     for (const prior of p.preserveRun) m.assertImagePin(prior.pin,oneImage(json(prior.leafReceipt.file).request.imageTag));
     for (const prior of p.preserveLanguage) m.assertImagePin(prior.pin,oneImage(json(prior.receipt.file).language.find(l=>l.key===prior.key).imageTag));
     for(const job of plan.jobs) {
@@ -278,13 +284,19 @@ export async function executeRecoveryPlan(bytes,expectedHash,guardBytes,guardHas
       assertProtected(plan); m.assertImagePin(job.currentTagPin,oneImage(job.request.imageTag));
       const prepared=m.prepare(job.request,true,deadline,plan.engine,{endpoint,configDirectory:client.configDirectory,clientState:client,spawnSync:wrappedSpawn},retention.pins());
       check(prepared.status==='PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION' && equal(prepared.request,job.request) && equal(prepared.engine,plan.engine) && equal(json(path.join(job.request.outputRoot,'receipt.json')),prepared) && prepared.toolchainHash===job.toolchainIdentity.toolchainHash, 'actual durable prepare identity');
-      const expectedIds=[...retention.pins().map(p=>p.observedImage.Id),prepared.imageId].sort();
+      const measured=measuredJobs.get(job.id);
+      check(completedBuilds.has(job.id) && measured && prepared.imageId===measured.observedImage.Id, 'fresh actual build/prepare job binding required');
+      m.assertImagePin(measured,prepared.imageInspect);
+      const expectedIds=[...new Set([...retention.pins().map(p=>p.observedImage.Id),prepared.imageId])].sort();
       check(equal(prepared.imageRetention.pins.map(e=>e.pin.observedImage.Id).sort(),expectedIds), 'leaf prior-pin set exact; no extra inferred IDs');
-      retention.add(m.imagePin(plan.engine,prepared.imageInspect,path.join(job.request.outputRoot,'receipt.json')));
+      const leafProof=fileProof(path.join(job.request.outputRoot,'receipt.json')), pin=m.imagePin(plan.engine,prepared.imageInspect,leafProof.file);
+      retention.add(pin);
+      receipt.requiredImageBindings.push({role:'RUN',job:job.id,pin,receipt:leafProof});
       invoke(engineArgs);check(invoke(['container','inspect',prepared.container.Id]).status===1,'new exact container absence after nonforce remove');
       receipt.jobs.at(-1).status='PREPARED_OFFLINE_DEFERRED'; receipt.jobs.at(-1).receipt=fileProof(path.join(job.request.outputRoot,'receipt.json'));save();activeJob=null;
     }
-    check(builds===2 && creates===2 && removed.size===2 && retention.pins().length===11 && knownPins.size===11,'exact two preparations and final11 proof');
+    const bindingIds=[...new Set(receipt.requiredImageBindings.map(b=>b.pin.observedImage.Id))].sort(), retainedIds=retention.pins().map(p=>p.observedImage.Id).sort();
+    check(builds===2 && completedBuilds.size===2 && measuredJobs.size===2 && creates===2 && removed.size===2 && receipt.requiredImageBindings.length===11 && new Set(receipt.requiredImageBindings.map(b=>b.role+':'+b.job)).size===11 && knownPins.size<=11 && knownPins.size===retainedIds.length && equal(bindingIds,retainedIds),'exact two preparations, 11 role/job bindings and <=11 immutable IDs proof');
     retention.verifyAll(); assertProtected(plan);
     check(Date.now()<deadline,'overall budget before publication');
     receipt.status='RECOVERY2_PREPARE_ONLY_COMPLETE_NOT_CONSUMER_OR_PRODUCT_ACCEPTANCE';save();return receipt;
