@@ -46,6 +46,16 @@ i `imageLock` liczą się od **tego pliku**, nie od terminala. Format:
 }
 ```
 
+**Pliki repo a wynik prepare.** Repozytoryjny `runtimes/images.lock.json` może
+zawierać pustą listę obrazów; nie jest dowodem przygotowania instalacji.
+`runtimes/pin-status.json` zachowuje historyczny opis LSP i zgód operatora —
+nie traktuj go jako aktualnego statusu Lightweight ani dodatkowej bramki prepare.
+Nie wypełniaj ręcznie pinów: użyj zmierzonego `images.lock.json`, wygenerowanego
+config i `jobs/<profile>` z własnego publicznego prepare. Jednoprofilowy wynik
+nie potwierdza pozostałych środowisk. W tym zakresie stosuj ten przewodnik,
+nie historyczne instrukcje LSP lub nakaz zrównania release z JDK w
+`examples/README.md`; obowiązuje rozdzielenie JDK i POM opisane powyżej.
+
 Sam config nie przygotowuje obrazu. Poniższa publiczna komenda generuje config
 wskazujący rzeczywiście przygotowany **jeden wybrany profil** i projekt.
 Nie trzeba przygotowywać pozostałych sześciu profili, aby użyć Java21.
@@ -242,9 +252,9 @@ To trzy różne działania, nie jeden limit120s:
   działania programu. Zachowaj pozostałe pola; przed restartem własnego serwera
   można ustawić np. taki fragment istniejącego config:
 
-  ```json
-  "execution": { "backend": "docker", "pullPolicy": "never", "readinessTimeoutMs": 45000 }
-  ```
+```json
+{ "execution": { "backend": "docker", "pullPolicy": "never", "readinessTimeoutMs": 45000 } }
+```
 
   Nie edytuj receiptów/cache/pinów i nie ponawiaj prepare dla samej zmiany tego
   budżetu. Podczas pomiaru edytor, zapis/ACK i weto pozostają niezależne; brak
