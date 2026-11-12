@@ -60,6 +60,16 @@ export interface LanguageFeatureRegistryOptions {
   /** SAME instance used by the actual coordinator save path, never a structural proof validator. */
   ackLedger: LanguageAckLedger;
   clock?: RegistryClock;
+  /** Trusted immutable lane policy. Absence preserves legacy BOTH-enabled callers only. */
+  languageFeatures?: Readonly<{ completion: boolean; diagnostics: boolean }>;
+}
+/** Validate and snapshot BEFORE factory binding or any lifecycle effect. Never retain caller flags. */
+export function snapshotLanguageFeaturePolicy(input: LanguageFeatureRegistryOptions['languageFeatures']): Readonly<{ completion: boolean; diagnostics: boolean }> {
+  if (input === undefined) return Object.freeze({ completion: true, diagnostics: true });
+  if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid language feature policy');
+  const { completion, diagnostics } = input;
+  if (typeof completion !== 'boolean' || typeof diagnostics !== 'boolean') throw new Error('Invalid language feature policy');
+  return Object.freeze({ completion, diagnostics });
 }
 type Pending = { snapshot: RegistrySnapshot; requested?: Readonly<ImmutableDiagnosticGeneration> };
 type Slot = { launch: RegistryLaunch; snapshot: RegistrySnapshot; epoch: number; invalid: boolean;
@@ -93,7 +103,9 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
   private retiredDiagnostics = new Set<string>();
   private problem: LanguageView['problem'] = null;
   private readonly clock: RegistryClock;
+  private readonly languageFeatures: Readonly<{ completion: boolean; diagnostics: boolean }>;
   constructor(private readonly options: LanguageFeatureRegistryOptions) {
+    this.languageFeatures = snapshotLanguageFeaturePolicy(options.languageFeatures);
     options.factory.bindAckLedger?.(options.ackLedger);
     this.clock = options.clock ?? { set: (ms, cb) => setTimeout(cb, ms), clear: h => clearTimeout(h as ReturnType<typeof setTimeout>) };
   }
@@ -122,18 +134,24 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     if (!this.current(result)) throw new Error('Snapshot changed during capture');
     return result;
   }
-  private enabled(): boolean { return !!this.scope && ['jdt', 'pylsp'].includes(this.scope.profile.language.provider); }
+  private enabled(phase?: Lane['phase']): boolean {
+    return !!this.scope && ['jdt', 'pylsp'].includes(this.scope.profile.language.provider) &&
+      (phase ? this.languageFeatures[phase] : this.languageFeatures.completion || this.languageFeatures.diagnostics);
+  }
   private view(): LanguageView {
     if (!this.scope) throw new Error('No language scope');
     const state: LanguageState = this.problem ? 'FAILED' : this.disposed || !this.enabled() ? 'OFF'
       : this.completion.state === 'ON' || this.diagnostics.state === 'ON' ? 'ON' : 'INDEXING';
     return copy({ projectId: this.scope.projectId, profileId: this.scope.profile.id, configurationGeneration: this.scope.configurationGeneration,
-      providerGeneration: this.scope.providerGeneration, state, autocomplete: this.disposed || !this.enabled() ? 'OFF' : this.completion.state,
+      providerGeneration: this.scope.providerGeneration, state, autocomplete: this.disposed || !this.enabled('completion') ? 'OFF' : this.completion.state,
       docs: 'N/A', problem: this.problem });
   }
   private emit(event: LanguageEvent): void { const immutable = copy(event); for (const l of [...this.listeners]) { try { l(immutable); } catch { /* Observer owns no lifecycle authority. */ } } }
   private status(): void { if (this.scope) this.emit({ type: 'STATUS', status: this.view() }); }
   private failed(message: string, code = 'LANGUAGE_RUNTIME_FAILED'): void {
+    // Source-operation validation can still reject while OFF; it is not a failed remote service.
+    // Only an actual retained ownership failure may override the explicit BOTH-disabled view.
+    if (!this.languageFeatures.completion && !this.languageFeatures.diagnostics && code !== 'PROCESS_STOP_UNCONFIRMED') { this.status(); return; }
     this.problem = { code, message, recovery: 'Reconcile the retained language process or prepare the selected runtime, then retry.', retryable: true };
     this.status();
   }
@@ -143,7 +161,7 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     for (const r of old) this.emit({ type: 'DIAGNOSTICS', result: { ...structuredClone(r), items: [], truncated: false } });
   }
   private revoke(l: Lane, refreshCompletion = false): void {
-    if (l.timer !== null) this.clock.clear(l.timer); l.timer = null; l.pending = null; l.ready = false; l.state = 'INDEXING';
+    if (l.timer !== null) this.clock.clear(l.timer); l.timer = null; l.pending = null; l.ready = false; l.state = this.enabled(l.phase) ? 'INDEXING' : 'OFF';
     if (l.active) {
       if (refreshCompletion && l.phase === 'completion' && l.active.opened && !l.active.invalid && !l.active.retiring) l.active.launch.session.cancelCompletions();
       else { l.active.invalid = true; l.active.cancellation.abort(); l.active.launch.session.invalidate('Complete source/overlay/dependency/scope vector invalidated'); }
@@ -159,6 +177,8 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
       if (admission !== this.scopeRequest) throw new Error('Language scope admission superseded');
     }
     this.retiredDiagnostics.clear(); this.scope = copy(scope); this.disposed = false; this.problem = null; this.completion = lane('completion'); this.diagnostics = lane('diagnostics');
+    this.completion.state = this.enabled('completion') ? 'INDEXING' : 'OFF';
+    this.diagnostics.state = this.enabled('diagnostics') ? 'INDEXING' : 'OFF';
     if (this.enabled()) { try { this.schedule(this.captured()); } catch (e) { this.failed(String(e)); } }
     this.status(); return this.view();
   }
@@ -167,12 +187,14 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
   }
   private schedule(snapshot: RegistrySnapshot, requested?: Readonly<ImmutableDiagnosticGeneration>): void {
     if (!this.enabled()) return;
-    this.completion.pending = { snapshot }; this.completion.ready = true;
-    this.diagnostics.pending = { snapshot, requested }; this.diagnostics.ready = false;
-    if (this.diagnostics.timer !== null) this.clock.clear(this.diagnostics.timer);
-    this.diagnostics.timer = this.clock.set(LANGUAGE_LIMITS.diagnosticCoalesceMs, () => {
-      this.diagnostics.timer = null; this.diagnostics.ready = true; void this.pump(this.diagnostics);
-    });
+    if (this.enabled('completion')) { this.completion.pending = { snapshot }; this.completion.ready = true; }
+    if (this.enabled('diagnostics')) {
+      this.diagnostics.pending = { snapshot, requested }; this.diagnostics.ready = false;
+      if (this.diagnostics.timer !== null) this.clock.clear(this.diagnostics.timer);
+      this.diagnostics.timer = this.clock.set(LANGUAGE_LIMITS.diagnosticCoalesceMs, () => {
+        this.diagnostics.timer = null; this.diagnostics.ready = true; void this.pump(this.diagnostics);
+      });
+    }
     void this.pump(this.completion); void this.pump(this.diagnostics);
   }
   private mutate(document?: OpenOrChange, closed?: DocumentStamp): Promise<void> {
@@ -225,7 +247,7 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     await Promise.resolve(); this.assertScope(scope);
     if (epoch !== this.epoch || !this.current(snapshot)) throw new Error('Language source refresh superseded');
   }
-  private valid(l: Lane, s: Slot): boolean { return l.active === s && !s.invalid && s.epoch === this.epoch && (this.current(s.snapshot) || l.phase === 'diagnostics' && this.aliasSnapshot === s.snapshot && !!this.alias && this.options.ackLedger.isVerified(this.alias)); }
+  private valid(l: Lane, s: Slot): boolean { return this.enabled(l.phase) && l.active === s && !s.invalid && s.epoch === this.epoch && (this.current(s.snapshot) || l.phase === 'diagnostics' && this.aliasSnapshot === s.snapshot && !!this.alias && this.options.ackLedger.isVerified(this.alias)); }
   private sourceCurrent(e: Evidence): boolean {
     return this.current(e.snapshot) || this.aliasSnapshot === e.snapshot && !!this.alias && this.options.ackLedger.isVerified(this.alias);
   }
@@ -314,6 +336,7 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
         !validateDiagnosticsResult({ ...source, presentationStamp: source.sourceStamp, association: null, items: [], truncated: false }))) throw new Error('Unbound immutable diagnostic generation');
   }
   private pump(l: Lane): Promise<void> {
+    if (!this.enabled(l.phase)) return Promise.resolve();
     if (l.pumping) return l.pumping;
     l.pumping = Promise.resolve().then(() => this.run(l)).catch(e => this.failed(String(e))).finally(() => { l.pumping = null;
       // Only genuinely new pending work, never a retry loop around uncertain Stop.
@@ -321,12 +344,13 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     }); return l.pumping;
   }
   private async captureOperation(l: Lane, next: Pending, expected: Slot | null, action: () => void): Promise<boolean> {
+    if (!this.enabled(l.phase)) return false;
     const scope = this.scope!, epoch = this.epoch;
     let invoked = false, applied = false, accepting = true;
     const capture = () => {
       if (!accepting || invoked) throw new Error('Capture operation must run exactly once within its lease');
       invoked = true;
-      if (this.disposed || scope !== this.scope || epoch !== this.epoch || l.active !== expected || !this.current(next.snapshot)) return;
+      if (!this.enabled(l.phase) || this.disposed || scope !== this.scope || epoch !== this.epoch || l.active !== expected || !this.current(next.snapshot)) return;
       action(); applied = true;
     };
     try {
@@ -337,6 +361,7 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     } finally { accepting = false; }
   }
   private async run(l: Lane): Promise<void> {
+    if (!this.enabled(l.phase)) return;
     if (l.phase === 'completion' && l.active && !l.active.invalid && l.pending && l.ready) {
       const s = l.active, next = l.pending; l.pending = null;
       if (this.current(next.snapshot)) {
@@ -412,12 +437,13 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
     if (!r.confirmed || !r.removed) { s.invalid = true; l.state = 'FAILED'; this.failed(r.problem ?? 'PROCESS_STOP_UNCONFIRMED', 'PROCESS_STOP_UNCONFIRMED'); return false; }
     if (l.phase === 'diagnostics') this.retiredDiagnostics.add(s.launch.session.launchId);
     if (l.active === s) l.active = null;
-    if (l.state === 'FAILED') l.state = 'INDEXING';
+    if (l.state === 'FAILED') l.state = this.enabled(l.phase) ? 'INDEXING' : 'OFF';
     if (this.problem?.code === 'PROCESS_STOP_UNCONFIRMED' && this.completion.state !== 'FAILED' && this.diagnostics.state !== 'FAILED') this.problem = null;
     return true;
   }
   async complete(request: CompleteRequest, signal?: AbortSignal): Promise<CompleteResult> {
-    this.stamp(request.stamp); if (!validateCompleteRequest(request)) throw new Error('Invalid completion request');
+    this.stamp(request.stamp); if (!this.enabled('completion')) throw new Error('Language completion disabled');
+    if (!validateCompleteRequest(request)) throw new Error('Invalid completion request');
     const captured = copy(request), epoch = this.epoch, s = this.completion.active;
     if (!s || !this.valid(this.completion, s)) throw new Error('Completion still indexing');
     if (!s.snapshot.documents.some(d => same(d.stamp, captured.stamp))) throw new Error('Completion not in captured source');
@@ -428,7 +454,9 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
   }
   cancel(request: CancelRequest): void { this.stamp(request.stamp); this.completion.active?.launch.session.cancel(request.requestId); }
   startDiagnostics(scope: LanguageProjectScope, generation: ImmutableDiagnosticGeneration): Promise<void> {
-    this.assertScope(scope); this.invalidate();
+    this.assertScope(scope);
+    if (!this.enabled('diagnostics')) return Promise.reject(new Error('Language diagnostics disabled'));
+    this.invalidate();
     try { this.schedule(this.captured(), copy(generation)); } catch (e) { void this.pump(this.completion); void this.pump(this.diagnostics); return Promise.reject(e); }
     return Promise.resolve();
   }

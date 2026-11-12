@@ -4,12 +4,14 @@ import type { CompleteResult, DocumentStamp, LanguageClientMessage, LanguageFile
 import type { LanguageBootstrapV2 } from '../../shared/language-authority-v2';
 import { validateCompleteResult, validateDiagnosticsResult, validateLanguageClientMessage, validateLanguageFileOperation, validateLanguageView } from '../../shared/validation-v2';
 import { LanguageAckLedger, type LanguageAckAuthority, type LanguageSaveInput, type PendingLanguageSave } from '../language/LanguageAckLedger';
-import { LanguageFeatureRegistry, type RegistryAuthority, type RegistrySnapshot } from '../language/LanguageFeatureRegistry';
+import { LanguageFeatureRegistry, snapshotLanguageFeaturePolicy, type RegistryAuthority, type RegistrySnapshot } from '../language/LanguageFeatureRegistry';
 import { createSelectedCacheLanguageFactory, type SelectedCacheLanguageFactoryOptions, type SelectedLanguageLease } from '../language/SelectedCacheLanguageAuthority';
 import type { LanguageEvent, LanguageProjectScope } from '../language/ports';
 
 export interface RuntimeLanguageBindingOptions {
   readonly scope: Readonly<LanguageProjectScope>;
+  /** Actual owner passes trusted runtime.config flags explicitly; absence is legacy compatibility. */
+  readonly languageFeatures?: Readonly<{ completion: boolean; diagnostics: boolean }>;
   readonly selected: SelectedCacheLanguageFactoryOptions & {
     withSourceLease: NonNullable<SelectedCacheLanguageFactoryOptions['withSourceLease']>;
   };
@@ -51,10 +53,12 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
   refreshSource(): Promise<void>;
   retire(): Promise<{ confirmed: boolean; status: LanguageView }>;
 } {
+  const languageFeatures = snapshotLanguageFeaturePolicy(options.languageFeatures);
   for (const callback of [options.assertCurrent, options.assertPeer, options.emit, options.sourceAuthority?.capture,
     options.sourceAuthority?.isCurrent, options.saveAuthority?.readCurrent, options.saveAuthority?.readCommittedSave,
     options.selected?.withSourceLease]) if (typeof callback !== 'function') throw new Error('Missing actual language authority callback');
   const scope = copy(options.scope), assertOwner = options.assertCurrent.bind(options), assertPeer = options.assertPeer.bind(options), emit = options.emit.bind(options);
+  const remoteEnabled = ['jdt', 'pylsp'].includes(scope.profile.language.provider) && (languageFeatures.completion || languageFeatures.diagnostics);
   const source = { capture: options.sourceAuthority.capture.bind(options.sourceAuthority), isCurrent: options.sourceAuthority.isCurrent.bind(options.sourceAuthority) };
   const save = { readCurrent: options.saveAuthority.readCurrent.bind(options.saveAuthority), readCommittedSave: options.saveAuthority.readCommittedSave.bind(options.saveAuthority) };
   let retired = false, clearing = false, started: Promise<LanguageView> | null = null, retirement: Promise<{ confirmed: boolean; status: LanguageView }> | null = null;
@@ -94,7 +98,7 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
     },
     readCommittedSave(request, receipt) { guard(); const commit = save.readCommittedSave(request, receipt); guard(); return commit ? copy(commit) : null; },
   }, codec);
-  registry = new LanguageFeatureRegistry({ factory: selected.factory, ackLedger: ledger,
+  registry = new LanguageFeatureRegistry({ languageFeatures, factory: selected.factory, ackLedger: ledger,
     authority: { capture: () => snapshot(), isCurrent: (_scope, captured) => current(captured) } });
   const forward = (event: LanguageEvent) => {
     // disposeProject synchronously clears real published diagnostics BEFORE its first await. Only that
@@ -190,6 +194,9 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
     },
     async prepareSaveAcknowledgement(lease) {
       requireStarted(); const request = ++preparation; prepared = null;
+      // Ordinary authorized saves/ACKs do not require remote cache/image/receipt verification when
+      // no remote lane is enabled. Never synthesize a diagnostic source or selected preparation.
+      if (!remoteEnabled) return;
       const captured = snapshot();
       try {
         sync(lease.assertCurrent()); sync(lease.assertRetainedCurrent()); guard();
