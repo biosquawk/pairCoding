@@ -176,5 +176,41 @@ export const supersededCases=Object.freeze([
   {
     "file": "tests/backend-cutover/language-owner-feature-policy.test.ts",
     "title": "OWNER missing receipt remains fail-closed with diagnostics enabled"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "ordered authenticated injection, captured completion, one-shot duplicate/late drops"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "CONTROL_PREPARE invalidates widget synchronously before cancellation and denied prepare never reopens"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "actual bytes, all generations and session/permission changes fence old completion"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "strict bounds reject unknown actions, oversized response, wrong scope, raw command and unsafe edits"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "source/provenance unchanged, empty diagnostic clear delivered, trusted ACK association required"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "reconnect resets transport sequence but never replays stale mutation/request; close/dispose drop"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "all model change causes use ordered open/change only; content or reason mismatch rejected"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "subscriber cannot mutate stored request/result, status scoped to active full authority"
+  },
+  {
+    "file": "tests/client-v2/language.test.ts",
+    "title": "cancelled/completed request IDs cannot be reused in same connection; all source identities remain distinct"
   }
 ]);

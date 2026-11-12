@@ -54,3 +54,12 @@ test('LIGHT selected-only assets: full seven-profile catalog loads Java21 only; 
   fs.writeFileSync(lock,JSON.stringify(only));const broken=structuredClone(catalog);broken.profiles[0].analysis.preview=true;broken.profiles[0].compilerRelease=21;
   fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify(broken));assert.equal(loadRuntimeConfiguration({configPath,environment:{}}).resolved,null,'whole inactive profile semantics stay validated');
 });
+
+test('LIGHT empty lock retains only valid local config; no fabricated image identity or execution readiness',t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'light-empty-lock-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+  fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify(catalog));fs.writeFileSync(path.join(root,'images.json'),'{"schemaVersion":1,"images":[]}');
+  const configPath=path.join(root,'runtime.json');fs.writeFileSync(configPath,JSON.stringify({schemaVersion:1,activeProfile:'java-maven-21',workspaceRoot:'workspace',runtimeCatalog:'catalog.json',imageLock:'images.json',languageFeatures:{completion:true,diagnostics:false},execution:{backend:'docker',pullPolicy:'never'}}));
+  const value=loadRuntimeConfiguration({configPath,environment:{}});assert.equal(value.resolved,null);assert.equal(value.problem?.code,'RUNTIME_CONFIG_INVALID');assert.equal(value.local?.profile.id,'java-maven-21');assert.deepEqual(value.local?.config.languageFeatures,{completion:true,diagnostics:false});
+  assert.equal(value.local?.workspaceRoot,path.join(root,'workspace'));assert.equal('image' in value.local!,false);
+  assert.equal(loadRuntimeConfiguration({configPath,environment:{PAIRCOACH_RUNTIME_PROFILE:'unknown'}}).local,undefined,'unknown profile cannot grant local configuration');
+});

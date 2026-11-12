@@ -260,7 +260,9 @@ rzeczywisty engine/obraz/narzędzia i kompletność cache
 `cache/<family>/<toolchainHash>/<dependencySha256>`. `imageLock` wymaga zmierzonego
 imageId **oraz prawdziwego** OCI manifest/INDEX Descriptor lub RepoDigest; samo imageId
 nie jest dowodem digestu. W Docker Desktop obie wartości mogą być równe, jeśli istnieje
-rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty lock blokuje Run.
+rzeczywisty Descriptor/RepoDigest — nie wymagaj sztucznej nierówności. Pusty lock blokuje Run, ale zwalidowany config/katalog/profil nadal udostępnia lokalne
+features i wybrany workspace: HTTP/WS, completion i zapis nie wymagają obrazów ani cache.
+Backend nie poświadcza uruchomienia lokalnego providera.
 CLI czyta rzeczywiste pełne SettingsV2 i wspólne task.workingDirectory, a backend ponownie
 sprawdza aktualny stan; staging/receipt CLI nie zastępuje WriteGate ani aktualnego źródła.
 

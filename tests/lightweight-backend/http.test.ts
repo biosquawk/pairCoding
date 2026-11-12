@@ -14,7 +14,7 @@ import catalog from '../../runtimes/catalog.json';
 import {createPairCoachServer} from '../../src/server/http';
 import {validateV2WireShape} from '../../src/shared/validation-v2';
 
-async function fixture(t:TestContext,profileId='java-maven-21',features={completion:true,diagnostics:false},badConfig=false){
+async function fixture(t:TestContext,profileId='java-maven-21',features={completion:true,diagnostics:false},badConfig=false,missingImage=false){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'light-http-')),workspace=path.join(root,'workspace');
   fs.mkdirSync(workspace,{mode:0o700});fs.mkdirSync(path.join(workspace,'.paircoach'),{mode:0o700});
   fs.writeFileSync(path.join(workspace,'source.java'),'class Original {}\n');
@@ -22,13 +22,13 @@ async function fixture(t:TestContext,profileId='java-maven-21',features={complet
   fs.writeFileSync(path.join(workspace,'.paircoach/settings.json'),JSON.stringify({schemaVersion:2,taskFilePath:null,taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',aiConsent:false,contextPatterns:[],runProfiles:[runProfile]}));
   const selected=catalog.profiles.find(p=>p.id===profileId)!;
   fs.writeFileSync(path.join(root,'catalog.json'),JSON.stringify({schemaVersion:1,profiles:[selected]}));
-  fs.writeFileSync(path.join(root,'images.json'),JSON.stringify({schemaVersion:1,images:[{key:selected.imageLockKey,image:'paircoach/runtime-'+selected.id+':unit',imageId:'sha256:'+'a'.repeat(64),digest:'sha256:'+'b'.repeat(64),tools:selected.expectedTools}]}));
+  fs.writeFileSync(path.join(root,'images.json'),JSON.stringify({schemaVersion:1,images:missingImage?[]:[{key:selected.imageLockKey,image:'paircoach/runtime-'+selected.id+':unit',imageId:'sha256:'+'a'.repeat(64),digest:'sha256:'+'b'.repeat(64),tools:selected.expectedTools}]}));
   const config=path.join(root,'runtime.json');fs.writeFileSync(config,JSON.stringify({schemaVersion:1,activeProfile:badConfig?'missing-profile':profileId,workspaceRoot:workspace,runtimeCatalog:'catalog.json',imageLock:'images.json',languageFeatures:features,execution:{backend:'docker',pullPolicy:'never'}}));
   let driverCalls=0,workerCalls=0,coachEdits=0;
   const OriginalWorker=workers.Worker;
   workers.Worker=function(){workerCalls++;throw Error('No worker may activate during ordinary edit/save');} as unknown as typeof OriginalWorker;
   syncBuiltinESMExports();
-  const app=createPairCoachServer({rootPath:workspace,port:0,token:'light-local-token',enableExecution:true,enableCoach:true,runtimeEnvironment:{},
+  const app=createPairCoachServer({...(missingImage?{}:{rootPath:workspace}),port:0,token:'light-local-token',enableExecution:true,enableCoach:true,runtimeEnvironment:{},
     runtimeArguments:['--runtime-config',config],dockerExecutable:path.join(root,'deliberately-unavailable-docker'),
     runtimeLanguageDriver:new Proxy({} as any,{get(){driverCalls++;throw Error('Retired remote driver accessed');}}),
     coachFactory:context=>({trigger(reason){if(reason==='EDIT'){coachEdits++;context.emit('CHAT_REPLY',{replyTo:null,text:'ordinary edit observed'});}},controlReady(){},stepRendered(){},abort(){},close(){}})});
@@ -106,4 +106,17 @@ test('LIGHT invalid runtime config still starts actual HTTP/WS and preserves aut
   assert.equal(f.first.payload.languageBootstrap,null);assert.equal(f.first.payload.project.capabilities.execution.runtime.state,'CONFIG_ERROR');
   const id=f.send('CODE_CHANGED',{path:'source.java',baseVersion:1,content:'class SafeDraft {}\n',editKind:'TYPING',controlEpoch:0});
   assert.equal((await f.wait(m=>m.type==='ACK'&&m.payload.replyTo===id)).payload.status,'OK');assert.equal((await f.http('GET','/api/project')).status,200);f.noInfrastructure();
+});
+
+test('LIGHT empty public image lock: actual config-only startup/HTTP/WS supplies local features and ordinary save while Run stays denied, without invented pins',async t=>{
+  const f=await fixture(t,'java-maven-21',{completion:true,diagnostics:false},false,true);
+  assert.equal(f.first.payload.languageBootstrap.provider,'builtin');assert.deepEqual(f.first.payload.languageBootstrap.features,{completion:true,diagnostics:false});
+  assert.equal(f.first.payload.project.capabilities.execution.runtime.profileId,'java-maven-21','local/FE profile stays coherent without a pin');
+  assert.equal(f.app.workspace.rootPath,f.workspace,'config-only startup retains the selected existing workspace');
+  assert.equal(f.first.payload.project.capabilities.execution.runtime.state,'CONFIG_ERROR');
+  assert.equal(f.first.payload.project.capabilities.language.state,'OFF');
+  const id=f.send('CODE_CHANGED',{path:'source.java',baseVersion:1,content:'class NoImageDraft {}\n',editKind:'TYPING',controlEpoch:0});
+  assert.equal((await f.wait(m=>m.type==='ACK'&&m.payload.replyTo===id)).payload.status,'OK');
+  const run=await f.http('POST','/api/run',{requestId:randomUUID(),clientId:f.clientId,sessionId:f.sessionId,mode:'RUN_MAIN',expectedWorkspaceVersion:1,configurationGeneration:f.first.payload.project.capabilities.execution.runtime.configurationGeneration});
+  assert.ok(run.status>=400);assert.ok(run.body.code);assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.root,'images.json'),'utf8')).images,[]);f.noInfrastructure();
 });

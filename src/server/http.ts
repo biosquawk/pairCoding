@@ -178,12 +178,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   }
   function languageProjection(bound:RuntimeStartup):LanguageView {
     // Server conveys configuration only, never browser worker readiness.
-    const local=['builtin','off'].includes(bound.configuration.resolved?.profile.language.provider??'');
+    const configured=bound.configuration.resolved??bound.configuration.local;
+    const local=['builtin','off'].includes(configured?.profile.language.provider??'');
     const problem=local ? null : bound.configuration.problem ?? {
       code:'LOCAL_LANGUAGE_UNAVAILABLE',message:'Local language features are not configured.',
       recovery:'Repair the runtime configuration; manual editing remains available.',retryable:true};
     return {projectId:requireRuntimeWorkspace(bound).workspace.projectId,
-      profileId:bound.configuration.resolved?.profile.id ?? 'unconfigured',configurationGeneration:bound.configuration.configurationGeneration,
+      profileId:configured?.profile.id ?? 'unconfigured',configurationGeneration:bound.configuration.configurationGeneration,
       providerGeneration:bound.configuration.configurationGeneration,state:'OFF',autocomplete:'OFF',docs:'N/A',problem};
   }
   async function saveSettings(original:UpdateSettingsRequestV2):Promise<ProjectV2> {
@@ -402,7 +403,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
       on(boundSession,'veto',()=>boundCoach?.abort());
       return {execution:boundExecution,runtime:boundRuntime,runtimeError,bootstrap:()=>clone(localBootstrap),connectLocal(connectionGeneration:string){
-        const resolved=owner.configuration.resolved;
+        const resolved=owner.configuration.resolved??owner.configuration.local;
         localBootstrap=resolved && ['builtin','off'].includes(resolved.profile.language.provider) ? {
           connectionGeneration,shadowGeneration:randomUUID(),provider:resolved.profile.language.provider as 'builtin'|'off',
           features:resolved.profile.language.provider==='builtin' ? clone(resolved.config.languageFeatures) : {completion:false,diagnostics:false}} : null;
