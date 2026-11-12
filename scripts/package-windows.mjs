@@ -53,13 +53,45 @@ function git(cwd, args) {
   return r.stdout;
 }
 const text = b => b.toString('utf8').trim();
-const top = new Set(['README.md', 'paircoach.config.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
+const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
+// Finite source contract. These are source inputs, never prepared images, caches or receipts.
+const runtimeScripts = [
+  'runtime-prepare-cli.mjs', 'runtime-prepare.mjs', 'runtime-language-prepare.mjs',
+  'runtime-operator.mjs', 'runtime-stage-inputs.mjs', 'runtime-files.mjs',
+  'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
+  'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
+  'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
+].map(name => `scripts/${name}`);
+const runtimeAssets = [
+  'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json',
+  'runtimes/pin-status.json', 'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
+  'docker/runtime.Dockerfile', 'docker/language-java.Dockerfile', 'docker/language-python.Dockerfile',
+  'examples/README.md',
+  ...['javascript-counter', 'typescript-counter', 'python-calculator', 'java-pattern', 'spring-counter']
+    .map(name => `examples/${name}/task.v2.json`),
+  'examples/javascript-counter/package.json', 'examples/javascript-counter/main.js', 'examples/javascript-counter/counter.test.js',
+  'examples/typescript-counter/package.json', 'examples/typescript-counter/tsconfig.json',
+  'examples/typescript-counter/main.ts', 'examples/typescript-counter/counter.test.ts',
+  'examples/python-calculator/requirements.txt', 'examples/python-calculator/calculator.py', 'examples/python-calculator/test_calculator.py',
+  'examples/java-pattern/pom.xml', 'examples/java-pattern/src/main/java/demo/StrategyDemo.java',
+  'examples/java-pattern/src/test/java/demo/StrategyDemoTest.java',
+  'examples/spring-counter/pom.xml', 'examples/spring-counter/src/main/java/demo/CounterApplication.java',
+  'examples/spring-counter/src/test/java/demo/CounterApplicationTest.java',
+];
+const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
+const sourceRequired = [...new Set([...top, ...runtimeRequired, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'])];
+const runtimeScriptSet = new Set(runtimeScripts);
+// Finite source formats within the three product source roots, not arbitrary binary/runtime data.
+const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||
+  /^docker\/(?:[A-Za-z0-9._/-]+\.Dockerfile|Dockerfile(?:\.[A-Za-z0-9._-]+)?|[A-Za-z0-9._/-]+\.(?:mjs|js|py|sh|json|txt|lock|md))$/.test(name) ||
+  /^examples\/[A-Za-z0-9._/-]+\.(?:js|cjs|mjs|ts|json|py|java|xml|txt|md|lock|properties|prefs)$/.test(name);
 // Allow tracked test sources/support, never raw QA output or local runtime data.
 function allowed(name) {
   const parts = name.toLowerCase().split('/');
-  if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
+  if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
+  if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
+  return top.has(name) || runtimeScriptSet.has(name) || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 // Deliberately finite contract, not a shell parser. Unknown/changed scripts require
@@ -69,6 +101,7 @@ function commandClosure(pkg, paths) {
     dev: ['vite --port 3000 --host 127.0.0.1', ['index.html', 'vite.config.ts'], ['vite']],
     build: ['vite build', ['index.html', 'vite.config.ts'], ['vite']],
     preview: ['vite preview', ['vite.config.ts'], ['vite'], 'Run build first; frontend preview only, not API'],
+    'runtime:prepare': ['node scripts/runtime-prepare-cli.mjs', runtimeRequired, [], 'Explicit project/profile and NEW private output; default plan-only is NOT prepared. Docker and approved pinned assets required for --execute'],
     clean: ['node scripts/clean.mjs', ['scripts/clean.mjs'], []],
     lint: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
     server: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
@@ -78,7 +111,7 @@ function commandClosure(pkg, paths) {
     test: ['tsx --test tests/**/*.test.ts', ['playwright.config.ts'], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
   };
   if (!pkg.scripts || typeof pkg.scripts !== 'object' || Array.isArray(pkg.scripts)) throw new Error('Brak poprawnych npm scripts.');
-  for (const name of ['clean', 'build', 'start', 'typecheck']) {
+  for (const name of ['clean', 'build', 'start', 'typecheck', 'runtime:prepare']) {
     if (!Object.hasOwn(pkg.scripts, name)) throw new Error(`Brak wymaganego npm script: ${name}`);
   }
   if (Object.hasOwn(pkg.scripts, 'test') && ![...paths].some(p => /^tests\/.+\.test\.ts$/.test(p))) throw new Error('npm test: brak źródeł *.test.ts w ZIP.');
@@ -134,7 +167,7 @@ function main() {
     portablePaths.add(folded);
   }
   const paths = new Set(selected.map(e => e.path));
-  for (const name of [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts']) {
+  for (const name of sourceRequired) {
     if (!paths.has(name)) throw new Error(`Brak wymaganego pliku: ${name}`);
   }
   const pkg = JSON.parse(git(root, ['show', `${commit}:package.json`]).toString('utf8'));
@@ -146,14 +179,11 @@ function main() {
     return { path: e.path, bytes: bytes.length, sha256: sha256(bytes) };
   });
   const plan = { status: 'MVP2_SOURCE_RUNTIME_ACCEPTANCE_SEPARATE', packageId, sourceCommit: commit,
-    releaseScope: 'MVP2 source candidate: snapshot/recovery/run/report; packaging does not establish Windows, GUI, recovery or final acceptance',
+    releaseScope: 'MVP2/polyglot source candidate: snapshot/recovery/run/report and runtime inputs; no image/cache readiness implied; packaging does not establish Windows, GUI, recovery or final acceptance',
     sourceVerification: {
       policy: 'paircoach-source-v1', archiveBytes: 'EXACT_MANIFEST_BYTES',
       trust: 'External manifest SHA256 from K/operator trusted channel; colocated SHA256SUMS is not trust',
-      requiredFiles: ['README.md', 'paircoach.config.json', 'docs/WINDOWS.md', 'docs/windows-start.md',
-        'docs/windows-package.md', 'docs/windows-coach-report-solarized.md',
-        'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs',
-        'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'],
+      requiredFiles: sourceRequired,
       recoveryTests: ['tests/snapshots/snapshot-crash.test.ts'],
       commands: [
         'powershell.exe -NoProfile -File scripts/windows-verify.ps1 -Source <source> -Revision <40SHA> [-TrustedManifest <external-manifest> -ManifestSha256 <trusted64SHA>]',

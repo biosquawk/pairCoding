@@ -9,14 +9,45 @@ import { TextDecoder } from 'node:util';
 const digest = b => createHash('sha256').update(b).digest('hex');
 const fullSHA = /^[a-f0-9]{40}$/;
 const hashSHA = /^[a-f0-9]{64}$/;
-const top = new Set(['README.md', 'paircoach.config.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
-const scripts = new Set(['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs']);
-export const requiredFiles = [...top, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', ...scripts, 'scripts/package-windows.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'];
-// Mirrors the packager's finite selection, tested against actual ZIP output.
+const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
+// Finite source contract. These are source inputs, never prepared images, caches or receipts.
+const runtimeScripts = [
+  'runtime-prepare-cli.mjs', 'runtime-prepare.mjs', 'runtime-language-prepare.mjs',
+  'runtime-operator.mjs', 'runtime-stage-inputs.mjs', 'runtime-files.mjs',
+  'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
+  'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
+  'runtime-generate-templates.mjs', 'runtime-image-retention.mjs',
+].map(name => `scripts/${name}`);
+const runtimeAssets = [
+  'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json',
+  'runtimes/pin-status.json', 'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
+  'docker/runtime.Dockerfile', 'docker/language-java.Dockerfile', 'docker/language-python.Dockerfile',
+  'examples/README.md',
+  ...['javascript-counter', 'typescript-counter', 'python-calculator', 'java-pattern', 'spring-counter']
+    .map(name => `examples/${name}/task.v2.json`),
+  'examples/javascript-counter/package.json', 'examples/javascript-counter/main.js', 'examples/javascript-counter/counter.test.js',
+  'examples/typescript-counter/package.json', 'examples/typescript-counter/tsconfig.json',
+  'examples/typescript-counter/main.ts', 'examples/typescript-counter/counter.test.ts',
+  'examples/python-calculator/requirements.txt', 'examples/python-calculator/calculator.py', 'examples/python-calculator/test_calculator.py',
+  'examples/java-pattern/pom.xml', 'examples/java-pattern/src/main/java/demo/StrategyDemo.java',
+  'examples/java-pattern/src/test/java/demo/StrategyDemoTest.java',
+  'examples/spring-counter/pom.xml', 'examples/spring-counter/src/main/java/demo/CounterApplication.java',
+  'examples/spring-counter/src/test/java/demo/CounterApplicationTest.java',
+];
+const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
+export const requiredFiles = [...new Set([...top, ...runtimeRequired, 'src/server/index.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts'])];
+const runtimeScriptSet = new Set(runtimeScripts);
+// Finite source formats within the three product source roots, not arbitrary binary/runtime data.
+const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||
+  /^docker\/(?:[A-Za-z0-9._/-]+\.Dockerfile|Dockerfile(?:\.[A-Za-z0-9._-]+)?|[A-Za-z0-9._/-]+\.(?:mjs|js|py|sh|json|txt|lock|md))$/.test(name) ||
+  /^examples\/[A-Za-z0-9._/-]+\.(?:js|cjs|mjs|ts|json|py|java|xml|txt|md|lock|properties|prefs)$/.test(name);
+// Allow tracked test sources/support, never raw QA output or local runtime data.
 export function allowedSource(name) {
   const parts = name.toLowerCase().split('/');
-  if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) || p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || scripts.has(name) ||
+  if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
+  if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
+      p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
+  return top.has(name) || runtimeScriptSet.has(name) || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 function fail(code, identity = {}) { const error = new Error(code); error.identity = identity; throw error; }
@@ -73,9 +104,9 @@ function inventory(root) {
       if (allowedSource(name)) {
         if (entry.isDirectory()) { walk(name); continue; }
         safeName(name); readFile(root, name); found.push(name);
-      } else if (entry.isDirectory() && (['src', 'tests', 'docs', 'scripts'].includes(name) || name.startsWith('tests/'))) {
+      } else if (entry.isDirectory() && (['src', 'tests', 'docs', 'scripts', 'runtimes', 'docker', 'examples'].includes(name) || ['tests/', 'runtimes/', 'docker/', 'examples/'].some(prefix => name.startsWith(prefix)))) {
         // Do not descend denylisted test directories (or symlinks).
-        if (['docs', 'scripts'].includes(name) || allowedSource(name + '/probe.ts')) walk(name);
+        if (['docs', 'scripts'].includes(name) || ['probe.ts', 'probe.json', 'probe.Dockerfile'].some(file => allowedSource(name + '/' + file))) walk(name);
       }
     }
   }
