@@ -17,7 +17,7 @@ export interface BridgeAuthority extends Omit<AcceptanceState, 'stamp' | 'conten
   stamp: Omit<DocumentStamp, 'path' | 'modelLifetime' | 'localModelVersion' | 'contentSha256'>;
 }
 export type BridgeEvent = { type: 'CONTROL_PREPARE' | 'VETO' | 'DISCONNECTED' | 'SCOPE' | 'CONFLICT' }
-  | { type: 'AUTHORITY_CHANGED' }
+  | { type: 'AUTHORITY_CHANGED' | 'AUTOSAVE_ACK' }
   | { type: 'DIAGNOSTICS'; result: DiagnosticsResult }
   | { type: 'FILE_OPERATION'; operation: 'CREATE' | 'RENAME' | 'DELETE'; path: string; newPath?: string };
 /**
@@ -230,7 +230,10 @@ export class MonacoLspBridge {
   private receive(event: BridgeEvent) {
     if (this.dead) return;
     if (event.type === 'DIAGNOSTICS') return; // Retired remote analysis is never a local authority.
-    if (event.type === 'AUTHORITY_CHANGED') {
+    if (event.type === 'AUTHORITY_CHANGED' || event.type === 'AUTOSAVE_ACK') {
+      // The old envelope/captured click is ALWAYS retired. Only a still-open local
+      // intent at the exact same model/caret may make a NEW request after own save.
+      const previous = event.type === 'AUTOSAVE_ACK' ? this.flight?.request ?? this.widget.currentRequest() : undefined;
       this.workGeneration++;
       // ACK-only: clear/cancel, but NO didChange/setValue/save/provider restart. New envelope retains source.
       this.entries.forEach(entry => { this.monaco.editor.setModelMarkers(entry.model,this.markerOwner,[]); });
@@ -240,6 +243,22 @@ export class MonacoLspBridge {
         this.prepareFloor = null; this.blocked = false;
       }
       void this.refreshLocalFeatures();
+      if (previous) {
+        try {
+          const state=this.current(),pos=this.editor.getPosition();
+          // Disk-version/request-generation changes are expected after a save; all
+          // physical buffer, connection, scope and control fields remain exact.
+          const saveMetadata=new Set(['baseDocumentVersion','documentVersion','requestGeneration']);
+          const samePhysical=Object.keys(previous.stamp).every(key=>saveMetadata.has(key) ||
+            previous.stamp[key as keyof DocumentStamp]===state.stamp[key as keyof DocumentStamp]);
+          if (mayAccept(state) && samePhysical &&
+            state.stamp.baseDocumentVersion>=previous.stamp.baseDocumentVersion && pos &&
+            pos.lineNumber===previous.position.line && pos.column===previous.position.column) {
+            const expected={stamp:{...state.stamp},position:{...pos}};
+            void this.requestAt(previous.trigger,expected);
+          }
+        } catch { /* Missing/retired authority never creates a replacement request. */ }
+      }
       return;
     }
     if (event.type === 'FILE_OPERATION') {
@@ -314,6 +333,11 @@ class CompletionWidget implements M.editor.IContentWidget {
   getId() { return this.node.id; }
   getDomNode() { return this.node; }
   getPosition(): M.editor.IContentWidgetPosition | null { return this.position ? {position:this.position,preference:[this.monaco.editor.ContentWidgetPositionPreference.BELOW,this.monaco.editor.ContentWidgetPositionPreference.ABOVE]} : null; }
+  currentRequest(): CompleteRequest | undefined {
+    const item=this.items[0];
+    return item && this.position ? {requestId:item.requestId,stamp:{...item.stamp},
+      position:{line:this.position.lineNumber,column:this.position.column},trigger:null} : undefined;
+  }
   show(items: readonly CompletionCandidate[]) {
     this.items = items; this.selected = 0; this.position = this.editor.getPosition();
     this.render();

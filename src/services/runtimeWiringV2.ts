@@ -60,7 +60,15 @@ export class RuntimeWiringV2 {
   beginAutosave(_id:string,_path:string,_content:string,_version:number,_epoch:number):undefined{return undefined;}
   cancelAutosave(_id:string){}
   prepareAutosaveAck(_ack:AutosaveAckEnvelope){}
-  ackTransition(_ack?:AutosaveAckEnvelope){this.revision++;this.requestGeneration++;this.emit({type:'AUTHORITY_CHANGED'});}
+  ackTransition(ack?:AutosaveAckEnvelope){
+    this.revision++;this.requestGeneration++;
+    const c=this.deps.current();
+    // Only the existing save-flight caller verifies replyTo/order/base version.
+    // Rejection, absent receipt or foreign control scope can retire but never refresh.
+    const saved=ack && c && ack.status!=='REJECTED' && ack.sessionId===c.sessionId && ack.controlEpoch===c.controlEpoch &&
+      Number.isSafeInteger(ack.documentVersion) && ack.documentVersion!>0;
+    this.emit({type:saved?'AUTOSAVE_ACK':'AUTHORITY_CHANGED'});
+  }
   fileOperation(operation:'CREATE'|'RENAME'|'DELETE',path:string,newPath?:string){
     this.revision++;this.requestGeneration++;
     this.emit({type:'FILE_OPERATION',operation,path,newPath});if(operation!=='CREATE')this.models.delete(path);

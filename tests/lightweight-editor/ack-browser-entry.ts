@@ -1,0 +1,23 @@
+/** Real Monaco + production local wiring/provider; controlled ACK boundary, NOT a backend fixture. */
+import * as monaco from 'monaco-editor';
+import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
+import {RuntimeWiringV2,type WiringControllerV2} from '../../src/services/runtimeWiringV2';
+import {MonacoLspBridge,toModelUri} from '../../src/services/monacoLspBridge';
+import {createCurrentDocumentWordsProvider} from '../../src/services/editor-language/currentDocumentWords';
+(self as any).MonacoEnvironment={getWorker:()=>new EditorWorker()};
+const initial='p2BufferAlpha\np2BufferAl';
+const doc={content:'p2BufferAlpha\n',version:1,readOnly:false,conflict:false};
+const controller:WiringControllerV2={projectId:'ack-browser',sessionId:'session',clientId:'client',connectionGeneration:'transport',connected:true,synced:true,writeOwner:'STUDENT',controlEpoch:0,preparing:false,vetoPending:false,language:{projectId:'ack-browser',sessionId:'session',profileId:'python',connectionGeneration:'local',configurationGeneration:'config',providerGeneration:'builtin',shadowGeneration:'lifetime',provider:'builtin',features:{completion:true,diagnostics:false}},document:()=>doc};
+const model=monaco.editor.createModel(initial,'plaintext',monaco.Uri.parse(toModelUri('ack-browser','calculator.py')));
+const editor=monaco.editor.create(document.getElementById('editor')!,{model,automaticLayout:true,ariaLabel:'Edytor testowy ACK',minimap:{enabled:false}});
+const output=document.getElementById('content')!,requests=document.getElementById('requests')!;
+const wiring=new RuntimeWiringV2({current:()=>controller,messageId:()=>crypto.randomUUID(),send:()=>{throw Error('No language transport permitted');},problem:m=>{throw Error(m);},status:()=>{},runtime:{current:()=>null,requestId:()=>crypto.randomUUID(),http:{run:async()=>null,stop:async()=>null,saveSettings:async()=>null}}});
+const words=createCurrentDocumentWordsProvider();let calls=0,release:(()=>void)|undefined;
+wiring.setBuiltin(async(m,r,s)=>{requests.textContent=String(++calls);if(calls===1)await new Promise<void>(resolve=>{release=resolve;});return words(m,r,s);});
+new MonacoLspBridge(monaco,editor,wiring.getBinding('ack-browser'));
+const update=()=>{output.textContent=model.getValue();};update();model.onDidChangeContent(update);
+for(const id of ['ack','release','veto'])document.getElementById(id)!.onmousedown=e=>e.preventDefault();
+document.getElementById('ack')!.onclick=()=>{doc.content=model.getValue();doc.version++;wiring.ackTransition({messageId:'controlled-reply',sessionId:'session',replyTo:'controlled-save-flight',status:'OK',documentVersion:doc.version,workspaceVersion:2,controlEpoch:0});};
+document.getElementById('release')!.onclick=()=>release?.();
+document.getElementById('veto')!.onclick=()=>{controller.vetoPending=true;wiring.invalidate('VETO');};
+editor.focus();editor.setPosition({lineNumber:2,column:11});
