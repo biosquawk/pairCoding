@@ -2,6 +2,7 @@
  * No host tasks, alternate implementations, automatic preparation or wire-owned execution policy.
  */
 import path from 'node:path';
+import fs from 'node:fs';
 import { Runner } from '../Runner';
 import { DockerExecutor } from '../execution/DockerExecutor';
 import { DurableRunJournal } from '../execution/DurableRunJournal';
@@ -12,7 +13,9 @@ import type { ExecutionHandle, ExecutionPlan, ExecutionPort, ExecutionReadiness,
 import type { RuntimeProfile, RunRequestV2, RunV2, ModeReadiness, SettingsV2 } from '../../shared/runtime-v2';
 import type { RuntimeConfiguration, RuntimeReadinessDependencies } from '../runtime-config';
 import { AppError } from '../errors';
-import { canonical } from './storage';
+import { canonical, readRecord, SerialQueue, sha256 } from './storage';
+import { inspectRuntimeServiceNetwork, prepareRuntimeServiceNetwork } from './RuntimeServiceNetwork';
+import { NetworkMaintenanceAbsence, type RuntimeNetworkPrepareRequest, type NetworkMaintenanceContext } from './RuntimeNetworkMaintenance';
 import type { RuntimeWorkspace } from './RuntimeWorkspace';
 import type { RuntimeExecutionLayout } from './RuntimeExecutionLayout';
 import type { PreparedRuntimeResolver, VerifiedPreparedCache, PreparedRuntimeSelection } from './PreparedRuntimeResolver';
@@ -43,6 +46,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   const adapters = createTaskRuntimeAdapterRegistry();
   const journal = new DurableRunJournal(layout.journalDirectory, layout.installationId);
   const byRun = new Map<string, DockerExecutor>();
+  const maintenanceQueue = new SerialQueue();
   const check = () => { options.assertCurrent(); if (core.workspace.rootPath !== layout.workspaceRoot || core.workspace.projectId !== layout.projectId)
     throw new AppError(409, 'PROJECT_STATE_CHANGED', 'Execution project changed.'); };
   const executorFor = (selected: PreparedRuntimeSelection, profile: RuntimeProfile): DockerExecutor => new DockerExecutor({
@@ -73,11 +77,11 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       try {
         const selected = await prepared.resolve(configuration.resolved, mode, run); check();
         if (mode === 'RUN_MAIN' && 'containerPort' in run.task.entry) {
-          const response = options.serviceNetwork === null ? null : await options.transport.run(['network','inspect',options.serviceNetwork], {timeoutMs:3000,maxBytes:1024*1024}); check();
-          const network = response?.exitCode === 0 ? JSON.parse(response.stdout) : null;
-          if (!Array.isArray(network) || network.length !== 1 || network[0].Name !== options.serviceNetwork ||
-              network[0].Internal !== true || network[0].Driver !== 'bridge' || !/^[a-f0-9]{64}$/.test(network[0].Id)) {
-            modes[mode] = denied('SERVICE_NETWORK_PREPARE_REQUIRED', 'Explicitly prepare the installation-owned internal service bridge; no external bridge/host network fallback.'); continue;
+          try {
+            const receipt=await inspectRuntimeServiceNetwork({layout,transport:options.transport,engineId:selected.engineId,assertCurrent:check});check();
+            if(!receipt || receipt.name!==options.serviceNetwork)throw Error('Missing exact owned bridge');
+          } catch {
+            check();modes[mode]=denied('SERVICE_NETWORK_PREPARE_REQUIRED','Explicitly prepare/reconcile the installation-owned internal service bridge and exact engine receipt; no external bridge/host fallback.');continue;
           }
         }
         modes[mode] = (await executorFor(selected, profile).readiness(profile, generation)).modes[mode]; check();
@@ -163,6 +167,67 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       },
     });
   }
-  return { runner, start, readiness: dependencies,
+  async function prepareServiceNetwork(original:RuntimeNetworkPrepareRequest,recovery:boolean,originalContext:NetworkMaintenanceContext|null,stage:(context:NetworkMaintenanceContext)=>void,assertAdmission:()=>void) {
+    const request=structuredClone(original);
+    return maintenanceQueue.run(()=>core.workspace._withQueuedMutation(async()=>{
+      const source=core.readSettings(), runtime=configuration.resolved;
+      const guard=()=>{check();assertAdmission();
+        if((!recovery && (!runtime || request.configurationGeneration!==configuration.configurationGeneration ||
+            core.workspace.workspaceVersion!==request.expectedWorkspaceVersion)) || core.readSettings().sourceSha256!==source.sourceSha256)
+          throw new AppError(409,'PROJECT_STATE_CHANGED','Maintenance source/configuration changed.');
+        if(runner.list().some(r=>['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.status)))
+          throw new AppError(409,'RUN_IN_PROGRESS','Active/unsettled Run excludes network maintenance.');
+      };
+      guard();
+      if((await journal.list()).some(r=>r.phase!=='REMOVED'))throw new AppError(409,'RUN_IN_PROGRESS','Durable orphan Run excludes network maintenance; reconcile that exact owner first.');
+      guard();
+      let engineId:string;
+      if(recovery) {
+        if(!originalContext)throw new NetworkMaintenanceAbsence('NOT_DISPATCHED');
+        if(!same(originalContext.layout,layout))throw Error('Retained original maintenance layout mismatch; no replay');
+        engineId=originalContext.engineId;
+      } else {
+        const run=source.settings?.runProfiles.find(r=>r.kind==='RUN_MAIN');
+        if(!runtime || !run)throw new AppError(409,'PREPARE_REQUIRED','Select a verified prepared runtime and explicit main task first.');
+        const selected=await prepared.resolve(runtime,'RUN_MAIN',run);guard();engineId=selected.engineId;
+        stage({layout:structuredClone(layout),engineId});guard();
+      }
+      const context={layout,transport:options.transport,engineId,assertCurrent:guard};
+      if(recovery) {
+        // First reconcile fresh read-only receipt/engine, even for a previously committed reply.
+        let receipt=null,absence=false;try {receipt=await inspectRuntimeServiceNetwork(context);absence=receipt===null;}catch {guard();}
+        guard();if(receipt)return receipt;
+        // Only the actual helper's original durable intent permits its reconciliation path.
+        // No intent => NEVER replay dispatch after our own crash-before-helper boundary.
+        const directory=path.join(layout.stateDirectory,'service-network');
+        const names=fs.existsSync(directory)?fs.readdirSync(directory):[];
+        if(names.length>386)throw Error('Unbounded service ledger');
+        const hasOriginalIntent=names.filter(n=>/^intent-\d{3}\.json$/.test(n)).some(n=>{
+          const value=JSON.parse(new TextDecoder('utf8',{fatal:true}).decode(readRecord(path.join(directory,n),65536)!));
+          return value.requestId===request.requestId;
+        });
+        guard();if(!hasOriginalIntent){if(absence)throw new NetworkMaintenanceAbsence('NOT_DISPATCHED');throw Error('Original dispatch is unconfirmed; never retry create without its durable helper intent');}
+      }
+      try {return await prepareRuntimeServiceNetwork({...context,requestId:request.requestId});}
+      catch(error) {
+        guard();
+        // Helper explicitly records a fresh same-engine absence before permitting a NEW
+        // attempt. Preserve it and close only this original request, never infer no effect.
+        const directory=path.join(layout.stateDirectory,'service-network');
+        if(fs.existsSync(directory))for(const n of fs.readdirSync(directory).filter(n=>/^intent-\d{3}\.json$/.test(n))) {
+          const bytes=readRecord(path.join(directory,n),65536)!,intent=JSON.parse(bytes.toString('utf8'));
+          if(intent.requestId!==request.requestId)continue;
+          const file=path.join(directory,n.replace('intent-','absence-')),proof=readRecord(file,65536,true);
+          if(proof) {
+            const value=JSON.parse(proof.toString('utf8'));
+            if(value.schemaVersion===1 && value.kind==='ABSENCE_CONFIRMED' && value.intentSha256===sha256(bytes) &&
+                await inspectRuntimeServiceNetwork(context)===null) {guard();throw new NetworkMaintenanceAbsence('ABSENCE_CONFIRMED');}
+          }
+        }
+        throw error;
+      }
+    }));
+  }
+  return { runner, start:(original:RunRequestV2,admit?:OriginalRunAdmission)=>{const request=structuredClone(original);return maintenanceQueue.run(()=>start(request,admit));}, prepareServiceNetwork, readiness: dependencies,
     readinessForSettings: (settings: SettingsV2): RuntimeReadinessDependencies => ({ execution: { readiness: readinessFor(structuredClone(settings)) }, probe: prepared }), journal };
 }

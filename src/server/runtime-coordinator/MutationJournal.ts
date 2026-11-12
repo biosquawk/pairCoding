@@ -262,6 +262,15 @@ export class DurableMutationJournal {
       return snapshot(outcome);
     });
   }
+  /** Actual durable original admission, including a Run still awaiting its first capture. */
+  assertNoPendingRuns():void {
+    this.assertOwner();
+    for(const [key,cached] of this.records) {
+      const r=this.existing(key,cached.identity)!;
+      if(r.identity.kind==='RUN' && r.outcome.state==='UNKNOWN')
+        fail('RUN_IN_PROGRESS','Unsettled original Run admission excludes service network maintenance.');
+    }
+  }
   /** Close only after all admitted effects have settled; pending records intentionally survive. */
   close(): Promise<void> {
     return this.serial.run(() => {

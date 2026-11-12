@@ -23,12 +23,13 @@ import { createRuntimeDockerTransport } from './runtime-coordinator/RuntimeDocke
 import type { DockerTransport } from './execution/DockerTransport';
 import type { RuntimeEnvironment, RuntimeReadinessDependencies } from './runtime-config';
 import { createRuntimeStartup, requireRuntimeWorkspace, type RuntimeStartup } from './runtime-coordinator/RuntimeStartup';
-import { validateRuntimeOpenProjectRequest, validateRuntimeClientMessage } from './runtime-coordinator/RuntimeHttpValidation';
+import { validateRuntimeOpenProjectRequest, validateRuntimeClientMessage, validateRuntimeNetworkPrepareRequest } from './runtime-coordinator/RuntimeHttpValidation';
 import { readRuntimeProject, applyRuntimeSettingsMetadata } from './runtime-coordinator/RuntimeProject';
 import { aggregateRuntimeReadiness } from './runtime-config';
 import { RuntimeSettingsMutation } from './runtime-coordinator/RuntimeSettingsMutation';
 import { DurableMutationJournal } from './runtime-coordinator/MutationJournal';
 import { RuntimeRunMutation } from './runtime-coordinator/RuntimeRunMutation';
+import { RuntimeNetworkMaintenance, type RuntimeNetworkPrepareRequest } from './runtime-coordinator/RuntimeNetworkMaintenance';
 import { RuntimeClientOwnership } from './runtime-coordinator/RuntimeClientOwnership';
 import type { ReconcileMutationRequestV2 } from '../shared/runtime-mutation-v2';
 
@@ -231,6 +232,25 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(outcome.state==='DEFINITIVELY_ABORTED') fail(409,'MUTATION_DEFINITIVELY_ABORTED','Original RUN was definitively aborted; use a new request only after synchronization.');
     return clone(outcome.result);
   }
+  async function prepareServiceNetwork(original:RuntimeNetworkPrepareRequest) {
+    const request=clone(original),bound=startup,owner=binding!,core=currentCore();
+    const epoch=core.session.state.controlEpoch,version=core.workspace.workspaceVersion,generation=bound.configuration.configurationGeneration;
+    const authorize=(retained:boolean)=>{
+      assertMutationScope(bound,request.clientId);
+      owner.clients.assertBound(request.clientId,request.sessionId);
+      if(!retained)core.session.assertClient(request.clientId,request.sessionId);
+      if(core.session.state.writeOwner!=='STUDENT' || core.session.state.controlEpoch!==(retained?epoch:request.controlEpoch))
+        fail(409,'STALE_EPOCH','Maintenance requires unchanged student control.');
+      if(core.session.state.lifecycle==='FINISHED')fail(409,'SESSION_FINISHED','Finished session cannot prepare a network.');
+      if(core.workspace.workspaceVersion!==(retained?version:request.expectedWorkspaceVersion) || bound.configuration.configurationGeneration!==(retained?generation:request.configurationGeneration))
+        fail(409,'PROJECT_STATE_CHANGED','Maintenance requires the exact source/configuration.');
+      owner.mutations.assertNoPendingRuns();
+      if(owner.runtime?.runner.list().some(r=>['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.status)))
+        fail(409,'RUN_IN_PROGRESS','Active/unsettled Run excludes service network maintenance.');
+    };
+    if(!owner.runtime)fail(503,'RUNTIME_UNAVAILABLE','Repair/select a verified runtime first; maintenance never falls back to host execution.');
+    return owner.track(owner.network.execute(request,authorize,(recovery,context,stage)=>owner.runtime!.prepareServiceNetwork(request,recovery,context,stage,()=>authorize(recovery))));
+  }
   function currentRuntimeRun() {
     // Read the genuine active neutral owner, including output/version changes not RUN_STATE events.
     // Do not invent V2 profile identity for a legacy injected executionFactory.
@@ -282,7 +302,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     let boundReports:ExecutionServices['reports']|undefined;
     let boundRuntime: ReturnType<typeof createRuntimeExecution> | undefined, runtimeError:unknown;
     let mutations:DurableMutationJournal|undefined, clients:RuntimeClientOwnership|undefined;
-    let saves:RuntimeSettingsMutation|undefined, runs:RuntimeRunMutation|undefined;
+    let saves:RuntimeSettingsMutation|undefined, runs:RuntimeRunMutation|undefined, network:RuntimeNetworkMaintenance|undefined;
     const pending=new Set<Promise<unknown>>();
     function track<T>(operation:Promise<T>):Promise<T> {pending.add(operation);void operation.finally(()=>pending.delete(operation)).catch(()=>{});return operation;}
     const listeners:{source:WorkspaceService|SessionController;event:string;handler:(...args:any[])=>void}[]=[];
@@ -295,6 +315,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     async function dispose() {
       if(disposed)return;disposed=true;active=false;
       await Promise.allSettled([...pending]);
+      await network?.close();
       await mutations?.close();
       // Continue cleanup even if a closing report cannot persist INTERRUPTED on a failed disk.
       for(const {source,event,handler} of listeners)source.off(event,handler);
@@ -307,6 +328,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       mutations=new DurableMutationJournal(path.join(boundWorkspace.dataDir,'runtime-mutations'));
       clients=new RuntimeClientOwnership(path.join(boundWorkspace.dataDir,'runtime-clients'),boundWorkspace.projectId);
       saves=new RuntimeSettingsMutation(core,mutations);
+      network=new RuntimeNetworkMaintenance(path.join(boundWorkspace.dataDir,'runtime-network-maintenance'),boundWorkspace.projectId);
       if(options.enableExecution && owner.configuration.resolved) {
         try {
           const layout = createRuntimeExecutionLayout(path.join(path.dirname(owner.configuration.resolved.configPath), '.paircoach-runtime'),
@@ -335,7 +357,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       on(boundWorkspace,'watcherError',(error:unknown)=>publish('ERROR',apiError(error)));
       on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
       on(boundSession,'veto',()=>boundCoach?.abort());
-      return {execution:boundExecution,runtime:boundRuntime,runtimeError,mutations,clients,saves,runs,track,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
+      return {execution:boundExecution,runtime:boundRuntime,runtimeError,mutations,clients,saves,runs,network,track,activate(){active=true;coach=boundCoach;execution=boundExecution;reports=boundReports;runtimeExecution=boundRuntime;},dispose};
     } catch(error) {await dispose();throw error;}
   }
   let binding:Awaited<ReturnType<typeof prepareBinding>>|undefined;
@@ -507,6 +529,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           if(!execution && !runtimeExecution) fail(503,'GATE003_NOT_ENABLED','Runner nie jest jeszcze włączony.'); value=(execution?.runner ?? runtimeExecution!.runner).get(url.pathname.split('/')[3]);
         } else fail(404,'NOT_FOUND','Nieznany endpoint.');
         respond(res,200,value);return;
+      }
+      if(req.method==='POST' && url.pathname==='/api/runtime/service-network/prepare') {
+        const body:unknown=await readBody(req);
+        if(!validateRuntimeNetworkPrepareRequest(body))fail(400,'VALIDATION_ERROR','Maintenance requires only the exact original request/client/session/version/configuration/epoch.');
+        requestId=body.requestId;
+        respond(res,200,await prepareServiceNetwork(body));return;
       }
       if(req.method==='POST' && url.pathname==='/api/runtime/mutation/reconcile') {
         const body:unknown=await readBody(req);
