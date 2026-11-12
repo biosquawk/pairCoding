@@ -6,7 +6,7 @@ import type { Document, FileEntry, Project, Settings, Snapshot } from '../shared
 import type { MutationAuth } from './WriteGate';
 import { drainSteps, drainStepsAsync } from './SnapshotSteps';
 import { AppError } from './errors';
-import { SnapshotStorage, type FrozenSnapshot, snapshotAllowed, identity, snapshotFailure } from './SnapshotStorage';
+import { SnapshotStorage, type FrozenSnapshot, snapshotAllowed, identity, sameIdentity, snapshotFailure } from './SnapshotStorage';
 import { SnapshotJournal, type RestoreBefore } from './SnapshotJournal';
 import { LanguageFeatureRegistry } from './LanguageFeatureRegistry';
 import { SerialQueue } from './runtime-coordinator/storage';
@@ -79,31 +79,34 @@ export class WorkspaceService extends EventEmitter {
       throw new AppError(409, 'WORKSPACE_BUSY', 'Durable V2 workspace requires one authoritative owner.');
     this.dataDir = path.resolve(dataDir ?? path.join(this.rootPath, '.paircoach'));
     if (this.dataDir === this.rootPath) throw new AppError(400, 'INVALID_DATA_DIR', 'Data directory must not be the workspace root.');
-    this.snapshotStore = new SnapshotStorage(this.rootPath, this.dataDir, (p, missing) => this._safePath(p, missing));
-    this.projectId = this.snapshotStore.projectId;
-    this.snapshotJournal = new SnapshotJournal(this.snapshotStore, (p, missing) => this._safePath(p, missing),
-      (phase, index) => this.emit('snapshotCheckpoint', { phase, index }));
-    try { this.recoveryRequired = this.snapshotJournal.hasPending(); }
-    catch { this.recoveryRequired = true; } // Gate validates/reports the exact cause before any mutation.
     this.settings = { taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md',
       runProfiles: [], aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'] };
     if (options.recoverSnapshotsBeforeVersions && !options.durableVersions)
       throw new AppError(400, 'DURABLE_VERSIONS_REQUIRED', 'Ordered V2 startup requires durable workspace ownership.');
-    if (!this.recoveryRequired && !options.recoverSnapshotsBeforeVersions) this.scan(true);
     if (options.durableVersions === true) {
-      if (this.recoveryRequired && !options.recoverSnapshotsBeforeVersions) throw snapshotFailure('Recover snapshots before enabling durable V2 versions.');
       this.safeDataDirectory();
-      this.versionStore = new DurableWorkspaceVersions(path.join(this.dataDir, 'workspace-v2'), this.projectId, this.rootPath,
-        this.versionSnapshot(), options.recoverSnapshotsBeforeVersions ? { deferDiskReconcile: true } : {});
-      try {
-        if (options.recoverSnapshotsBeforeVersions) {
-          // Own the durable root BEFORE snapshot recovery can affect public paths. No watcher,
-          // session, source scan or settings route may observe a partial recovered tree.
-          this.startupSnapshotRecovery = true;
-          try { this._recoverSnapshots(); } finally { this.startupSnapshotRecovery = false; }
-          this.scan(true);
-          this.versionStore.reconcileDisk(this.versionSnapshot());
-        }
+      // The SAME versions lease covers validated authority -> identity -> journal recovery ->
+      // source scan/reconciliation. No provisional UUID or mutable state escapes the resolver.
+      let resolved: SnapshotStorage | undefined;
+      this.versionStore = new DurableWorkspaceVersions(path.join(this.dataDir, 'workspace-v2'), scope => {
+        resolved = new SnapshotStorage(this.rootPath, this.dataDir, (p, missing) => this._safePath(p, missing), scope);
+        return resolved.projectId;
+      }, this.rootPath, { workspaceVersion: 0, files: [] }, { deferDiskReconcile: true });
+      this.snapshotStore = resolved!;
+    } else this.snapshotStore = new SnapshotStorage(this.rootPath, this.dataDir, (p, missing) => this._safePath(p, missing));
+    this.projectId = this.snapshotStore.projectId;
+    this.snapshotJournal = new SnapshotJournal(this.snapshotStore, (p, missing) => this._safePath(p, missing),
+      (phase, index) => this.emit('snapshotCheckpoint', { phase, index }));
+    try {
+      try { this.recoveryRequired = this.snapshotJournal.hasPending(); }
+      catch { this.recoveryRequired = true; } // Gate reports the exact cause before mutation.
+      if (options.recoverSnapshotsBeforeVersions) {
+        this.startupSnapshotRecovery = true;
+        try { this._recoverSnapshots(); } finally { this.startupSnapshotRecovery = false; }
+      } else if (this.versionStore && this.recoveryRequired) throw snapshotFailure('Recover snapshots before enabling durable V2 versions.');
+      if (!this.recoveryRequired) this.scan(true);
+      if (this.versionStore) {
+        this.versionStore.reconcileDisk(this.versionSnapshot());
         const recovered = this.versionStore.snapshot();
         this.workspaceVersion = recovered.workspaceVersion;
         this.versions = new Map(recovered.files.map(f => [f.path, f.version]));
@@ -111,8 +114,8 @@ export class WorkspaceService extends EventEmitter {
           const current = this.records.get(file.path);
           if (current) this.records.set(file.path, this.track(file.path, current, file.version));
         }
-      } catch (error) { this.versionStore.close(); throw error; }
-    }
+      }
+    } catch (error) { this.versionStore?.close(); throw error; }
     if (!options.deferObservation) this._startObservation();
     if (!openWorkspaces.has(this.rootPath)) openWorkspaces.set(this.rootPath, new Set());
     openWorkspaces.get(this.rootPath)!.add(this);
@@ -138,7 +141,8 @@ export class WorkspaceService extends EventEmitter {
     const parts = relative.split('/');
     let current = this.rootPath;
     // Detect replacement of root itself after opening the workspace.
-    if (fs.lstatSync(current).isSymbolicLink() || fs.realpathSync.native(current) !== current) {
+    const rootStat = fs.lstatSync(current, { bigint: true });
+    if (rootStat.isSymbolicLink() || this.snapshotStore && !sameIdentity(rootStat, this.snapshotStore.rootIdentity) || fs.realpathSync.native(current) !== current) {
       throw new AppError(403, 'UNSAFE_PATH', 'Workspace root changed.');
     }
     let missing = false;
@@ -779,8 +783,14 @@ export class WorkspaceService extends EventEmitter {
   }
 
   private versionSnapshot() {
+    this.snapshotStore.assertBinding(this.snapshotStore.binding);
+    // Only durable projection uses historical dev. DiskFile stamps and all fstat/rename/
+    // capture/sameIdentity checks retain current device+inode and exact remaining metadata.
+    const { rootIdentity, binding } = this.snapshotStore;
+    const projected = (stamp: string | undefined) => !stamp ? null : stamp.startsWith(rootIdentity.dev + ':')
+      ? binding.dev + stamp.slice(rootIdentity.dev.length) : stamp;
     return { workspaceVersion: this.workspaceVersion,
-      files: [...this.versions].map(([path, version]) => ({ path, version, stamp: this.records.get(path)?.stamp ?? null })) };
+      files: [...this.versions].map(([path, version]) => ({ path, version, stamp: projected(this.records.get(path)?.stamp) })) };
   }
   private persistVersions(): void {
     if (!Number.isSafeInteger(this.workspaceVersion)) throw new AppError(503, 'VERSION_EXHAUSTED', 'Workspace version cannot be incremented safely.');
@@ -881,12 +891,14 @@ export class WorkspaceService extends EventEmitter {
   }
 
   private assertReadable(): void {
+    this.snapshotStore.assertBinding(this.snapshotStore.binding);
     if (this.versionFailure) throw new AppError(503, 'WORKSPACE_VERSIONS_UNAVAILABLE', 'Durable version publication failed; restart recovery is required.');
     this.versionStore?.assertCurrent();
     if (activeAsyncRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Snapshot capture/restore is in progress; retry after its terminal result.');
   }
 
   _assertWritable(): void {
+    this.snapshotStore.assertBinding(this.snapshotStore.binding);
     if (this.versionFailure) throw new AppError(503, 'WORKSPACE_VERSIONS_UNAVAILABLE', 'Durable version publication failed; restart recovery is required.');
     if (this.closed) throw new AppError(503, 'WORKSPACE_CLOSED', 'Workspace is closed.');
     this.versionStore?.assertWritable();

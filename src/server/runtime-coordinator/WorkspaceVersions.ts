@@ -7,6 +7,8 @@ import { JournalLease } from './JournalLease';
 import { canonical, privateDirectory, readRecord, createRecord, replaceRecord, sha256 } from './storage';
 import type { SettingsSaveReceipt, SettingsTransactionIdentity, SettingsTransactionOutcome, SettingsMutation } from '../settings-v2';
 import { AppError } from '../errors';
+/** Internal detached authority projection; never exposes settings/pending/outcome state. */
+export interface ValidatedWorkspaceScope { readonly projectId: string; readonly root: string; readonly files: readonly Readonly<VersionSnapshot["files"][number]>[] }
 export interface VersionSnapshot { workspaceVersion: number; files: { path: string; version: number; stamp: string | null }[] }
 type Saved = { identity: SettingsTransactionIdentity; outcome: Exclude<SettingsTransactionOutcome, { state: 'UNKNOWN' }> };
 interface State extends VersionSnapshot { schemaVersion: 1; projectId: string; root: string; pending: SettingsTransactionIdentity | null; outcomes: Saved[] }
@@ -26,7 +28,7 @@ export class DurableWorkspaceVersions {
   private poisoned = false;
   private closed = false;
   private freshDeferredBaseline = false;
-  constructor(directory: string, projectId: string, root: string, initial: VersionSnapshot, options: { deferDiskReconcile?: true } = {}) {
+  constructor(directory: string, projectId: string | ((scope: ValidatedWorkspaceScope | null) => string), root: string, initial: VersionSnapshot, options: { deferDiskReconcile?: true } = {}) {
     privateDirectory(directory);
     this.file = path.join(directory, 'versions.json');
     const leasePath = path.join(directory, 'lease.lock');
@@ -38,18 +40,34 @@ export class DurableWorkspaceVersions {
       const names = fs.readdirSync(directory);
       if (names.some(n => n !== 'lease.lock' && n !== 'versions.json')) throw Error('Workspace version recovery required');
       const bytes = readRecord(this.file, MAX_BYTES, true);
+      // readRecord pins regular/single-link bytes; authority additionally requires private ownership.
+      if (bytes && process.platform !== 'win32') {
+        const stat = fs.lstatSync(this.file);
+        const parent = fs.lstatSync(directory);
+        if ((stat.mode & 0o077) || stat.uid !== process.getuid!() || parent.uid !== process.getuid!())
+          throw Error('Workspace version authority is not privately owned');
+      }
       if (bytes) {
         const envelope = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(bytes));
         this.state = envelope.body;
         if (envelope.sha256 !== sha256(canonical(this.state))) throw Error('Workspace version integrity failure');
         this.validate(this.state);
-        if (this.state.projectId !== projectId || this.state.root !== root) throw Error('Workspace version scope mismatch');
+        // Reject foreign roots BEFORE a resolver can publish any identity. The callback receives
+        // a frozen clone, not this.state or settings outcomes, under this SAME held kernel lease.
+        if (this.state.root !== root) throw Error('Workspace version scope mismatch');
+        const scope: ValidatedWorkspaceScope = Object.freeze({ root: this.state.root, projectId: this.state.projectId,
+          files: Object.freeze(this.state.files.map(f => Object.freeze(copy(f)))) });
+        const resolved = typeof projectId === 'string' ? projectId : projectId(scope);
+        this.lease.assertCurrent();
+        if (this.state.projectId !== resolved) throw Error('Workspace version scope mismatch');
         if (!options.deferDiskReconcile) this.reconcileDisk(initial);
       } else {
         // The stable kernel lease is never unlinked. Its prior presence with missing state is
         // initialization uncertainty/lost persistence, NOT a new workspace/version-zero grant.
         if (priorOwnership) throw Error('Missing prior workspace versions; retain state and recover');
-        this.state = { ...copy(initial), schemaVersion: 1, projectId, root, pending: null, outcomes: [] };
+        const resolved = typeof projectId === 'string' ? projectId : projectId(null);
+        this.lease.assertCurrent();
+        this.state = { ...copy(initial), schemaVersion: 1, projectId: resolved, root, pending: null, outcomes: [] };
         this.validate(this.state); createRecord(this.file, this.encoded(this.state));
         this.freshDeferredBaseline = options.deferDiskReconcile === true;
       }
@@ -68,7 +86,7 @@ export class DurableWorkspaceVersions {
       const previous = new Map(this.state.files.map(f => [f.path, f]));
       const files: VersionSnapshot['files'] = [];
       let workspaceVersion = this.state.workspaceVersion;
-      for (const name of new Set([...disk.keys(), ...previous.keys()])) {
+      for (const name of new Set([...previous.keys(), ...disk.keys()])) {
         const old = previous.get(name), stamp = disk.get(name) ?? null;
         if (!old && stamp === null) continue;
         if (old?.stamp === stamp) files.push(copy(old));

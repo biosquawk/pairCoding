@@ -4,6 +4,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import type { Snapshot } from '../shared/protocol';
 import { drainSteps } from './SnapshotSteps';
 import { AppError } from './errors';
+import type { ValidatedWorkspaceScope } from './runtime-coordinator/WorkspaceVersions';
 
 export const SNAPSHOT_MAX_BYTES = 1048576;
 export const SNAPSHOT_MAX_FILES = 1000;
@@ -91,46 +92,127 @@ export class SnapshotStorage {
   readonly projectId: string;
   readonly privateRoot: string;
   readonly binding: { root: string; dev: string; ino: string; projectId: string };
+  /** Historical signed binding and current live device/inode are deliberately different. */
+  readonly rootIdentity: Identity;
   private key: string;
-  constructor(readonly root: string, readonly dataDir: string, private readonly safePath: (p: string, missing?: boolean) => string) {
+  private identityPublished = false;
+  constructor(readonly root: string, readonly dataDir: string, private readonly safePath: (p: string, missing?: boolean) => string,
+      scope?: ValidatedWorkspaceScope | null) {
     this.privateRoot = path.join(root, '.paircoach');
-    const rootId = identity(fs.lstatSync(root, { bigint: true }));
-    // Stable before the first snapshot, without changing the task tree at open.
-    // Persist the matching identity/key lazily when the recovery feature is used.
-    const digest = sha256(JSON.stringify({ root, ...rootId }));
-    this.projectId = `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
-    this.binding = { root, ...rootId, projectId: this.projectId };
-    this.key = randomBytes(32).toString('hex');
+    privateDirectory(root);
+    this.rootIdentity = Object.freeze(identity(fs.lstatSync(root, { bigint: true })));
+    if (scope && scope.root !== root) throw snapshotFailure('Workspace identity/root scope mismatch.');
     const file = path.join(this.privateRoot, 'workspace-v1.json');
-    try { this.loadIdentity(file); } catch (e) { if (!missing(e)) throw e; }
+    this.assertNoPartialIdentity();
+    let saved: ReturnType<SnapshotStorage['readIdentity']> | undefined;
+    try { saved = this.readIdentity(file); } catch (e) { if (!missing(e)) throw e; }
+    let historical = this.rootIdentity;
+    if (saved) {
+      historical = { dev: saved.dev, ino: saved.ino };
+    } else if (scope) {
+      // Genuine lazy-v1 authority: all candidate stamps are inspected, never a first-stamp
+      // guess. Only the old device that exactly re-derives the validated UUID is authority.
+      // Exact current root/dev/inode may prove an UNCHANGED lazy empty/tombstoned
+      // workspace too. A changed device still needs a historical stamp witness.
+      const devices = new Set<string>([this.rootIdentity.dev]);
+      for (const f of scope.files) if (f.stamp !== null) {
+        const match = /^(\d+):\d+:\d+:\d+:\d+:\d+(?::[a-f0-9]{64}|:hardlink:\d+)?$/.exec(f.stamp);
+        if (!match) throw snapshotFailure('Ambiguous lazy workspace identity; retain its authority.');
+        devices.add(match[1]);
+      }
+      const candidates = [...devices].filter(dev => this.derivedId({ dev, ino: this.rootIdentity.ino }) === scope.projectId);
+      if (candidates.length !== 1) throw snapshotFailure('Unproven lazy workspace binding; retain its authority.');
+      historical = { dev: candidates[0], ino: this.rootIdentity.ino };
+    }
+    this.projectId = this.derivedId(historical);
+    this.binding = Object.freeze({ root, ...historical, projectId: this.projectId });
+    if (scope && scope.projectId !== this.projectId) throw snapshotFailure('Workspace identity/project scope mismatch.');
+    this.key = saved?.key ?? randomBytes(32).toString('hex');
+    this.identityPublished = !!saved;
+    if (scope !== undefined) {
+      // Durable open only: resolver runs after full versions validation under its lease.
+      // Never mint a replacement key over partial identity or dependent signed material.
+      if (!saved) this.assertNoSignedMaterial();
+      this.ensureIdentity();
+    }
   }
 
-  private loadIdentity(file: string): void {
-    let value: any;
+  private derivedId(id: Identity): string {
+    const digest = sha256(JSON.stringify({ root: this.root, ...id }));
+    return `${digest.slice(0, 8)}-${digest.slice(8, 12)}-4${digest.slice(13, 16)}-8${digest.slice(17, 20)}-${digest.slice(20, 32)}`;
+  }
+
+  private privateAuthority(file?: string): void {
+    privateDirectory(this.privateRoot);
+    if (process.platform !== 'win32') {
+      for (const p of file ? [this.privateRoot, file] : [this.privateRoot]) {
+        const stat = fs.lstatSync(p);
+        if ((stat.mode & 0o077) || stat.uid !== process.getuid!()) throw snapshotFailure('Workspace identity authority is not privately owned.');
+      }
+    } // Windows uses the existing trusted inherited private-parent ACL boundary, not chmod.
+  }
+
+  private readIdentity(file: string): { root: string; dev: string; ino: string; projectId: string; key: string } {
+    this.privateAuthority(file);
     const raw = privateRead(file, 4096);
-    try { value = JSON.parse(raw.toString('utf8')); } catch { throw snapshotFailure('Malformed workspace identity.'); }
-    if (!value || value.format !== 1 || value.root !== this.root || value.dev !== this.binding.dev || value.ino !== this.binding.ino ||
-        value.projectId !== this.projectId || !/^[a-f0-9]{64}$/.test(value.key)) throw snapshotFailure('Workspace identity/root binding is invalid.');
-    this.key = value.key;
+    let value: any;
+    try { value = JSON.parse(new TextDecoder('utf8', { fatal: true }).decode(raw)); } catch { throw snapshotFailure('Malformed workspace identity.'); }
+    if (!value || value.format !== 1 || value.root !== this.root || typeof value.dev !== 'string' || typeof value.ino !== 'string' || !validIdentity(value) || value.ino !== this.rootIdentity.ino ||
+        value.projectId !== this.derivedId({dev: value.dev, ino: value.ino}) || !/^[a-f0-9]{64}$/.test(value.key))
+      throw snapshotFailure('Workspace identity/root binding is invalid.');
+    return value;
+  }
+
+  private assertNoPartialIdentity(): void {
+    try { this.privateAuthority(); } catch (e) { if (missing(e)) return; throw e; }
+    if (fs.readdirSync(this.privateRoot).some(n => n.startsWith('identity-')))
+      throw snapshotFailure('Partial workspace identity publication; preserve its material.');
+  }
+
+  private assertNoSignedMaterial(): void {
+    const exists = (p: string) => { try { fs.lstatSync(p); return true; } catch (e) { if (missing(e)) return false; throw e; } };
+    if (exists(this.privateRoot)) {
+      this.privateAuthority();
+      if (fs.readdirSync(this.privateRoot).some(n => n.startsWith('identity-') || n === 'snapshot-journal-v1'))
+        throw snapshotFailure('Missing identity with partial/signed material; preserve it.');
+    }
+    if (exists(path.join(this.dataDir, 'snapshots-v1'))) throw snapshotFailure('Missing identity for signed snapshot history; preserve it.');
   }
 
   private ensureIdentity(): void {
+    this.assertBinding(this.binding);
+    this.assertNoPartialIdentity();
     privateDirectory(this.privateRoot, true);
+    this.privateAuthority();
     const file = path.join(this.privateRoot, 'workspace-v1.json');
-    if (!fs.existsSync(file)) {
+    let present = true;
+    try { fs.lstatSync(file); } catch (e) { if (!missing(e)) throw e; present = false; }
+    if (!present) {
+      if (this.identityPublished) throw snapshotFailure('Published workspace identity disappeared; preserve recovery material.');
+      this.assertNoSignedMaterial();
       const temp = path.join(this.privateRoot, 'identity-' + randomUUID());
       privateWrite(temp, Buffer.from(JSON.stringify({ format: 1, ...this.binding, key: this.key })));
-      try { fs.linkSync(temp, file); }
-      catch (e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e; }
-      finally { fs.unlinkSync(temp); }
+      // Leave partial material on unknown failure. A later open must not silently repair it.
+      this.assertBinding(this.binding);
+      fs.linkSync(temp, file);
+      syncDirectory(this.privateRoot); // Retain the temp/alias if publication durability is unknown.
+      // The temporary second link is our own pinned publication, never accepted by normal reads.
+      if (!privateRead(file, 4096, 2).equals(Buffer.from(JSON.stringify({ format: 1, ...this.binding, key: this.key }))))
+        throw snapshotFailure('Workspace identity publication readback mismatch.');
+      this.assertBinding(this.binding);
+      fs.unlinkSync(temp);
       syncDirectory(this.privateRoot);
     }
-    this.loadIdentity(file);
+    this.assertBinding(this.binding);
+    const saved = this.readIdentity(file);
+    if (saved.root !== this.binding.root || saved.dev !== this.binding.dev || saved.ino !== this.binding.ino ||
+        saved.projectId !== this.projectId || saved.key !== this.key) throw snapshotFailure('Published workspace identity changed.');
+    this.identityPublished = true;
   }
 
   assertBinding(binding: unknown): void {
     privateDirectory(this.root);
-    if (JSON.stringify(binding) !== JSON.stringify(this.binding) || !sameIdentity(fs.lstatSync(this.root, { bigint: true }), this.binding)) {
+    if (JSON.stringify(binding) !== JSON.stringify(this.binding) || !sameIdentity(fs.lstatSync(this.root, { bigint: true }), this.rootIdentity)) {
       throw snapshotFailure('Recovery material belongs to another root/project.');
     }
   }
