@@ -109,6 +109,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     subscribe: (h, listener) => retained(h).subscribe(h, listener),
     serviceReadiness: h => retained(h).serviceReadiness(h),
     wait: (h, signal) => retained(h).wait(h, signal), stop: (h, reason) => retained(h).stop(h, reason),
+    recoverUnstarted: h => retained(h).recoverUnstarted(h),
     collect: (h, exit) => retained(h).collect(h, exit), cleanup: receipt => retained(receipt.handle).cleanup(receipt),
     inspectOwnedOrphans: async installationId => {
       if (installationId !== layout.installationId) throw Error('Foreign installation');
@@ -187,6 +188,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       const plan=knownPlans.get(record.handle.runId);
       if(!plan || !same(plan,record.plan) || !byRun.has(record.handle.runId))
         throw new AppError(409,'RUN_RECOVERY_REQUIRED','Durable Run has no unique original executor owner; finish/project replacement is fenced.');
+      if(record.phase==='REMOVED' && record.unstartedCancellation)await byRun.get(record.handle.runId)!.readUnstartedCancellation(record.handle);
       if(requireTerminal && record.phase!=='REMOVED')
         throw new AppError(409,'PROCESS_STOP_UNCONFIRMED','Durable Run ownership is not fully settled.');
     }
@@ -219,13 +221,14 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         if(record?.collection) {
           if(!record.exit || !same(await executor.collect(record.handle,record.exit),record.collection))throw Error('Retained collection changed');
         }
+        const cancellation=record?.unstartedCancellation && record.phase==='REMOVED' ? await executor.readUnstartedCancellation(record.handle) : null;
         const retained=states.read(plan);
         if(!record && retained && (retained.run.startedAt!==null || retained.run.exitCode!==null ||
             retained.run.finishedAt!==null && retained.run.processProblem?.code!=='RUN_NOT_DISPATCHED'))
           throw Error('Missing executor intent contradicts retained process/terminal evidence');
         runner.restore({sessionId:identity.sessionId,original,plan,adapter:adapters.get(plan.profile),
           handle:record?.handle??null,exit:record?.exit??null,collection:record?.collection??null,outcome:record?.outcome??null,
-          removed:record?.phase==='REMOVED',noProcess:record===null,retained});
+          removed:record?.phase==='REMOVED',noProcess:record===null,cancellation,retained});
       }
       if(records.some(r=>!ids.has(r.handle.runId)))throw Error('Executor orphan has no unique original admission');
       await assertAccounted();

@@ -5,7 +5,7 @@ import {
 } from 'node:crypto';
 import * as http from 'node:http';
 import type {
-  AdapterOutcome, CollectedArtifacts, DurableTerminalReceipt, ExecutionExit, ExecutionHandle, ExecutionOutput, ExecutionOwnership, ExecutionPlan, ExecutionPort, ExecutionReadiness, ExecutionServiceReadiness, OwnedOrphan, StopConfirmation
+  AdapterOutcome, CollectedArtifacts, DurableTerminalReceipt, DurableUnstartedCancellationReceipt, UnstartedRecoveryConfirmation, ExecutionExit, ExecutionHandle, ExecutionOutput, ExecutionOwnership, ExecutionPlan, ExecutionPort, ExecutionReadiness, ExecutionServiceReadiness, OwnedOrphan, StopConfirmation
 } from './ports';
 import type {
   RuntimeProblem, RuntimeProfile
@@ -20,7 +20,7 @@ import {
   approvedRuntime, dockerCreateArgs, type ExecutorPolicy, validatePlan, validateApprovedCaches
 } from './PlanPolicy';
 import {
-  canonicalDirectory, durableWrite, readRegular, requireThat, safeId, safeRelative, sha256, canonicalJson
+  canonicalDirectory, durableWrite, fsyncDirectory, readRegular, requireThat, safeId, safeRelative, sha256, canonicalJson
 } from './files';
 import {
   verifyAcknowledgedInput
@@ -47,6 +47,7 @@ interface Inspection {
     Running:boolean;
     Status:string;
     ExitCode:number;
+    StartedAt?:string;
     FinishedAt:string
   };
   NetworkSettings?:{
@@ -238,6 +239,7 @@ export class DockerExecutor implements ExecutionPort {
       if(existing){
         requireThat(canonicalJson(existing.plan)===canonicalJson(p),'Run id reused with different plan');
         const v=await this.inspect(existing);
+        requireThat(existing.startDispatch!=='REVOKED','Existing start authority permanently revoked');
         if(v)return {
           ...existing.handle
         };
@@ -262,7 +264,7 @@ export class DockerExecutor implements ExecutionPort {
       try{
         requireThat(await this.inspect(r)===null,'Preexisting container name collision');
         try{
-          await this.checked(dockerCreateArgs(this.policy,p));
+          await this.journal.withCreateAuthority(r,()=>this.checked(dockerCreateArgs(this.policy,p)));
         }catch(error){
           const reconciled=await this.inspect(r);
           if(!reconciled)throw error;
@@ -273,6 +275,7 @@ export class DockerExecutor implements ExecutionPort {
         r.phase='CREATED';
         await this.journal.update(r);
         // Container may already have started after an uncertain CLI response; no duplicate start on read-confirmed running/exit.
+        await this.journal.claimStart(r);
         if(v.State.Status==='created')try{
           await this.checked(['start',v.Id]);
         }catch(error){
@@ -481,6 +484,126 @@ export class DockerExecutor implements ExecutionPort {
             ...handle
           },problem:problem('PROCESS_STOP_UNCONFIRMED',String(error))
         };
+      }
+    });
+  }
+  private requireUnstarted(r:JournalRecord,v:Inspection|null):asserts v is Inspection {
+    requireThat(['INTENT','CREATED','STOP_UNCONFIRMED','REMOVED'].includes(r.phase) && v && !v.State.Running && v.State.Status==='created' &&
+      typeof v.State.StartedAt==='string' && /^0001-01-01T00:00:00(?:\.0+)?Z$/.test(v.State.StartedAt) &&
+      !r.exit && !r.collection && !r.outcome,'No positive never-started observation');
+  }
+  private async unchanged(r:JournalRecord) {
+    requireThat(canonicalJson(await this.record(r.handle))===canonicalJson(r),'Recovery ownership/revision changed');
+  }
+  /** Explicit exact-ID AND ownership-name absence; daemon errors/timeouts are never absence. */
+  private async unstartedAbsent(r:JournalRecord) {
+    await this.engine();
+    const reply=await this.command(['container','inspect',r.containerId!]);
+    requireThat(reply.exitCode===1 && reply.stdout.trim()==='' &&
+      [`Error: No such container: ${r.containerId}`,`Error response from daemon: No such container: ${r.containerId}`].includes(reply.stderr.trim()),'Exact container ID absence unconfirmed');
+    requireThat(await this.inspect(r)===null,'Ownership name absence unconfirmed');
+    await this.unchanged(r);
+  }
+  private async collectUnstarted(r:JournalRecord,v:Inspection) {
+    this.requireUnstarted(r,v);
+    const logs=await this.checked(['logs',v.Id],{maxBytes:EXECUTOR_LIMITS.logBytes});
+    await this.unchanged(r);
+    const directory=path.join(this.policy.runRoot,r.handle.runId,'unstarted-'+randomUUID());
+    await fs.mkdir(directory,{mode:0o700});await canonicalDirectory(directory);
+    await durableWrite(path.join(directory,'stdout.log'),logs.stdout);
+    await durableWrite(path.join(directory,'stderr.log'),logs.stderr);
+    const files:{relative:string;sha256:string;bytes:number}[]=[];let total=0,seen=0;
+    const walk=async(relative:string,depth:number):Promise<void>=>{
+      requireThat(depth<=16,'No-process artifact depth limit');
+      const source=path.join(r.plan.input.artifactsDirectory,relative);await canonicalDirectory(source);
+      for(const entry of await fs.readdir(source,{withFileTypes:true})) {
+        requireThat(++seen<=EXECUTOR_LIMITS.artifactFiles,'No-process artifact count limit');
+        const rel=relative?relative+'/'+entry.name:entry.name;requireThat(safeRelative(rel),'Unsafe no-process artifact path');
+        const file=path.join(r.plan.input.artifactsDirectory,rel),st=await fs.lstat(file);
+        requireThat(!st.isSymbolicLink(),'No-process artifact link');
+        if(st.isDirectory()){await walk(rel,depth+1);continue;}
+        requireThat(st.isFile(),'No-process artifact type');
+        const bytes=await readRegular(file,EXECUTOR_LIMITS.artifactFileBytes);total+=bytes.length;
+        requireThat(total<=EXECUTOR_LIMITS.artifactTotalBytes,'No-process artifact total limit');
+        const target=path.join(directory,'files',rel);await fs.mkdir(path.dirname(target),{recursive:true,mode:0o700});
+        // Preserve bytes exactly, including non-UTF8, without inventing adapter output.
+        await durableWrite(target,bytes.toString('base64'));
+        files.push({relative:rel,sha256:sha256(bytes),bytes:bytes.length});
+      }
+    };
+    await walk('',0);files.sort((a,b)=>a.relative.localeCompare(b.relative));
+    // Flush every newly published ancestry link, not just the leaf file/directory.
+    const directories=new Set([directory]);
+    for(const f of files)for(let d=path.dirname(path.join(directory,'files',f.relative));d!==path.dirname(directory);d=path.dirname(d))directories.add(d);
+    for(const d of [...directories].sort((a,b)=>b.length-a.length))await fsyncDirectory(d);
+    await fsyncDirectory(path.dirname(directory));
+    await this.unchanged(r);
+    const evidence={version:1,kind:'NO_PROCESS_CANCELLATION',handle:r.handle,ownership:r.ownership,
+      planSha256:sha256(canonicalJson(r.plan)),inputManifestSha256:r.plan.input.identity.manifestSha256,
+      startDispatch:'REVOKED',artifactEncoding:'base64',container:v,stdoutSha256:sha256(logs.stdout),stderrSha256:sha256(logs.stderr),files,
+      inventoryReason:files.length?null:'Actual bounded artifacts directory inventory contained no regular files; no process dispatch occurred.'};
+    const evidencePath=path.join(directory,'evidence.json'),bytes=canonicalJson(evidence);
+    await durableWrite(evidencePath,bytes);
+    return {evidencePath,evidenceSha256:sha256(bytes),confirmedAt:null};
+  }
+  private async verifyUnstartedEvidence(r:JournalRecord) {
+    const c=r.unstartedCancellation,runRoot=path.join(this.policy.runRoot,r.handle.runId);
+    requireThat(r.ownership.engineId===this.policy.engineId && r.ownership.installationId===this.policy.installationId,'Recovery engine/installation differs from original owner');
+    requireThat(c && r.startDispatch==='REVOKED' && r.containerId && !r.exit && !r.collection && !r.outcome,'Missing no-process evidence');
+    const dir=path.dirname(c.evidencePath);
+    requireThat(path.dirname(dir)===runRoot && /^unstarted-[a-f0-9-]{36}$/.test(path.basename(dir)) && path.basename(c.evidencePath)==='evidence.json','No-process evidence containment');
+    const bytes=await readRegular(c.evidencePath,EXECUTOR_LIMITS.inspectBytes),e=JSON.parse(bytes.toString());
+    requireThat(sha256(bytes)===c.evidenceSha256 && e.version===1 && e.kind==='NO_PROCESS_CANCELLATION' && e.startDispatch==='REVOKED' && e.artifactEncoding==='base64' &&
+      canonicalJson(e.handle)===canonicalJson(r.handle) && canonicalJson(e.ownership)===canonicalJson(r.ownership) && e.planSha256===sha256(canonicalJson(r.plan)) &&
+      e.inputManifestSha256===r.plan.input.identity.manifestSha256 && e.container?.Id===r.containerId && e.container.Name==='/'+r.ownership.containerName &&
+      e.container.Image===r.ownership.imageId && Array.isArray(e.files) && e.files.length<=EXECUTOR_LIMITS.artifactFiles,'No-process evidence mismatch');
+    this.requireUnstarted(r,e.container);
+    for(const [key,value] of Object.entries({installation:r.ownership.installationId,run:r.ownership.runId,profile:r.ownership.profileId,engine:r.ownership.engineId,image:r.ownership.imageId,role:'execution'}))
+      requireThat(e.container.Config?.Labels?.['paircoach.'+key]===value,'No-process evidence labels changed');
+    requireThat(sha256(await readRegular(path.join(dir,'stdout.log'),EXECUTOR_LIMITS.logBytes))===e.stdoutSha256 &&
+      sha256(await readRegular(path.join(dir,'stderr.log'),EXECUTOR_LIMITS.logBytes))===e.stderrSha256,'No-process logs changed');
+    let total=0;const seen=new Set<string>();
+    for(const f of e.files){
+      requireThat(safeRelative(f.relative) && !seen.has(f.relative) && Number.isSafeInteger(f.bytes) && f.bytes>=0 && f.bytes<=EXECUTOR_LIMITS.artifactFileBytes,'Invalid no-process inventory');seen.add(f.relative);
+      const encoded=await readRegular(path.join(dir,'files',f.relative),Math.ceil(EXECUTOR_LIMITS.artifactFileBytes/3)*4),b=Buffer.from(encoded.toString(),'base64');
+      requireThat(b.toString('base64')===encoded.toString() && b.length===f.bytes && sha256(b)===f.sha256,'No-process artifact changed');total+=b.length;
+      requireThat(total<=EXECUTOR_LIMITS.artifactTotalBytes,'No-process inventory total limit');
+    }
+    await this.unchanged(r);
+  }
+  /** Read-only startup join. No Docker operations and no receipt reconstruction by consumers. */
+  async readUnstartedCancellation(handle:ExecutionHandle):Promise<DurableUnstartedCancellationReceipt> {
+    const r=await this.record(handle);await this.verifyUnstartedEvidence(r);return this.journal.cancellationReceipt(r);
+  }
+  async recoverUnstarted(handle:ExecutionHandle):Promise<UnstartedRecoveryConfirmation> {
+    return this.exclusive(async()=>{
+      try {
+        const r=await this.record(handle);
+        if(r.phase==='REMOVED')return {confirmed:true,receipt:await this.readUnstartedCancellation(handle)};
+        return await this.journal.withUnstartedRecovery(r,async save=>{
+          // MAY/legacy was rejected under native exclusion BEFORE any evidence/mutation.
+          let v=await this.inspect(r);await this.unchanged(r);
+          if(!r.unstartedCancellation || v) {
+            this.requireUnstarted(r,v);
+            if(r.containerId)requireThat(r.containerId===v.Id,'Unstarted container ID changed');
+            r.containerId=v.Id;
+            if(r.startDispatch==='NOT_DISPATCHED'){r.startDispatch='REVOKED';await save();}
+            if(!r.unstartedCancellation){r.unstartedCancellation=await this.collectUnstarted(r,v);await save();}
+          }
+          // A missing object is reconcilable ONLY from the previously durable cancellation intent.
+          await this.verifyUnstartedEvidence(r);
+          if(v) {
+            v=await this.inspect(r);this.requireUnstarted(r,v);await this.unchanged(r);
+            requireThat(r.startDispatch==='REVOKED' && r.containerId===v.Id,'Revocation/identity changed before removal');
+            try {await this.checked(['rm',v.Id]);} catch { /* Reconcile actual same-engine ID+name absence, never blind retry here. */ }
+          }
+          await this.unstartedAbsent(r);
+          r.unstartedCancellation!.confirmedAt=new Date(this.now()).toISOString();r.phase='REMOVED';await save();
+          await this.verifyUnstartedEvidence(r);
+          return {confirmed:true as const,receipt:await this.journal.cancellationReceipt(r)};
+        });
+      } catch(error) {
+        return {confirmed:false,handle:{...handle},problem:problem('PROCESS_STOP_UNCONFIRMED','Unstarted cancellation/removal unconfirmed: '+String(error).slice(0,512))};
       }
     });
   }

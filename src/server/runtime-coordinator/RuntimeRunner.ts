@@ -1,10 +1,11 @@
 /** Neutral run lifecycle. This class never starts a host task or chooses a language/tool/image. */
 import { randomUUID } from 'node:crypto';
 import type { RunProfileV2, RunRequestV2, RunV2, RuntimeProblem, RuntimeProfile } from '../../shared/runtime-v2';
-import type { AdapterOutcome, AcknowledgedRunInput, CollectedArtifacts, DurableTerminalReceipt,
+import type { AdapterOutcome, AcknowledgedRunInput, CollectedArtifacts, DurableTerminalReceipt, DurableUnstartedCancellationReceipt,
   ExecutionExit, ExecutionHandle, ExecutionPlan, ExecutionPort, PlanContext, TaskRuntimeAdapter } from '../execution/ports';
 import { validateRunV2 } from '../../shared/validation-v2';
 import { AppError, validId } from '../errors';
+import { canonicalJson, sha256 } from '../execution/files';
 
 export interface RuntimeRunAdmission {
   projectId: string;
@@ -127,7 +128,7 @@ export class RuntimeRunner {
    * Unconfirmed owners remain separately retained until explicit same-owner Stop. */
   restore(input: { sessionId:string; original:RunV2; plan:ExecutionPlan; adapter:TaskRuntimeAdapter;
     handle:ExecutionHandle|null; exit:ExecutionExit|null; collection:CollectedArtifacts|null;
-    outcome:AdapterOutcome|null; removed:boolean; noProcess:boolean;
+    outcome:AdapterOutcome|null; removed:boolean; noProcess:boolean; cancellation?:DurableUnstartedCancellationReceipt|null;
     retained:{run:RunV2;requested:'USER'|'TIMEOUT'|null}|null }):void {
     const r={...snapshot({...input,adapter:undefined}),adapter:input.adapter}, run=r.retained?.run ?? r.original;
     requireThat(!this.jobs.has(run.runId) && validateRunV2(run) && run.runId===r.plan.ownership.runId &&
@@ -141,6 +142,10 @@ export class RuntimeRunner {
       job.run.status='CANCELLED';job.run.finishedAt ??=new Date(this.now()).toISOString();
       job.run.processProblem=problem('RUN_NOT_DISPATCHED','Original accepted Run has no executor intent; no process effect was dispatched.');
       this.options.retainState?.(snapshot(job.plan!),snapshot(job.run),job.requested);
+    } else if(r.cancellation) {
+      requireThat(r.removed && r.handle && same(r.handle,r.cancellation.handle) && !r.exit && !r.collection && !r.outcome,
+        'Cancellation is not a process exit/collection');
+      this.applyCancellation(job,input.cancellation!);
     } else if(r.removed) {
       requireThat(r.handle && r.exit && r.collection && r.outcome,'Removed Run lacks durable terminal facts');
       const terminal=r.retained?.run;
@@ -230,6 +235,13 @@ export class RuntimeRunner {
           job.handle=freeze(snapshot(matching[0].handle));
         }
         if (!job.exit) {
+          if(job.run.startedAt===null && this.options.execution.recoverUnstarted) {
+            const recovered=await this.options.execution.recoverUnstarted(job.handle);
+            if(recovered.confirmed) {
+              this.applyCancellation(job,recovered.receipt);
+              this.release(job);this.emitState(job);return;
+            }
+          }
           const stopped=await this.options.execution.stop(job.handle,reason);
           if (stopped.confirmed===true) this.acceptExit(job,stopped.exit);
           else if (!job.exit) throw new AppError(503,'PROCESS_STOP_UNCONFIRMED','Container Stop is not confirmed.');
@@ -242,8 +254,22 @@ export class RuntimeRunner {
         if (!job.exit) { this.uncertain(job,'PROCESS_STOP_UNCONFIRMED','Container Stop is not confirmed.');throw error; }
       } finally { if(job.stopAttempt===attempt) job.stopAttempt=undefined; }
     } else await job.stopAttempt;
-    await this.settle(job);
+    if(this.unsettled.has(job))await this.settle(job);
     return this.get(job.run.runId);
+  }
+  private applyCancellation(job:Job,receipt:DurableUnstartedCancellationReceipt):void {
+    requireThat(job.handle && job.plan && sameHandle(job.handle,receipt.handle) && same(job.plan.ownership,receipt.ownership) &&
+      receipt.inputManifestSha256===job.plan.input.identity.manifestSha256 && job.run.startedAt===null && !job.exit && !job.collection && !job.outcome &&
+      /^[a-f0-9]{64}$/.test(receipt.containerId) && receipt.planSha256===sha256(canonicalJson(job.plan)) && /^[a-f0-9]{64}$/.test(receipt.evidenceSha256) &&
+      /^[a-f0-9]{64}$/.test(receipt.journalSha256) && Number.isFinite(Date.parse(receipt.confirmedAt)),
+    'Cancellation receipt differs from original no-process Run');
+    if(job.run.finishedAt)requireThat(job.run.status==='CANCELLED' && job.run.finishedAt===receipt.confirmedAt && job.run.exitCode===null &&
+      job.run.testOutcome===(job.run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE') && job.run.testCount===null && job.run.processProblem?.code==='RUN_CANCELLED_UNSTARTED',
+    'Retained cancellation differs from durable receipt');
+    job.run.status='CANCELLED';job.run.startedAt=null;job.run.exitCode=null;job.run.finishedAt=receipt.confirmedAt;
+    job.run.testOutcome=job.run.mode==='RUN_TESTS'?'UNKNOWN':'NOT_APPLICABLE';job.run.testCount=null;job.run.serviceReadiness=null;
+    job.run.processProblem=problem('RUN_CANCELLED_UNSTARTED','Original Run cancelled before process dispatch; exact owned container removal durably confirmed.');
+    this.options.retainState?.(snapshot(job.plan),snapshot(job.run),job.requested);
   }
   private async settle(job: Job): Promise<void> {
     if (!this.unsettled.has(job)) return;

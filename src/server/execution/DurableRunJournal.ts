@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { atomicNoReplace } from '../AtomicNoReplace';
 import type {
-  AdapterOutcome, CollectedArtifacts, DurableTerminalReceipt, ExecutionExit, ExecutionHandle, ExecutionOwnership, ExecutionPlan
+  AdapterOutcome, CollectedArtifacts, DurableTerminalReceipt, DurableUnstartedCancellationReceipt, ExecutionExit, ExecutionHandle, ExecutionOwnership, ExecutionPlan
 } from './ports';
 import {
   canonicalDirectory, durableWrite, fsyncDirectory, readRegular, requireThat, safeId, sha256, canonicalJson
@@ -99,6 +99,9 @@ export interface JournalRecord {
   ownership:ExecutionOwnership;
   plan:ExecutionPlan;
   phase:'INTENT'|'CREATED'|'RUNNING'|'STOP_UNCONFIRMED'|'EXITED'|'COLLECTED'|'TERMINAL'|'REMOVED';
+  /** Missing on legacy records means UNKNOWN, never implicitly NOT_DISPATCHED. */
+  startDispatch?: 'NOT_DISPATCHED'|'MAY_HAVE_BEEN_DISPATCHED'|'REVOKED';
+  unstartedCancellation?: { evidencePath:string; evidenceSha256:string; confirmedAt:string|null };
   containerId:string|null;
   exit:ExecutionExit|null;
   collection:CollectedArtifacts|null;
@@ -138,12 +141,19 @@ export class DurableRunJournal {
   async read(runId:string):Promise<JournalRecord>{
     const r=JSON.parse((await readRegular(this.filename(runId),4*1024*1024)).toString()) as JournalRecord;
     requireThat(r.version===1 && Number.isFinite(r.createdAt) && Number.isSafeInteger(r.revision) && r.revision>=0 && r.handle.runId===runId && r.ownership.installationId===this.installationId && r.ownership.runId===runId && canonicalJson(r.plan.ownership)===canonicalJson(r.ownership) && r.plan.input.identity.runId===runId && ['INTENT','CREATED','RUNNING','STOP_UNCONFIRMED','EXITED','COLLECTED','TERMINAL','REMOVED'].includes(r.phase),'Corrupt/foreign journal');
+    requireThat(r.startDispatch===undefined || ['NOT_DISPATCHED','MAY_HAVE_BEEN_DISPATCHED','REVOKED'].includes(r.startDispatch),'Unknown dispatch fence');
+    if(r.unstartedCancellation)requireThat(r.startDispatch==='REVOKED' && r.containerId && !r.exit && !r.collection && !r.outcome &&
+      typeof r.unstartedCancellation.evidencePath==='string' && /^[a-f0-9]{64}$/.test(r.unstartedCancellation.evidenceSha256) &&
+      (r.phase==='REMOVED' ? typeof r.unstartedCancellation.confirmedAt==='string' && Number.isFinite(Date.parse(r.unstartedCancellation.confirmedAt)) && Date.parse(r.unstartedCancellation.confirmedAt)>0 : r.unstartedCancellation.confirmedAt===null),'Invalid cancellation journal');
+    if(r.startDispatch==='REVOKED' && r.phase==='REMOVED')requireThat(r.unstartedCancellation,'Revoked removal lacks cancellation proof');
     return r;
   }
   /** Cross-instance admission is atomic. An uncertain/crashed run fences new runs until reconciliation. */
   async reserve(record:JournalRecord) {
     await this.locked(async()=>{
       requireThat((await this.list()).every(r=>r.phase==='REMOVED'),'Unreconciled run blocks admission');
+      requireThat(record.phase==='INTENT' && record.revision===0 && !record.containerId && !record.exit && !record.collection && !record.outcome && !record.unstartedCancellation,'New reserve must be a fresh intent');
+      record.startDispatch='NOT_DISPATCHED';
       const file=this.filename(record.handle.runId);
       const fd=await fs.open(file,'wx',0o600);
       try{
@@ -156,17 +166,59 @@ export class DurableRunJournal {
       requireThat(canonicalJson(await this.read(record.handle.runId))===canonicalJson(record),'Intent readback mismatch');
     });
   }
-  async update(record:JournalRecord){
-    await this.locked(async()=>{
-      const old=await this.read(record.handle.runId);
-      requireThat(old.revision===record.revision,'Concurrent journal revision');
-      requireThat(old.handle.opaqueId===record.handle.opaqueId && canonicalJson(old.ownership)===canonicalJson(record.ownership) && canonicalJson(old.plan)===canonicalJson(record.plan),'Journal ownership changed');
-      const next={
-        ...record,revision:record.revision+1
-      };
-      await durableWrite(this.filename(record.handle.runId),canonicalJson(next));
-      record.revision=next.revision;
+  private async writeUpdate(record:JournalRecord, recovery=false, claim=false) {
+    const old=await this.read(record.handle.runId);
+    requireThat(old.revision===record.revision,'Concurrent journal revision');
+    requireThat(old.createdAt===record.createdAt && old.handle.opaqueId===record.handle.opaqueId && canonicalJson(old.ownership)===canonicalJson(record.ownership) && canonicalJson(old.plan)===canonicalJson(record.plan) && (!old.containerId || old.containerId===record.containerId),'Journal ownership changed');
+    const fenceUnchanged=old.startDispatch===record.startDispatch;
+    requireThat(fenceUnchanged || (old.startDispatch==='NOT_DISPATCHED' &&
+      (claim && record.startDispatch==='MAY_HAVE_BEEN_DISPATCHED' || recovery && record.startDispatch==='REVOKED')),'Start dispatch fence cannot regress/change without native CAS');
+    requireThat(recovery || canonicalJson(old.unstartedCancellation??null)===canonicalJson(record.unstartedCancellation??null),'Cancellation requires native recovery exclusion');
+    if(record.unstartedCancellation)requireThat(record.startDispatch==='REVOKED' && record.containerId && !record.exit && !record.collection && !record.outcome,'Cancellation contradicts process evidence');
+    if(old.unstartedCancellation)requireThat(record.unstartedCancellation &&
+      old.unstartedCancellation.evidencePath===record.unstartedCancellation.evidencePath && old.unstartedCancellation.evidenceSha256===record.unstartedCancellation.evidenceSha256 &&
+      (!old.unstartedCancellation.confirmedAt || old.unstartedCancellation.confirmedAt===record.unstartedCancellation.confirmedAt),'Cancellation intent immutable');
+    if(old.phase==='REMOVED')requireThat(canonicalJson(old)===canonicalJson(record),'Removed journal immutable');
+    const next={...record,revision:record.revision+1};
+    await durableWrite(this.filename(record.handle.runId),canonicalJson(next));
+    record.revision=next.revision;
+  }
+  async update(record:JournalRecord){ await this.locked(()=>this.writeUpdate(record)); }
+  /** Native exclusion spans the create invocation; revocation cannot slip between check and dispatch. */
+  async withCreateAuthority<T>(record:JournalRecord, dispatch:()=>Promise<T>):Promise<T> {
+    return this.locked(async()=>{
+      requireThat(canonicalJson(await this.read(record.handle.runId))===canonicalJson(record) && record.startDispatch==='NOT_DISPATCHED' && record.phase==='INTENT' && !record.containerId,'Create authority revoked/changed');
+      return dispatch();
     });
+  }
+  /** Durable monotonic CAS MUST resolve before transport.start is invoked. */
+  async claimStart(record:JournalRecord):Promise<void> {
+    await this.locked(async()=>{
+      requireThat(record.startDispatch==='NOT_DISPATCHED' && !record.unstartedCancellation,'Start authority unavailable');
+      record.startDispatch='MAY_HAVE_BEEN_DISPATCHED';
+      await this.writeUpdate(record,false,true);
+    });
+  }
+  /** The native lease spans bounded evidence, intent publication, recheck, rm and absence.
+   * All saves CAS the exact revision/plan. No second recovery or delayed create/start can enter.
+   */
+  async withUnstartedRecovery<T>(record:JournalRecord, action:(save:()=>Promise<void>)=>Promise<T>):Promise<T> {
+    return this.locked(async()=>{
+      requireThat(canonicalJson(await this.read(record.handle.runId))===canonicalJson(record) &&
+        ['NOT_DISPATCHED','REVOKED'].includes(record.startDispatch??''),'No positive no-dispatch authority');
+      return action(()=>this.writeUpdate(record,true));
+    });
+  }
+  async cancellationReceipt(record:JournalRecord):Promise<DurableUnstartedCancellationReceipt> {
+    // Re-acknowledge a visible final rename whose original directory-flush response
+    // may have failed. A read alone must not upgrade that uncertainty to durability.
+    await fsyncDirectory(this.directory);
+    const bytes=await readRegular(this.filename(record.handle.runId),4*1024*1024),r=await this.read(record.handle.runId),c=r.unstartedCancellation;
+    requireThat(canonicalJson(r)===canonicalJson(record) && r.phase==='REMOVED' && r.startDispatch==='REVOKED' && c && r.containerId &&
+      !r.exit && !r.collection && !r.outcome && typeof c.confirmedAt==='string' && Number.isFinite(Date.parse(c.confirmedAt)) && Date.parse(c.confirmedAt)>0 && /^[a-f0-9]{64}$/.test(c.evidenceSha256),'No durable unstarted cancellation');
+    return Object.freeze({handle:Object.freeze({...r.handle}),ownership:Object.freeze({...r.ownership}),containerId:r.containerId,
+      inputManifestSha256:r.plan.input.identity.manifestSha256,planSha256:sha256(canonicalJson(r.plan)),
+      evidenceSha256:c.evidenceSha256,journalSha256:sha256(bytes),confirmedAt:c.confirmedAt}) as DurableUnstartedCancellationReceipt;
   }
   async receipt(record:JournalRecord):Promise<DurableTerminalReceipt> {
     const bytes=await readRegular(this.filename(record.handle.runId),4*1024*1024);

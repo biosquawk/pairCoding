@@ -44,6 +44,17 @@ export interface DurableTerminalReceipt {
   readonly handle: ExecutionHandle; readonly ownership: ExecutionOwnership;
   readonly exit: ExecutionExit; readonly collectionSha256: string; readonly journalSha256: string;
 }
+declare const durableUnstartedCancellation: unique symbol;
+/** No process was dispatched. Distinct from exit/terminal/test-success authority. */
+export interface DurableUnstartedCancellationReceipt {
+  readonly [durableUnstartedCancellation]: true;
+  readonly handle: ExecutionHandle; readonly ownership: ExecutionOwnership;
+  readonly containerId: string; readonly inputManifestSha256: string; readonly planSha256: string;
+  readonly evidenceSha256: string; readonly journalSha256: string; readonly confirmedAt: string;
+}
+export type UnstartedRecoveryConfirmation =
+  { confirmed: true; receipt: DurableUnstartedCancellationReceipt } |
+  { confirmed: false; handle: ExecutionHandle; problem: RuntimeProblem };
 export interface OwnedOrphan {
   ownership: ExecutionOwnership; handle: ExecutionHandle;
   state: 'RUNNING' | 'EXITED' | 'UNKNOWN'; durableReceipt: DurableTerminalReceipt | null;
@@ -65,6 +76,8 @@ export interface ExecutionPort {
   serviceReadiness(handle: ExecutionHandle): Promise<ExecutionServiceReadiness | null>;
   wait(handle: ExecutionHandle, signal?: AbortSignal): Promise<ExecutionExit>;
   stop(handle: ExecutionHandle, reason: 'USER' | 'TIMEOUT' | 'RECOVERY'): Promise<StopConfirmation>;
+  /** Trusted same-owner recovery only; no inferred exit, automatic replay, or legacy backfill. */
+  recoverUnstarted?(handle: ExecutionHandle): Promise<UnstartedRecoveryConfirmation>;
   collect(handle: ExecutionHandle, exit: ExecutionExit): Promise<CollectedArtifacts>;
   /** Verify receipt matches retained ownership/exit/collection; exact NON-force rm only after durable outcome. */
   cleanup(receipt: DurableTerminalReceipt): Promise<void>;
