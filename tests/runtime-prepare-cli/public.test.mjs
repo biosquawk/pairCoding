@@ -33,18 +33,40 @@ function fixture(t, { profile = 'javascript-node', example = 'javascript-counter
 function tree(root) {
   return fs.readdirSync(root, { recursive: true }).sort().map(r => { const f = path.join(root, r), s = fs.lstatSync(f); return [r, s.isFile() ? hash(fs.readFileSync(f)) : 'dir']; });
 }
-function unitTransport(observed = { Id: id, Descriptor: descriptor, RepoDigests: [] }) {
-  const calls = [];
+// Actual createDockerClientState/beginDockerCommand contract: ONLY these three keys,
+// private per-output home/buildx and a fresh empty per-command credential directory.
+function assertClient(exe, args, options, root, used) {
+  assert.equal(exe, 'docker'); assert.equal(options.shell, false);
+  assert.deepEqual(Object.keys(options.env).sort(), ['BUILDX_CONFIG', 'HOME', 'PATH']);
+  assert.equal(options.env.PATH, process.env.PATH);
+  assert.equal(options.env.HOME, path.join(root, 'docker-home'));
+  assert.equal(options.env.BUILDX_CONFIG, path.join(root, 'docker-buildx'));
+  assert.equal(args[0], '--host');
+  assert.equal(args[1], process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock');
+  assert.equal(args[2], '--config');
+  const config = args[3];
+  assert.equal(path.dirname(config), path.join(root, 'docker-config'));
+  assert.match(path.basename(config), /^command-[0-9]{6}$/);
+  assert.equal(used.has(config), false, 'credential directory must never be reused');
+  for (const dir of [root, options.env.HOME, options.env.BUILDX_CONFIG, path.dirname(config), config]) {
+    const st = fs.lstatSync(dir);
+    assert.equal(st.isSymbolicLink(), false); assert.equal(st.isDirectory(), true);
+    assert.equal(fs.realpathSync(dir), dir);
+    if (process.platform !== 'win32') { assert.equal(st.mode & 0o777, 0o700); assert.equal(st.uid, process.getuid()); }
+  }
+  assert.deepEqual(fs.readdirSync(config), []);
+  used.add(config);
+}
+function unitTransport(root, observed = { Id: id, Descriptor: descriptor, RepoDigests: [] }) {
+  const calls = [], used = new Set();
+  let inspections = 0;
   const invoke = (exe, args, options) => {
     calls.push({ exe, args, options });
-    assert.equal(exe, 'docker'); assert.equal(options.shell, false);
-    assert.deepEqual(Object.keys(options.env).sort(), ['HOME', 'PATH']);
+    assertClient(exe, args, options, root, used);
     assert.ok(options.timeout > 0 && options.timeout <= 480000);
-    assert.equal(args[0], '--host'); assert.equal(args[2], '--config');
-    assert.deepEqual(fs.readdirSync(args[3]), []);
     const cmd = args.slice(4);
     if (cmd[0] === 'info') return { status: 0, signal: null, stdout: JSON.stringify(engine), stderr: '' };
-    if (cmd[0] === 'image') return { status: 0, signal: null, stdout: JSON.stringify([{ ...observed, Config: { User: '10001:10001', Entrypoint: null } }]), stderr: '' };
+    if (cmd[0] === 'image') return { status: 0, signal: null, stdout: JSON.stringify([{ ...(typeof observed === 'function' ? observed(cmd, ++inspections) : observed), Config: { User: '10001:10001', Entrypoint: null } }]), stderr: '' };
     throw new Error('Unexpected UNIT Docker operation');
   };
   return { invoke, calls };
@@ -62,6 +84,7 @@ function unitProducers() {
       const deps = { family: request.family, workingDirectory: request.workingDirectory, dependencySha256: request.dependencySha256, tools, preparedAt: '2026-11-11T00:00:00Z' };
       put(path.join(cache, 'tools.json'), JSON.stringify(tools)); put(path.join(cache, 'dependencies-prepared.json'), JSON.stringify(deps));
       const r = { schemaVersion: 1, status: 'PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION', request, ...identity, engine: actualEngine, imageId: id, observedImage: { Id: id, Descriptor: descriptor, RepoDigests: [] },
+        imageInspect: { Id: id, Descriptor: descriptor, RepoDigests: [], Config: { User: '10001:10001', Entrypoint: null } }, imageRetention: { pins: [] },
         cacheEvidence: { root: cache, tools: { path: 'tools.json', sha256: hash(JSON.stringify(tools)), actual: tools }, dependencies: { path: 'dependencies-prepared.json', sha256: hash(JSON.stringify(deps)), actual: deps } } };
       publish(r); return r;
     },
@@ -150,7 +173,7 @@ test('genuine Descriptor/index and RepoDigest accepted, including genuine Id=dig
 });
 
 test('UNIT execute reuses actual receipt/helper, selected one-profile lock/config passes actual guards+loader, exact output stdout selectors', async t => {
-  const f = fixture(t), plan = await buildPublicPreparePlan(f.argv), transport = unitTransport(), producers = unitProducers();
+  const f = fixture(t), plan = await buildPublicPreparePlan(f.argv), transport = unitTransport(f.output), producers = unitProducers();
   const beforeProject = tree(f.project), result = await executePublicPreparePlan(plan, { ...producers, spawnSync: transport.invoke });
   assert.equal(result.status, 'PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE'); assert.deepEqual(producers.calls, ['stage', 'prepare']);
   assert.equal(result.preparedRuntime, plan.preparedRuntime); assert.equal(result.runtimeConfig, plan.runtimeConfig);
@@ -162,9 +185,18 @@ test('UNIT execute reuses actual receipt/helper, selected one-profile lock/confi
 });
 
 test('UNIT absent manifest leaves explicit NOTREADY and no usable generated artifacts/config; raw receipt retained', async t => {
-  const f = fixture(t), p = await buildPublicPreparePlan(f.argv), transport = unitTransport({ Id: id, Descriptor: null, RepoDigests: [] });
+  const f = fixture(t), p = await buildPublicPreparePlan(f.argv);
+  // First two real retention reads (ID/reference) remain valid. The third is
+  // the actual publication observation: its missing manifest MUST stay NOTREADY.
+  const transport = unitTransport(f.output, (cmd, n) => {
+    assert.equal(cmd[0], 'image'); assert.equal(cmd[1], 'inspect');
+    if (n === 3) { assert.equal(cmd[2], id); return { Id: id, Descriptor: null, RepoDigests: [] }; }
+    assert.ok(n < 3); return { Id: id, Descriptor: descriptor, RepoDigests: [] };
+  });
   const result = await executePublicPreparePlan(p, { ...unitProducers(), spawnSync: transport.invoke });
   assert.equal(result.status, 'NOTREADY'); assert.equal(result.runtimeConfig, null);
+  assert.match(result.problem, /genuine matching manifest\/index Descriptor or RepoDigest required/);
+  assert.equal(transport.calls.filter(c => c.args[4] === 'image').length, 3);
   for (const name of ['runtime-config.json', 'images.lock.json', 'catalog.json']) assert.equal(fs.existsSync(path.join(f.output, name)), false);
   assert.equal(json(path.join(p.preparedRuntime, 'receipt.json')).imageId, id);
 });
@@ -178,7 +210,7 @@ test('UNIT failed/unknown transport or same-engine drift retains durable error, 
   }
 });
 
-test('language kinds strict BEFORE any write/run; default BOTH preserved (source), selected-only failure does not enter other kind', t => {
+test('language kinds strict BEFORE any write/run; default BOTH preserved (source), selected-only failure does not enter other kind', { skip: 'SUPERSEDED_BY_OWNER_LIGHTWEIGHT_POLICY c905 §2: LSP image preparation withdrawn; body/history retained, not PASS' }, t => {
   const f = fixture(t);
   for (const kinds of [[], ['java', 'java'], ['bogus'], ['java', 'python', 'java'], 'java']) {
     assert.throws(() => prepareLanguageImages(f.output, {}, { run: () => assert.fail(), save: () => assert.fail(), receipt: {} }, kinds), /language kinds/); assert.equal(fs.existsSync(f.output), false);
@@ -194,30 +226,41 @@ test('actual producer default plan compatible; optional explicit transport logs 
   const f = fixture(t), install = path.join(f.root, 'install');
   fs.mkdirSync(install); fs.mkdirSync(path.join(install, 'scripts')); fs.mkdirSync(path.join(install, 'runtimes'));
   // Unchanged actual source in a small UNIT installed-metadata sandbox, not a production pin proof.
-  for (const name of ['runtime-prepare.mjs', 'runtime-files.mjs', 'runtime-spec.mjs', 'runtime-dependencies.mjs', 'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-cache.mjs', 'runtime-tools.mjs', 'runtime-artifacts.mjs']) fs.copyFileSync(path.join(repo, 'scripts', name), path.join(install, 'scripts', name));
+  for (const name of ['runtime-prepare.mjs', 'runtime-files.mjs', 'runtime-spec.mjs', 'runtime-dependencies.mjs', 'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-cache.mjs', 'runtime-tools.mjs', 'runtime-artifacts.mjs', 'runtime-image-retention.mjs']) fs.copyFileSync(path.join(repo, 'scripts', name), path.join(install, 'scripts', name));
   fs.mkdirSync(path.join(install, 'docker')); fs.copyFileSync(path.join(repo, 'docker/runtime.Dockerfile'), path.join(install, 'docker/runtime.Dockerfile'));
-  const profile = json(path.join(repo, 'runtimes/catalog.json')).profiles[0], pin = 'node@sha256:' + '1'.repeat(64);
+  const profile = json(path.join(repo, 'runtimes/catalog.json')).profiles.find(p => p.id === 'javascript-node'), pin = 'node@sha256:' + '1'.repeat(64);
   const toolsRoot = path.join(f.root, 'tools'); fs.mkdirSync(toolsRoot); fs.mkdirSync(path.join(toolsRoot, 'node_modules')); fs.mkdirSync(path.join(toolsRoot, 'node_modules/unit')); put(path.join(toolsRoot, 'node_modules/unit/x'), 'unit');
   put(path.join(install, 'runtimes/catalog.json'), JSON.stringify({ profiles: [profile] }));
   put(path.join(install, 'runtimes/production-inputs.lock.json'), JSON.stringify({ images: { node: { reference: pin }, maven: { reference: 'maven@sha256:be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f' } }, artifacts: [{ kind: 'npm', name: 'unit', files: [{ path: 'x', sha256: hash('unit') }] }] }));
   const projectRoot = path.join(f.root, 'only-input'); fs.mkdirSync(projectRoot); put(path.join(projectRoot, 'main.js'), 'unit');
   const req = { schemaVersion: 1, workingDirectory: '.', installationId: 'unit', family: 'node', key: profile.id, imageTag: 'paircoach/runtime-unit:unit', baseImage: pin, nodeImage: pin,
     tools: { root: toolsRoot, files: [{ path: 'node_modules/unit/x', sha256: hash('unit') }] }, project: { root: projectRoot, files: [{ path: 'main.js', sha256: hash('unit') }] }, expectedTools: profile.expectedTools, dependencySha256: hash('[]'), outputRoot: path.join(f.root, 'default') };
-  const { prepare: actual } = await import(new URL('file://' + path.join(install, 'scripts/runtime-prepare.mjs')));
+  const { prepare: actual, createDockerClientState: actualClient } = await import(new URL('file://' + path.join(install, 'scripts/runtime-prepare.mjs')));
   const planned = actual(req); assert.equal(planned.status, 'PLAN_ONLY_NOT_PREPARED'); assert.deepEqual(planned.commands, []); assert.equal(planned.endpoint, undefined);
-  const configDirectory = path.join(f.root, 'emptyconfig'); fs.mkdirSync(configDirectory);
-  let calls = 0; const endpoint = 'unix:///var/run/docker.sock'; req.outputRoot = path.join(f.root, 'transport');
-  assert.throws(() => actual(req, true, Date.now() + 10000, null, { endpoint, configDirectory, spawnSync: (exe, argv, options) => {
-    calls++; assert.equal(exe, 'docker'); assert.deepEqual(argv.slice(0, 4), ['--host', endpoint, '--config', configDirectory]); assert.equal(options.shell, false); assert.deepEqual(Object.keys(options.env).sort(), ['HOME', 'PATH']);
+  const clientRoot = path.join(f.root, 'client'); fs.mkdirSync(clientRoot, { mode: 0o700 });
+  const clientState = actualClient(clientRoot), configDirectory = clientState.configDirectory, used = new Set();
+  let calls = 0; const endpoint = process.platform === 'win32' ? 'npipe:////./pipe/docker_engine' : 'unix:///var/run/docker.sock'; req.outputRoot = path.join(f.root, 'transport');
+  assert.throws(() => actual(req, true, Date.now() + 10000, null, { endpoint, configDirectory, clientState, spawnSync: (exe, argv, options) => {
+    calls++; assertClient(exe, argv, options, clientRoot, used);
     return { status: null, error: new Error('UNIT transport unknown'), stdout: '', stderr: '' };
   } }), /failed|reconcile/);
   assert.equal(calls, 1); const failed = json(path.join(req.outputRoot, 'receipt.json'));
-  assert.equal(failed.status, 'FAILED_RETAIN_AND_RECONCILE'); assert.deepEqual(failed.commands[0].argv.slice(0, 5), ['docker', '--host', endpoint, '--config', configDirectory]);
+  assert.equal(failed.status, 'FAILED_RETAIN_AND_RECONCILE'); assert.deepEqual(failed.commands[0].argv.slice(0, 5), ['docker', '--host', endpoint, '--config', [...used][0]]);
+  assert.equal(failed.commands[0].configDirectory, configDirectory);
+  // A structurally identical object is NOT the actual issuer's in-process capability.
+  for (const [name, transport, error] of [
+    ['forged', { endpoint, configDirectory, clientState: { ...clientState } }, /Unowned Docker client/],
+    ['alias', { endpoint, configDirectory: clientState.homeDirectory, clientState }, /alias\/outside/],
+  ]) {
+    req.outputRoot = path.join(f.root, name);
+    assert.throws(() => actual(req, true, Infinity, null, { ...transport, spawnSync: () => assert.fail('unsafe transport must not spawn') }), error);
+    assert.equal(fs.existsSync(req.outputRoot), false);
+  }
   req.outputRoot = path.join(f.root, 'unsafe'); put(path.join(configDirectory, 'config.json'), '{}');
-  assert.throws(() => actual(req, true, Infinity, null, { endpoint, configDirectory }), /empty/); assert.equal(fs.existsSync(req.outputRoot), false);
+  assert.throws(() => actual(req, true, Infinity, null, { endpoint, configDirectory, clientState }), /credential pool entry/); assert.equal(fs.existsSync(req.outputRoot), false);
 });
 
-test('actual language primitive selected-only and default BOTH complete real FS/injected Docker probes', t => {
+test('actual language primitive selected-only and default BOTH complete real FS/injected Docker probes', { skip: 'SUPERSEDED_BY_OWNER_LIGHTWEIGHT_POLICY c905 §2: JDT/pylsp acquisition/probes withdrawn; body/history retained, not PASS' }, t => {
   const f = fixture(t), jdt = Buffer.from('UNIT jdt artifact'), wheel = Buffer.from('UNIT wheel artifact');
   const lock = { images: Object.fromEntries(['java11', 'java17', 'java21', 'java27', 'python'].map(k => [k, { reference: k + '@' + digest }])), language: {
     pylsp: { pythonVersion: '3.13.9' }, artifacts: [{ kind: 'jdt', bytes: jdt.length, sha256: hash(jdt) }, { kind: 'language-wheel', name: 'unit-package', version: '1.0.0', filename: 'unit.whl', bytes: wheel.length, sha256: hash(wheel) }],
@@ -246,19 +289,51 @@ test('actual language primitive selected-only and default BOTH complete real FS/
   }
 });
 
-test('UNIT Python required language produces only observed selected language tools and passes existing config loader', async t => {
-  const f = fixture(t, { profile: 'python-3.13', example: 'python-calculator' }), p = await buildPublicPreparePlan(f.argv), producers = unitProducers(), transport = unitTransport();
-  const production = json('runtimes/production-inputs.lock.json');
-  let selected;
-  const result = await executePublicPreparePlan(p, { ...producers, spawnSync: transport.invoke, prepareLanguageImages: (root, lock, { receipt, save }, kinds) => {
-    selected = kinds;
-    const actual = { python: lock.language.pylsp.pythonVersion, packages: Object.fromEntries(lock.language.artifacts.filter(a => a.kind === 'language-wheel').map(a => [a.name, a.version])) };
-    receipt.language = [{ key: 'pylsp-runtime-3.13', imageTag: 'paircoach/language-pylsp:stage09', engine, observedImage: { Id: id, Descriptor: descriptor, RepoDigests: [] }, status: 'BUILT_TOOLS_CHECKED_NOT_LSP_FUNCTIONAL_ACCEPTANCE', tools: [
-      { name: 'paircoach-stage09-language-python-pylsp-inventory', status: 'TOOL_PROBE_PASS_REMOVED', inventory: actual, stdout: JSON.stringify(actual), stderr: '', container: { Id: 'c'.repeat(64), State: { Running: false, ExitCode: 0 }, Config: { Image: id, Labels: { 'paircoach.installation': 'stage09-runtime-assets', 'paircoach.role': 'language-tool-probe' } } } },
-    ] }]; save(); return receipt.language;
-  } });
-  assert.equal(result.status, 'PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE'); assert.deepEqual(selected, ['python']);
-  const images = json(path.join(f.output, 'images.lock.json')).images; assert.equal(images.length, 2);
-  assert.deepEqual(images[1].tools.map(t => t.name), ['python', 'python-lsp-server', 'jedi', 'pyflakes']);
-  assert.equal(images[1].tools.find(t => t.name === 'python-lsp-server').version, production.language.pylsp.version);
+// This case was mixed: remove ONLY the withdrawn pylsp requirement, keeping actual
+// publication, observed-tool inventory and config-loader checks ACTIVE for Python.
+test('UNIT Python builtin prepares only selected runtime tools and passes existing config loader without language acquisition', async t => {
+  const f = fixture(t, { profile: 'python-3.13', example: 'python-calculator' }), p = await buildPublicPreparePlan(f.argv), producers = unitProducers(), transport = unitTransport(f.output);
+  assert.equal(p.profile.language.provider, 'builtin'); assert.equal(p.languageRequired, null);
+  assert.equal(p.profile.language.imageLockKey, null); assert.equal(p.profile.language.serverJvm, null);
+  const result = await executePublicPreparePlan(p, { ...producers, spawnSync: transport.invoke });
+  assert.equal(result.status, 'PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE');
+  assert.deepEqual(producers.calls, ['stage', 'prepare']); // language producer throws if reached
+  const images = json(path.join(f.output, 'images.lock.json')).images;
+  assert.equal(images.length, 1); assert.equal(images[0].key, p.profile.imageLockKey);
+  assert.deepEqual(images[0].tools, p.profile.expectedTools);
+  assert.deepEqual(images[0].tools.map(t => t.name).sort(), ['node', 'pytest', 'python']);
+  assert.deepEqual(json(path.join(f.output, 'receipt.json')).language, []);
+  assert.deepEqual(json(path.join(f.output, 'catalog.json')).profiles, [p.profile]);
+  assert.equal(json(result.runtimeConfig).activeProfile, 'python-3.13');
+});
+
+// Active negative controls for the revised fixture: BUILDX_CONFIG must not mean
+// forwarding caller credentials, adopting nonempty config or hiding transport errors.
+test('UNIT public transport isolates hostile inherited env without widening child keys or mutating caller env', async t => {
+  const f = fixture(t), p = await buildPublicPreparePlan(f.argv), transport = unitTransport(f.output);
+  const names = ['HOME', 'USERPROFILE', 'BUILDX_CONFIG', 'DOCKER_HOST', 'DOCKER_CONFIG', 'DOCKER_AUTH_CONFIG', 'AWS_SECRET_ACCESS_KEY', 'HTTP_PROXY', 'HTTPS_PROXY'];
+  const original = Object.fromEntries(names.map(k => [k, process.env[k]]));
+  const hostile = Object.fromEntries(names.map(k => [k, '/UNIT-HOSTILE-' + k]));
+  try {
+    Object.assign(process.env, hostile);
+    const result = await executePublicPreparePlan(p, { ...unitProducers(), spawnSync: transport.invoke });
+    assert.equal(result.status, 'PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE');
+    assert.ok(transport.calls.length >= 3);
+    for (const c of transport.calls) assert.equal(Object.values(c.options.env).some(v => Object.values(hostile).includes(v)), false);
+    for (const k of names) assert.equal(process.env[k], hostile[k]);
+  } finally { for (const k of names) { if (original[k] === undefined) delete process.env[k]; else process.env[k] = original[k]; } }
+});
+
+test('UNIT unexpected command credential write fails closed before producers without retry or usable config', async t => {
+  const f = fixture(t), p = await buildPublicPreparePlan(f.argv), producers = unitProducers(), transport = unitTransport(f.output);
+  await assert.rejects(executePublicPreparePlan(p, { ...producers, spawnSync: (exe, args, options) => {
+    const reply = transport.invoke(exe, args, options);
+    put(path.join(args[3], 'config.json'), '{}'); // simulated forbidden Docker child write
+    return reply;
+  } }), /Unexpected Docker credential config write/);
+  assert.equal(transport.calls.length, 1); assert.deepEqual(producers.calls, []);
+  const receipt = json(path.join(f.output, 'receipt.json'));
+  assert.equal(receipt.status, 'FAILED_RETAIN_AND_RECONCILE'); assert.equal(receipt.commands.length, 1);
+  for (const name of ['runtime-config.json', 'images.lock.json', 'catalog.json']) assert.equal(fs.existsSync(path.join(f.output, name)), false);
+  assert.equal(fs.readFileSync(path.join(transport.calls[0].args[3], 'config.json'), 'utf8'), '{}', 'unknown state retained, never removed/reused');
 });

@@ -458,10 +458,15 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       setHintContainer(old => old.width === bounds.width && old.height === bounds.height ? old : { width: bounds.width, height: bounds.height });
       const selection = editor?.getSelection();
       const node = editor?.getDomNode();
-      if (!editor || !selection || !node || !editor.getModel()) { setProtectedCode(null); return; }
+      const model = editor?.getModel();
+      if (!editor || !selection || !node || !model) { setProtectedCode(null); return; }
+      // Undo/delete can emit scroll/layout before Monaco reconciles the old
+      // selection with the shorter model. Validate only the presentation range;
+      // never change the actual selection, document or Undo history here.
+      const range = model.validateRange(selection);
       const offset = node.getBoundingClientRect().top - bounds.top;
-      const top = Math.max(0, offset + editor.getTopForLineNumber(selection.startLineNumber) - editor.getScrollTop());
-      const bottom = Math.min(bounds.height, offset + editor.getBottomForLineNumber(selection.endLineNumber) - editor.getScrollTop());
+      const top = Math.max(0, offset + editor.getTopForLineNumber(range.startLineNumber) - editor.getScrollTop());
+      const bottom = Math.min(bounds.height, offset + editor.getBottomForLineNumber(range.endLineNumber) - editor.getScrollTop());
       const next = bottom > top ? { left: 0, top, width: bounds.width, height: bottom - top } : null;
       setProtectedCode(old => JSON.stringify(old) === JSON.stringify(next) ? old : next);
     };

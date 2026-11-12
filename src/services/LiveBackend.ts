@@ -164,7 +164,13 @@ export class LiveBackend {
         stamp:JSON.stringify([this.connectionGeneration,this.generation,this.lastSeq,this.maintenanceSourceRevision,p.files]),
         allowed:reason===undefined,reason};
     },requestId:id,publish:()=>this.publish(),
-    post:body=>this.http('/api/runtime/service-network/prepare','POST',body),
+    // Explicit maintenance is not a 5s editor read. PreparedRuntimeResolver permits
+    // 16 output roots: one engine read plus up to three Docker reads/root at3s.
+    // RuntimeServiceNetwork needs at most ten sequential 10s commands (fresh create
+    // or original read-first recovery). Add 5s for response delivery, only here.
+    // Local work/queue delays can still exceed this finite wait: abort remains UNKNOWN,
+    // never cancellation, release, automatic resend or permission to mint a new ID.
+    post:body=>this.http('/api/runtime/service-network/prepare','POST',body,true,undefined,(1+3*16)*3000+10*10000+5000),
     isAbsence:error=>error instanceof HttpRejectedError&&error.status===409&&!error.bodyUnreadable&&
       (error.code==='SERVICE_NETWORK_NOT_DISPATCHED'||error.code==='SERVICE_NETWORK_ABSENCE_CONFIRMED'),
     refresh:async authority=>{

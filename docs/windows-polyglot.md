@@ -64,6 +64,35 @@ Nie trzeba przygotowywać pozostałych sześciu profili, aby użyć Java21.
 w GUI ma pierwszeństwo przed `PAIRCOACH_WORKSPACE_DIR` i `workspaceRoot`.
 Usuń niezamierzone nadpisania w swojej sesji. Zmiana profilu wymaga restartu.
 
+### Windows z backendem WSL a native Windows
+
+- **WSL backend + przeglądarka Windows:** Node/npm, prepare i backend działają
+  w WSL, projekt/output mają ścieżki `/…`, a klient Docker używa
+  `unix:///var/run/docker.sock`. Edge/Chrome w Windows otwiera adres backendu.
+  To dowód topologii WSL, nie natywnego produktu Windows.
+- **Native Windows:** Node/npm, prepare i backend działają w Windows/PowerShell,
+  projekt/output mają lokalne ścieżki `C:\…`, a zależności aplikacji pochodzą
+  z własnego `npm.cmd ci`. Nie uruchamiaj tych komend przez `wsl.exe` i nie
+  używaj WSL `node_modules`, cache ani receiptów jako dowodu natywnego wykonania.
+
+Publiczny prepare wywołuje `docker` z PATH, z jawnym lokalnym endpointem
+`npipe:////./pipe/docker_engine` i własną konfiguracją klienta. Publiczny backend
+Windows używa domyślnie `C:\Program Files\Docker\Docker\resources\bin\docker.exe`
+i tego samego npipe, bez wyszukiwania executable w PATH. Potrzebny jest dostęp
+zwykłego konta do tego endpointu i engine **Linux amd64/x86_64** oraz działające
+bind mounty lokalnej kopii projektu. Inny kontekst Docker lub ustawienie
+`DOCKER_HOST` nie wybiera innego endpointu produktu. Nie ma publicznej flagi
+wyboru engine/executable; nie dodawaj TCP/socket proxy ani hostowego Maven/JDK
+jako obejścia. Brak dostępu/niezgodna instalacja to ograniczenie tej ścieżki,
+nie potwierdzenie awarii całego Docker Desktop.
+
+Dotychczasowy odczyt hosta (2026-11-12): Windows11 (NT10.0.26200),
+PowerShell5.1.26100.9168, Node25.6.1, obecne npm.cmd/git.exe/Edge/docker.exe;
+`docker.exe info` zwrócił exit0 i engine29.7.2/linux. To **wyłącznie discovery**:
+nie sprawdza publicznego npipe z izolowaną konfiguracją, bind mountów, prepare,
+startu, natywnej persystencji, Ctrl+C ani GUI. Nie oznacza native PASS.
+Dokładne bieżące wersje i tożsamość obrazu trzeba zmierzyć w danym przebiegu.
+
 ## 2. Nowa prywatna kopia przykładu i pełne ustawienia
 
 Najpierw zbuduj aplikację według windows-start. W PowerShell pozostań w jej
@@ -370,6 +399,49 @@ z niezależnie przekazanym zaufanym hashem manifestu. Nie wystarczy hash leżąc
 obok nieznanego ZIP. Źródłowy ZIP nie zawiera sekretów, node_modules, obrazów,
 cache, raw receipts ani danych `.paircoach`. Świeża instalacja ma własne zależności
 natywne i własne publiczne prepare; nie kopiuj dowodów gotowości ze starej.
+
+### Minimalny przebieg świeży ZIP → Spring21
+
+To zastosowanie istniejących kroków, nie osobny instalator ani odbiór całej
+macierzy. Producent K/ROOT używa czystego checkoutu przyjętego kandydata i
+istniejącego pakietera z [windows-package §1](windows-package.md):
+
+```powershell
+# $sha = pelny przyjety 40SHA, HEAD == $sha i clean; $out = NOWY katalog poza repo,
+# z istniejacym rodzicem; kontrole/list/dry-run jak w windows-package §1.
+node .\scripts\package-windows.mjs --commit $sha --output $out
+if ($LASTEXITCODE -ne 0) { throw 'Pakowanie FAIL: zachowaj wynik, nie ponawiaj w ciemno' }
+```
+
+K przekazuje packageId, sourceCommit, hash ZIP i niezależnie zaufany SHA256
+zewnętrznego manifestu. Odbiorca wykonuje **tylko §1 windows-start**:
+sprawdzenie manifestu/ZIP → nowy katalog rozpakowania →
+`verify-source-revision.mjs` przed npm → własne `npm.cmd ci` → clean/build.
+Nie przechodź do historycznego przykładu hostowego RunProfile z dalszych sekcji;
+dla Lightweight obowiązują ustawienia zadania z tego przewodnika. Git jest
+potrzebny producentowi, nie odbiorcy zweryfikowanej paczki z manifestem.
+
+W tym samym PowerShell, w zweryfikowanym `$app`, wykonaj istniejący blok §2,
+ale **zamiast** `$example = 'java-pattern'` wybierz
+`$example = 'spring-counter'`; pozostaw `$profile = 'java-maven-21'`.
+Blok tworzy nowy `$base`/projekt i pełne settings z zapakowanego
+`examples\spring-counter\task.v2.json` (Main/Tests900000ms, zgoda AI false).
+Następnie wykonaj bez zmian blok PowerShell §3 (publiczny `runtime:prepare`,
+log i kontrola wyniku), a po potwierdzonym prepare blok PowerShell §4
+(publiczny `npm.cmd start` z wygenerowanym config i `jobs/<profile>`).
+To zwykły start z paczki, nie zewnętrzny helper operatora.
+Użyj wolnego8080; nie zatrzymuj obcej usługi i nie wymyślaj flagi portu.
+
+W GUI wykonaj §5: Tests **FAILED** na celowym błędzie → popraw tylko kod
+`2 - 3` na `2 + 3` → ACK → świeże Tests **PASSED** z testCount>0 → jawne
+**Przygotuj środowisko** sieci → potwierdzenie i świeża gotowość obu trybów →
+Main → HTTP200 `/sum` z wartością5 pod pokazanym adresem → nadal RUNNING →
+Stop właściwego kontenera i niedostępny endpoint. Zachowaj rzeczywiste runId,
+workspaceVersion, hashe config/wejścia, raport JUnit i imageId/digest/narzędzia.
+Nie kopiuj starego config/cache/layout/receiptów do tej instalacji. Istniejące
+obrazy wolno wykorzystać tylko przez publiczny prepare; nie wykonuj prune dla
+pozoru „cold”. Ten przebieg pozostaje NOT_RUN do rzeczywistego wykonania;
+nie zastępuje Spring27, pozostałych profili ani regresji.
 
 Build, prepare, start, zdrowy proces i działający scenariusz GUI to osobne wyniki.
 Pełny odbiór wymaga siedmiu profili, Spring21/27, działających funkcji chronionych,

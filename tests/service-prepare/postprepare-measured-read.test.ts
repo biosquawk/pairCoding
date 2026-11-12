@@ -159,12 +159,17 @@ test('explicit recovery after lost GET retains byte-identical original; cheap re
 });
 
 
-test('original POST still has ordinary 5s deadline; new read budget is not global (fakeclock)',async t=>{
+// HUMANf9f99813/1ef77b83: the legitimate prepare POST has its own producer-derived
+// bounded wait. Only this obsolete POST5000 expectation changes; measured GET is unchanged.
+test('original POST has scoped bounded maintenance deadline, not ordinary editor5s (fakeclock)',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});const f=await fixture(t),gate=deferred<unknown>();
   f.post=signal=>{signal.addEventListener('abort',()=>gate.reject(Error('POST aborted')),{once:true});return gate.promise;};
   const pending=f.live.prepareRuntimeEnvironment();await setImmediate();
-  t.mock.timers.tick(4999);assert.equal(f.posts()[0].signal.aborted,false);
+  const original=structuredClone(f.original()),postBudgetMs=(1+3*16)*3000+10*10000+5000;
+  t.mock.timers.tick(5001);assert.equal(f.posts()[0].signal.aborted,false);
+  t.mock.timers.tick(postBudgetMs-5002);assert.equal(f.posts()[0].signal.aborted,false);
   t.mock.timers.tick(1);assert.equal(await pending,false);assert.equal(f.posts()[0].signal.aborted,true);
+  assert.deepEqual(f.original(),original);assert.equal(await f.live.prepareRuntimeEnvironment(),false);
   assert.equal(f.reads().length,0);assert.equal(f.maintenance().uncertain,true);assert.equal(f.original().receipt,null);
   assert.equal(f.posts().length,1);
 });
