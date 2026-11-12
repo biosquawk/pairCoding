@@ -84,7 +84,9 @@ export class DockerExecutor implements ExecutionPort {
   private outputUnavailable=new Set<string>();
   private outputs=new Map<string,{
     stdout:string;
-    stderr:string
+    stderr:string;
+    final?:boolean;
+    polling?:boolean
   }>();
   constructor(options:DockerExecutorOptions){
     this.policy=structuredClone({
@@ -320,31 +322,52 @@ export class DockerExecutor implements ExecutionPort {
       if(!set.size)this.listeners.delete(key);
     };
   }
-  private async emitLogs(r:JournalRecord){
+  private outputFailure(r:JournalRecord,error:unknown){
+    const key=r.handle.runId+':'+r.handle.opaqueId;
+    if(this.outputUnavailable.has(key))return;
+    this.outputUnavailable.add(key);
+    for(const listener of this.listeners.get(key)??[])try{
+      listener({stream:'STDERR',text:'[Docker output unavailable; terminal collection still mandatory: '+String(error).slice(0,512)+']\n'});
+    }catch{ /* One observer cannot break execution ownership. */ }
+  }
+  /** Only bounded Docker replies, never collected-file reads or synthetic task output.
+   * Final closes the existing per-handle cursor; delayed polls cannot replay it or revive disposed state.
+   */
+  private publishLogs(r:JournalRecord,reply:Pick<DockerReply,'stdout'|'stderr'>,final=false){
     const key=r.handle.runId+':'+r.handle.opaqueId,set=this.listeners.get(key);
-    if(!set?.size||this.outputUnavailable.has(key))return;
-    const reply=await this.checked(['logs',r.containerId!],{
-      maxBytes:EXECUTOR_LIMITS.logBytes
-    });
-    const previous=this.outputs.get(key)??{
-      stdout:'',stderr:''
-    };
-    for(const [name,stream]of [['stdout','STDOUT'],['stderr','STDERR']] as const){
-      const value=reply[name],old=previous[name];
-      requireThat(value.startsWith(old),'Docker log prefix changed; no synthetic output replay');
-      const delta=value.slice(old.length);
-      for(let n=0;
-      n<delta.length;
-      n+=16384)for(const listener of set)try{
-        listener({
-          stream,text:delta.slice(n,n+16384)
-        });
-      }catch{
-        /* One UI listener cannot break execution ownership. */
-      }
-      previous[name]=value;
-    }
+    const previous=this.outputs.get(key)??{stdout:'',stderr:'',final:false,polling:false};
+    if(previous.final)return;
+    if(final)previous.final=true;
     this.outputs.set(key,previous);
+    if(!set?.size||(!final&&this.outputUnavailable.has(key)))return;
+    try{
+      // Validate BOTH streams before publishing any bytes from this snapshot.
+      for(const name of ['stdout','stderr'] as const)requireThat(reply[name].startsWith(previous[name]),'Docker log prefix changed; no synthetic output replay');
+      for(const [name,stream]of [['stdout','STDOUT'],['stderr','STDERR']] as const){
+        const delta=Buffer.from(reply[name].slice(previous[name].length),'utf8');
+        for(let start=0;start<delta.length;){
+          let end=Math.min(start+16384,delta.length);
+          while(end<delta.length&&(delta[end]&0xc0)===0x80)end--;
+          const text=delta.subarray(start,end).toString('utf8');start=end;
+          for(const listener of set)try{listener({stream,text});}catch{ /* Observer isolation. */ }
+        }
+      }
+      previous.stdout=reply.stdout;previous.stderr=reply.stderr;
+    }catch(error){this.outputFailure(r,error);}
+  }
+  private async emitLogs(r:JournalRecord){
+    const key=r.handle.runId+':'+r.handle.opaqueId;
+    if(!this.listeners.get(key)?.size||this.outputUnavailable.has(key))return;
+    const state=this.outputs.get(key)??{stdout:'',stderr:'',final:false,polling:false};
+    if(state.final||state.polling)return;
+    this.outputs.set(key,state);state.polling=true;
+    try{
+      // Do not hold the lifecycle queue across a log request: Stop must not wait for it.
+      const reply=await this.checked(['logs',r.containerId!],{maxBytes:EXECUTOR_LIMITS.logBytes});
+      if(this.outputs.get(key)===state&&!state.final)this.publishLogs(r,reply);
+    }catch(error){
+      if(this.outputs.get(key)===state&&!state.final)this.outputFailure(r,error);
+    }finally{state.polling=false;}
   }
   async wait(handle:ExecutionHandle,signal?:AbortSignal):Promise<ExecutionExit>{
     while(true){
@@ -353,18 +376,7 @@ export class DockerExecutor implements ExecutionPort {
       if(r.exit)return structuredClone(r.exit);
       const v=await this.inspect(r);
       requireThat(v,'Container missing without verified exit');
-      try{
-        await this.emitLogs(r);
-      }catch(error){
-        const key=handle.runId+':'+handle.opaqueId;
-        this.outputUnavailable.add(key);
-        for(const listener of this.listeners.get(key)??[])try{
-          listener({
-            stream:'STDERR',text:'[Docker output unavailable; terminal collection still mandatory: '+String(error).slice(0,512)+']\n'
-          });
-        }catch{
-        }
-      }
+      await this.emitLogs(r);
       if(!v.State.Running&&['exited','dead'].includes(v.State.Status))return this.exclusive(async()=>{
         r=await this.record(handle);
         if(!r.exit){
@@ -670,9 +682,13 @@ export class DockerExecutor implements ExecutionPort {
       }
       const v=await this.inspect(r);
       requireThat(v&&canonicalJson(this.exit(r,v))===canonicalJson(exit),'Collection exit not confirmed');
-      const logs=await this.checked(['logs',v.Id],{
-        maxBytes:EXECUTOR_LIMITS.logBytes
-      });
+      let logs:DockerReply;
+      try{
+        logs=await this.checked(['logs',v.Id],{maxBytes:EXECUTOR_LIMITS.logBytes});
+      }catch(error){this.outputFailure(r,error);throw error;}
+      // start()/Stop may confirm exit before any poll/subscription. Reuse this bounded
+      // final reply before Runner release, even if subsequent durable collection fails.
+      this.publishLogs(r,logs,true);
       const destination=path.join(this.policy.runRoot,handle.runId,'collected');
       await fs.mkdir(destination,{
         mode:0o700,recursive:true
