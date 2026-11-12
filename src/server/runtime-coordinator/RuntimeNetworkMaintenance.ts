@@ -7,13 +7,13 @@ import { AppError } from '../errors';
 import { validateRuntimeNetworkPrepareRequest } from './RuntimeHttpValidation';
 import { JournalLease } from './JournalLease';
 import type { RuntimeExecutionLayout } from './RuntimeExecutionLayout';
-import type { PreparedServiceNetwork } from './RuntimeServiceNetwork';
+import { runtimeServiceNetworkName, type PreparedServiceNetwork } from './RuntimeServiceNetwork';
 import { canonical, privateDirectory, createRecord, readRecord, replaceRecord, SerialQueue, sha256 } from './storage';
 export interface RuntimeNetworkPrepareRequest {
   requestId:string; clientId:string; sessionId:string; expectedWorkspaceVersion:number;
   configurationGeneration:string; controlEpoch:number;
 }
-export interface NetworkMaintenanceContext {layout:RuntimeExecutionLayout;engineId:string}
+export interface NetworkMaintenanceContext {layout:RuntimeExecutionLayout;engineId:string;purpose?:'http-nat-v1'}
 export class NetworkMaintenanceAbsence extends Error {
   constructor(readonly state:'NOT_DISPATCHED'|'ABSENCE_CONFIRMED') {super('Original maintenance reconciled without an available bridge; use a separately explicit new request.');}
 }
@@ -37,9 +37,9 @@ export class RuntimeNetworkMaintenance {
       const e=r.body as Entry;
       if(!e || e.version!==1 || e.projectId!==this.projectId || !validateRuntimeNetworkPrepareRequest(e.request) || r.sha256!==sha256(canonical(e)) || name!==this.key(e.request)+'.json' ||
           Object.keys(e).sort().join(',')!=='context,projectId,request,result,state,version' || !['PENDING','PREPARED','NOT_DISPATCHED','ABSENCE_CONFIRMED'].includes(e.state) || (e.state==='PREPARED')!==(e.result!==null) ||
-          e.context!==null && (!e.context || Object.keys(e.context).sort().join(',')!=='engineId,layout' || typeof e.context.engineId!=='string' || !e.context.layout || e.context.layout.projectId!==this.projectId) ||
+          e.context!==null && (!e.context || !['engineId,layout','engineId,layout,purpose'].includes(Object.keys(e.context).sort().join(',')) || ('purpose' in e.context && e.context.purpose!=='http-nat-v1') || typeof e.context.engineId!=='string' || !e.context.layout || e.context.layout.projectId!==this.projectId) ||
           e.result!==null && (!e.context || Object.keys(e.result).sort().join(',')!=='engineId,installationId,name,networkId,projectId,schemaVersion,status' || e.result.schemaVersion!==1 || e.result.status!=='PREPARED'||e.result.projectId!==this.projectId ||
-            e.result.engineId!==e.context.engineId || e.result.installationId!==e.context.layout.installationId || e.result.name!==`paircoach-${e.context.layout.installationId}-service` || !/^[a-f0-9]{64}$/.test(e.result.networkId)))throw Error('Invalid maintenance record');
+            e.result.engineId!==e.context.engineId || e.result.installationId!==e.context.layout.installationId || e.result.name!==runtimeServiceNetworkName(e.context.layout.installationId,e.context.purpose) || !/^[a-f0-9]{64}$/.test(e.result.networkId)))throw Error('Invalid maintenance record');
       return e;
     });
   }
@@ -60,6 +60,8 @@ export class RuntimeNetworkMaintenance {
       let result:PreparedServiceNetwork;
       try {result=await perform(!!prior,structuredClone(entry.context),context=>{
         this.check();authorize(false);
+        if(!context || !['engineId,layout','engineId,layout,purpose'].includes(Object.keys(context).sort().join(',')) ||
+            ('purpose' in context && context.purpose!=='http-nat-v1'))throw Error('Unknown maintenance context/purpose');
         if(prior || entry.context)throw Error('Original maintenance context may only be staged once before dispatch');
         entry={...entry,context:structuredClone(context)};replaceRecord(file,this.encode(entry));
       });}

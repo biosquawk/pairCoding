@@ -14,6 +14,8 @@ export interface RuntimeServiceNetworkContext {
   readonly layout: Readonly<{stateDirectory:string;installationId:string;projectId:string;workspaceRoot:string}>;
   readonly transport: DockerTransport;
   readonly engineId: string;
+  /** Absent selects the immutable legacy internal generation. */
+  readonly purpose?: 'http-nat-v1';
   assertCurrent():void;
 }
 export interface PreparedServiceNetwork {
@@ -35,9 +37,10 @@ function exact(value: unknown, keys: string[]): value is Record<string, unknown>
   return !!value && typeof value === 'object' && !Array.isArray(value) &&
     Object.keys(value).sort().join(',') === [...keys].sort().join(',');
 }
-export function runtimeServiceNetworkName(installationId:string):string {
+export function runtimeServiceNetworkName(installationId:string, purpose?:'http-nat-v1'):string {
+  requireState(purpose===undefined || purpose==='http-nat-v1', 'unknown service network purpose');
   requireState(validId(installationId), 'invalid installation ID');
-  const name = `paircoach-${installationId}-service`;
+  const name = `paircoach-${installationId}-service${purpose==='http-nat-v1'?'-http-v1':''}`;
   requireState(safeId(name), 'installation identity cannot form approved service name (80 character limit); never truncate or replace identity');
   return name;
 }
@@ -66,7 +69,8 @@ function authority(input: RuntimeServiceNetworkContext) {
   input.assertCurrent();
   const layout = {...input.layout}, engineId = input.engineId, transport = input.transport;
   requireState(typeof engineId === 'string' && engineId.length > 0 && engineId.length <= 256 && !/[\s\x00-\x1f\x7f]/.test(engineId), 'invalid approved engine ID');
-  const name = runtimeServiceNetworkName(layout.installationId);
+  const purpose=input.purpose;
+  const name = runtimeServiceNetworkName(layout.installationId,purpose);
   requireState(validId(layout.projectId), 'invalid project ID');
   canonicalDirectory(layout.workspaceRoot);
   const ws=fs.lstatSync(layout.workspaceRoot,{bigint:true}), workspaceIdentity=[ws.dev,ws.ino].join(':');
@@ -80,12 +84,12 @@ function authority(input: RuntimeServiceNetworkContext) {
   requireState(exact(identity,['version','workspaceRoot','projectId','installationId']) && identity.version === 1 &&
     identity.workspaceRoot === layout.workspaceRoot && identity.projectId === layout.projectId && identity.installationId === layout.installationId,
     'existing installation identity mismatch; never reset it');
-  const directory = path.join(layout.stateDirectory,'service-network');
+  const directory = path.join(layout.stateDirectory,purpose==='http-nat-v1'?'service-network-http-v1':'service-network');
   let childIdentity: string | null = null, lease: JournalLease | undefined;
   const observed = new Map<string, {bytes:Buffer;stamp:string}>();
   function guard() {
     input.assertCurrent();
-    requireState(canonical(input.layout) === canonical(layout) && input.engineId === engineId && input.transport === transport, 'context changed');
+    requireState(canonical(input.layout) === canonical(layout) && input.engineId === engineId && input.transport === transport && input.purpose === purpose, 'context changed');
     canonicalDirectory(layout.workspaceRoot);
     const wsNow=fs.lstatSync(layout.workspaceRoot,{bigint:true});
     requireState([wsNow.dev,wsNow.ino].join(':')===workspaceIdentity, 'workspace root identity changed');
@@ -126,7 +130,7 @@ function authority(input: RuntimeServiceNetworkContext) {
     requireState(id===engineId, 'approved engine identity mismatch');
   }
   const labels = {'paircoach.installation':layout.installationId,'paircoach.project':layout.projectId,
-    'paircoach.engine':engineId,'paircoach.role':'service-network'};
+    'paircoach.engine':engineId,'paircoach.role':'service-network',...(purpose==='http-nat-v1'?{'paircoach.purpose':purpose}:{})};
   async function observe():Promise<string|null> {
     await engine(); guard();
     const r=await run(['network','ls','--no-trunc','--filter',`name=^${name}$`,'--format','{{json .}}']);
@@ -143,8 +147,8 @@ function authority(input: RuntimeServiceNetworkContext) {
     let data:unknown; try { data=JSON.parse(inspected.stdout); } catch { throw Error('SERVICE_NETWORK: malformed network inspect'); }
     requireState(Array.isArray(data) && data.length===1, 'ambiguous network inspect');
     const net=data[0];
-    requireState(net && net.Id===row.ID && id64(net.Id) && net.Name===name && net.Internal===true && net.Driver==='bridge' &&
-      net.Scope==='local' && canonical(net.Labels)===canonical(labels), 'foreign, external, malformed or replaced service bridge');
+    requireState(net && net.Id===row.ID && id64(net.Id) && net.Name===name && net.Internal===(purpose!=='http-nat-v1') && net.Driver==='bridge' &&
+      net.Scope==='local' && canonical(net.Labels)===canonical(labels), 'foreign, wrong-generation, malformed or replaced service bridge');
     await engine(); guard();
     return net.Id;
   }
@@ -189,7 +193,7 @@ function authority(input: RuntimeServiceNetworkContext) {
     }
     return {intents,receipt,entries,responses};
   }
-  return {guard,exists,read,write,run,engine,observe,binding,ledger,directory,
+  return {guard,exists,read,write,run,engine,observe,binding,ledger,directory,labels,purpose,
     lock() { guard(); privateDirectory(directory); childIdentity=directoryIdentity(directory); guard(); lease=new JournalLease(path.join(directory,'lease')); guard(); },
     close() { lease?.close(); },
   };
@@ -242,10 +246,8 @@ export async function prepareRuntimeServiceNetwork(context:RuntimeServiceNetwork
     a.write(intentFile(last.sequence),last);
     await a.engine(); a.guard();
     // No caller-selected flags/name/labels, no rm/connect/disconnect/prune or Run invocation.
-    const args=['network','create','--driver','bridge','--internal'];
-    const labels={'paircoach.installation':a.binding.installationId,'paircoach.project':a.binding.projectId,
-      'paircoach.engine':a.binding.engineId,'paircoach.role':'service-network'};
-    args.push(...Object.entries(labels).flatMap(([k,v])=>['--label',`${k}=${v}`]),a.binding.name);
+    const args=['network','create','--driver','bridge',...(a.purpose==='http-nat-v1'?[]:['--internal'])];
+    args.push(...Object.entries(a.labels).flatMap(([k,v])=>['--label',`${k}=${v}`]),a.binding.name);
     let returnedId:string|null=null, outcome:Response['outcome']='UNKNOWN';
     try {
       a.guard();

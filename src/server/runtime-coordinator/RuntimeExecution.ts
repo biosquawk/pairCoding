@@ -14,7 +14,7 @@ import type { RuntimeProfile, RunRequestV2, RunV2, ModeReadiness, SettingsV2 } f
 import type { RuntimeConfiguration, RuntimeReadinessDependencies } from '../runtime-config';
 import { AppError } from '../errors';
 import { canonical, readRecord, SerialQueue, sha256 } from './storage';
-import { inspectRuntimeServiceNetwork, prepareRuntimeServiceNetwork } from './RuntimeServiceNetwork';
+import { inspectRuntimeServiceNetwork, prepareRuntimeServiceNetwork, type PreparedServiceNetwork } from './RuntimeServiceNetwork';
 import { NetworkMaintenanceAbsence, type RuntimeNetworkPrepareRequest, type NetworkMaintenanceContext } from './RuntimeNetworkMaintenance';
 import type { RuntimeWorkspace } from './RuntimeWorkspace';
 import { RuntimeRunState } from './RuntimeRunState';
@@ -55,10 +55,10 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
   const maintenanceQueue = new SerialQueue();
   const check = () => { options.assertCurrent(); if (core.workspace.rootPath !== layout.workspaceRoot || core.workspace.projectId !== layout.projectId)
     throw new AppError(409, 'PROJECT_STATE_CHANGED', 'Execution project changed.'); };
-  const executorFor = (selected: PreparedRuntimeSelection, profile: RuntimeProfile): DockerExecutor => new DockerExecutor({
+  const executorFor = (selected: PreparedRuntimeSelection, profile: RuntimeProfile, serviceNetworkIdentity?:PreparedServiceNetwork): DockerExecutor => new DockerExecutor({
     transport: options.transport, journal, policy: {
       installationId: layout.installationId, engineId: selected.engineId, runRoot: layout.runRoot,
-      nonRootUser: '10001:10001', managedCacheRoot: selected.outputRoot, serviceNetwork: options.serviceNetwork,
+      nonRootUser: '10001:10001', managedCacheRoot: selected.outputRoot, serviceNetwork: options.serviceNetwork, serviceNetworkIdentity,
       // Executor independently validates the COMPLETE dispatcher grammar before this exact structural guard.
       runtimes: [{ profile, image: selected.image, caches: selected.caches,
         commandAllowed: command => command.executable === '/opt/paircoach/node/bin/node' && command.args.length === 2 &&
@@ -89,10 +89,10 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         const selected = await prepared.resolve(configuration.resolved, mode, run); check();
         if (mode === 'RUN_MAIN' && 'containerPort' in run.task.entry) {
           try {
-            const receipt=await inspectRuntimeServiceNetwork({layout,transport:options.transport,engineId:selected.engineId,assertCurrent:check});check();
+            const receipt=await inspectRuntimeServiceNetwork({layout,transport:options.transport,engineId:selected.engineId,purpose:'http-nat-v1',assertCurrent:check});check();
             if(!receipt || receipt.name!==options.serviceNetwork)throw Error('Missing exact owned bridge');
           } catch {
-            check();modes[mode]=denied('SERVICE_NETWORK_PREPARE_REQUIRED','Explicitly prepare/reconcile the installation-owned internal service bridge and exact engine receipt; no external bridge/host fallback.');continue;
+            check();modes[mode]=denied('SERVICE_NETWORK_PREPARE_REQUIRED','Explicitly prepare/reconcile the installation-owned HTTP NAT bridge and exact engine receipt; HTTP Main permits outbound access, Tests/nonservice stay offline.');continue;
           }
         }
         modes[mode] = (await executorFor(selected, profile).readiness(profile, generation)).modes[mode]; check();
@@ -180,7 +180,14 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
           engineId: selected.engineId, imageId: selected.image.imageId,
           containerName: `paircoach-${layout.installationId}-${runtime.profile.id}-${runId}` };
         retainedPolicy = { managedCacheRoot: selected.outputRoot, serviceNetwork: options.serviceNetwork };
-        byRun.set(runId, executorFor(selected, runtime.profile));
+        let serviceNetworkIdentity:PreparedServiceNetwork|undefined;
+        if (request.mode==='RUN_MAIN' && run.task.entry.kind==='SPRING_BOOT') {
+          const receipt=await inspectRuntimeServiceNetwork({layout,transport:options.transport,engineId:selected.engineId,purpose:'http-nat-v1',assertCurrent});
+          assertCurrent();
+          if(!receipt || receipt.name!==options.serviceNetwork)throw new AppError(409,'SERVICE_NETWORK_PREPARE_REQUIRED','Explicit HTTP network preparation required.');
+          serviceNetworkIdentity=receipt;
+        }
+        byRun.set(runId, executorFor(selected, runtime.profile, serviceNetworkIdentity));
         return { ownership, input, profile: runtime.profile, lockedImage: selected.image, caches: selected.caches } satisfies PlanContext;
       },
     });
@@ -263,25 +270,28 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
       guard();await assertAccounted();
       if((await journal.list()).some(r=>r.phase!=='REMOVED'))throw new AppError(409,'RUN_IN_PROGRESS','Durable orphan Run excludes network maintenance; reconcile that exact owner first.');
       guard();
-      let engineId:string;
+      let engineId:string, purpose:NetworkMaintenanceContext['purpose'];
       if(recovery) {
         if(!originalContext)throw new NetworkMaintenanceAbsence('NOT_DISPATCHED');
         if(!same(originalContext.layout,layout))throw Error('Retained original maintenance layout mismatch; no replay');
-        engineId=originalContext.engineId;
+        engineId=originalContext.engineId;purpose=originalContext.purpose;
       } else {
         const run=source.settings?.runProfiles.find(r=>r.kind==='RUN_MAIN');
         if(!runtime || !run)throw new AppError(409,'PREPARE_REQUIRED','Select a verified prepared runtime and explicit main task first.');
+        if(run.task.entry.kind!=='SPRING_BOOT')throw new AppError(409,'SERVICE_NETWORK_INELIGIBLE','Only an explicitly saved HTTP Main task can prepare this network.');
+        const valid=await adapters.get(runtime.profile).validate(runtime.profile,run);guard();
+        if(!valid.valid)throw new AppError(409,'SERVICE_NETWORK_INELIGIBLE','Save a valid HTTP Main task before preparation.');
         const selected=await prepared.resolve(runtime,'RUN_MAIN',run);guard();engineId=selected.engineId;
-        stage({layout:structuredClone(layout),engineId});guard();
+        purpose='http-nat-v1';stage({layout:structuredClone(layout),engineId,purpose});guard();
       }
-      const context={layout,transport:options.transport,engineId,assertCurrent:guard};
+      const context={layout,transport:options.transport,engineId,purpose,assertCurrent:guard};
       if(recovery) {
         // First reconcile fresh read-only receipt/engine, even for a previously committed reply.
         let receipt=null,absence=false;try {receipt=await inspectRuntimeServiceNetwork(context);absence=receipt===null;}catch {guard();}
         guard();if(receipt)return receipt;
         // Only the actual helper's original durable intent permits its reconciliation path.
         // No intent => NEVER replay dispatch after our own crash-before-helper boundary.
-        const directory=path.join(layout.stateDirectory,'service-network');
+        const directory=path.join(layout.stateDirectory,purpose==='http-nat-v1'?'service-network-http-v1':'service-network');
         const names=fs.existsSync(directory)?fs.readdirSync(directory):[];
         if(names.length>386)throw Error('Unbounded service ledger');
         const hasOriginalIntent=names.filter(n=>/^intent-\d{3}\.json$/.test(n)).some(n=>{
@@ -295,7 +305,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
         guard();
         // Helper explicitly records a fresh same-engine absence before permitting a NEW
         // attempt. Preserve it and close only this original request, never infer no effect.
-        const directory=path.join(layout.stateDirectory,'service-network');
+        const directory=path.join(layout.stateDirectory,purpose==='http-nat-v1'?'service-network-http-v1':'service-network');
         if(fs.existsSync(directory))for(const n of fs.readdirSync(directory).filter(n=>/^intent-\d{3}\.json$/.test(n))) {
           const bytes=readRecord(path.join(directory,n),65536)!,intent=JSON.parse(bytes.toString('utf8'));
           if(intent.requestId!==request.requestId)continue;

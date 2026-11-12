@@ -36,8 +36,10 @@ export interface ExecutorPolicy {
   runtimes:readonly ApprovedRuntime[];
   nonRootUser:string;
   managedCacheRoot:string|null;
-  /** Preprepared isolated internal bridge. Required only for neutral HTTP service. */
+  /** Exact preprepared bridge. New HTTP Main uses an outbound-capable owned NAT generation. */
   serviceNetwork:string|null;
+  /** Trusted current helper receipt, never caller/task input. Absent on retained legacy Run policies. */
+  serviceNetworkIdentity?:Readonly<{schemaVersion:1;status:'PREPARED';installationId:string;projectId:string;engineId:string;name:string;networkId:string}>;
 }
 export function approvedRuntime(policy:ExecutorPolicy,profile:RuntimeProfile) {
   const runtime=policy.runtimes.find(p=>p.profile.id===profile.id);
@@ -101,7 +103,7 @@ export function dockerCreateArgs(policy:ExecutorPolicy,p:ExecutionPlan):string[]
   for(const [k,v]of Object.entries({
     installation:o.installationId,run:o.runId,profile:o.profileId,engine:o.engineId,image:o.imageId,role:'execution'
   }))args.push('--label',`paircoach.${k}=${v}`);
-  args.push('--user',p.isolation.nonRootUser,'--cap-drop=ALL','--security-opt=no-new-privileges','--read-only','--memory',String(p.resources.memoryBytes),'--memory-swap',String(p.resources.memoryBytes),'--cpus',String(p.resources.cpus),'--pids-limit',String(p.resources.pids),'--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--network',p.service?policy.serviceNetwork!:'none','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=67108864,mode=1777');
+  args.push('--user',p.isolation.nonRootUser,'--cap-drop=ALL','--security-opt=no-new-privileges','--read-only','--memory',String(p.resources.memoryBytes),'--memory-swap',String(p.resources.memoryBytes),'--cpus',String(p.resources.cpus),'--pids-limit',String(p.resources.pids),'--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=1','--network',p.service?(policy.serviceNetworkIdentity?.networkId??policy.serviceNetwork!):'none','--tmpfs','/tmp:rw,nosuid,nodev,noexec,size=67108864,mode=1777');
   for(const [source,target,ro]of [[p.input.immutableDirectory,'/input',true],[p.input.buildDirectory,'/workspace',false],[p.input.artifactsDirectory,'/artifacts',false],...p.caches.map((c,i)=>[c.directory,`/cache/${i}`,c.readOnly])] as [string,string,boolean][])args.push('--mount',`type=bind,source=${source},target=${target}${ro?',readonly':''}`);
   if(p.service)args.push('--publish',`127.0.0.1::${p.service.containerPort}`);
   args.push('--workdir',p.command.workingDirectory);

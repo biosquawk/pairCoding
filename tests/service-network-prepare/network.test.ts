@@ -9,7 +9,7 @@ import type { DockerReply, DockerTransport } from '../../src/server/execution/Do
 import { canonical, createRecord } from '../../src/server/runtime-coordinator/storage';
 const ID='a'.repeat(64), OTHER='b'.repeat(64), INSTALL='123e4567-e89b-42d3-a456-426614174000';
 const ok=(v:unknown):DockerReply=>({exitCode:0,stdout:JSON.stringify(v),stderr:''});
-function fixture(t:test.TestContext) {
+function fixture(t:test.TestContext,purpose?:'http-nat-v1') {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'service-network-')); fs.chmodSync(root,0o700);
   t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
   const stateDirectory=path.join(root,'state'),workspaceRoot=path.join(root,'workspace');
@@ -18,7 +18,7 @@ function fixture(t:test.TestContext) {
   const identity=path.join(stateDirectory,'installation.json');
   // Exact pre-existing factory FORMAT, not actual factory composition.
   createRecord(identity,Buffer.from(canonical({version:1,workspaceRoot,projectId:layout.projectId,installationId:INSTALL})));
-  const networkDir=path.join(stateDirectory,'service-network'), calls:string[][]=[];
+  const networkDir=path.join(stateDirectory,purpose?'service-network-http-v1':'service-network'), calls:string[][]=[];
   let net:Record<string,any>|null=null, current=true;
   let hook:((args:readonly string[])=>DockerReply|undefined|Promise<DockerReply|undefined>)|undefined;
   const transport:DockerTransport={async run(args,options) {
@@ -30,16 +30,16 @@ function fixture(t:test.TestContext) {
     if (args[1]==='create') {
       assert.ok(fs.existsSync(path.join(networkDir,'intent-001.json')),'intent durable BEFORE create');
       assert.equal(fs.lstatSync(path.join(networkDir,'intent-001.json')).mode&0o777,0o600);
-      assert.deepEqual(args,['network','create','--driver','bridge','--internal',
+      assert.deepEqual(args,['network','create','--driver','bridge',...(purpose?[]:['--internal']),
         '--label',`paircoach.installation=${INSTALL}`,'--label',`paircoach.project=${layout.projectId}`,
-        '--label','paircoach.engine=approved-engine','--label','paircoach.role=service-network',nameOf(INSTALL)]);
+        '--label','paircoach.engine=approved-engine','--label','paircoach.role=service-network',...(purpose?['--label','paircoach.purpose=http-nat-v1']:[]),nameOf(INSTALL,purpose)]);
       net=own(); return {exitCode:0,stdout:ID+'\n',stderr:''};
     }
     throw Error('unexpected Docker command');
   }};
-  const context:RuntimeServiceNetworkContext={layout,engineId:'approved-engine',transport,assertCurrent(){if(!current)throw Error('authority revoked');}};
-  function own() { return {Id:ID,Name:nameOf(INSTALL),Driver:'bridge',Internal:true,Scope:'local',Labels:{
-    'paircoach.installation':INSTALL,'paircoach.project':layout.projectId,'paircoach.engine':'approved-engine','paircoach.role':'service-network'}}; }
+  const context:RuntimeServiceNetworkContext={layout,purpose,engineId:'approved-engine',transport,assertCurrent(){if(!current)throw Error('authority revoked');}};
+  function own() { return {Id:ID,Name:nameOf(INSTALL,purpose),Driver:'bridge',Internal:!purpose,Scope:'local',Labels:{
+    'paircoach.installation':INSTALL,'paircoach.project':layout.projectId,'paircoach.engine':'approved-engine','paircoach.role':'service-network',...(purpose?{'paircoach.purpose':purpose}:{})}}; }
   const snapshot=()=>fs.existsSync(networkDir)?Object.fromEntries(fs.readdirSync(networkDir).map(f=>[f,fs.readFileSync(path.join(networkDir,f)).toString('hex')])):{};
   return {root,layout,identity,networkDir,calls,context,own,snapshot,
     request:(requestId='maintenance:1')=>({...context,requestId}),
@@ -216,4 +216,166 @@ test('read-only inspect does NOT adopt a pending created network or mutate its l
   await assert.rejects(prepare(f.request()));f.hook=undefined;const bytes=f.snapshot();
   await assert.rejects(inspect(f.context),/explicit reconciliation/);assert.deepEqual(f.snapshot(),bytes);assert.equal(f.creates(),1);
   await prepare(f.request());assert.equal(f.creates(),1);
+});
+
+// HUMAN352072e3: NEW explicitly prepared HTTP Main generation only; legacy tests above unchanged.
+test('current NAT exact purpose/name/private ledger, create once and stable readback',async t=>{
+  const f=fixture(t,'http-nat-v1'),before=fs.readFileSync(f.identity);
+  assert.equal(await inspect(f.context),null);assert.equal(f.creates(),0);
+  const r=await prepare(f.request());
+  assert.equal(r.name,`paircoach-${INSTALL}-service-http-v1`);
+  assert.equal(f.net!.Internal,false);assert.equal(f.net!.Labels['paircoach.purpose'],'http-nat-v1');
+  assert.equal(fs.existsSync(path.join(f.layout.stateDirectory,'service-network')),false);
+  const bytes=f.snapshot();assert.deepEqual(await prepare(f.request()),r);assert.deepEqual(await inspect(f.context),r);
+  assert.equal(f.creates(),1);assert.deepEqual(f.snapshot(),bytes);assert.deepEqual(fs.readFileSync(f.identity),before);
+});
+for(const [title,mutate]of Object.entries({
+  internal:(n:any)=>{n.Internal=true;},purpose:(n:any)=>{n.Labels['paircoach.purpose']='legacy';},
+  missingPurpose:(n:any)=>{delete n.Labels['paircoach.purpose'];},extra:(n:any)=>{n.Labels.extra='x';},
+  engine:(n:any)=>{n.Labels['paircoach.engine']='other';},project:(n:any)=>{n.Labels['paircoach.project']='other';},
+  installation:(n:any)=>{n.Labels['paircoach.installation']='other';},role:(n:any)=>{n.Labels['paircoach.role']='other';},
+  driver:(n:any)=>{n.Driver='overlay';},scope:(n:any)=>{n.Scope='swarm';},name:(n:any)=>{n.Name=nameOf(INSTALL);},
+  id:(n:any)=>{n.Id=OTHER;},
+}))test(`current NAT refuses altered ${title} after receipt, never recreates`,async t=>{
+  const f=fixture(t,'http-nat-v1');await prepare(f.request());const bytes=f.snapshot();mutate(f.net!);
+  await assert.rejects(inspect(f.context));await assert.rejects(prepare(f.request('new')));
+  assert.deepEqual(f.snapshot(),bytes);assert.equal(f.creates(),1);
+});
+test('current pending restart read-first preserves original intent and never repeats create',async t=>{
+  const f=fixture(t,'http-nat-v1');f.hook=args=>{
+    if(args[1]==='create'){f.net=f.own();throw Error('lost reply');}
+    if(f.creates()&&args[1]==='ls')throw Error('readback unavailable');
+  };
+  await assert.rejects(prepare(f.request()));const before=f.snapshot();f.hook=undefined;
+  const r=await prepare({...f.context,requestId:'maintenance:1'});
+  assert.equal(r.name,nameOf(INSTALL,'http-nat-v1'));assert.equal(f.creates(),1);
+  assert.equal(f.snapshot()['intent-001.json'],before['intent-001.json']);
+  assert.equal(f.snapshot()['response-001.json'],before['response-001.json']);
+});
+test('current purpose unknown or changed across await is refused before create',async t=>{
+  const f=fixture(t,'http-nat-v1');
+  await assert.rejects(inspect({...f.context,purpose:'unknown'} as any));assert.equal(f.calls.length,0);
+  const request=f.request();f.hook=args=>{if(args[1]==='ls')(request as any).purpose=undefined;};
+  await assert.rejects(prepare(request),/context changed/);assert.equal(f.creates(),0);
+});
+test('current name remains exact and bounded without truncation',()=>{
+  assert.equal(nameOf('a'.repeat(54),'http-nat-v1').length,80);
+  assert.throws(()=>nameOf('a'.repeat(55),'http-nat-v1'));
+});
+
+import { RuntimeNetworkMaintenance } from '../../src/server/runtime-coordinator/RuntimeNetworkMaintenance';
+import { createRuntimeExecution } from '../../src/server/runtime-coordinator/RuntimeExecution';
+import type { RuntimeExecutionLayout } from '../../src/server/runtime-coordinator/RuntimeExecutionLayout';
+
+/** Real private ledgers/lease + actual maintenance/runtime/helper; injected workspace/resolver/Docker.
+ * NOT authenticated HTTP, real source gate or actual Docker proof. */
+function generations(t:test.TestContext) {
+  const f=fixture(t),layout:RuntimeExecutionLayout={...f.layout,runRoot:path.join(f.layout.stateDirectory,'runs'),journalDirectory:path.join(f.layout.stateDirectory,'journal')};
+  const directory=path.join(f.root,'maintenance'),nets=new Map<string,any>(),calls:string[][]=[];
+  fs.mkdirSync(layout.runRoot,{mode:0o700});
+  let failed=false,lose=false;
+  const transport:DockerTransport={async run(args){
+    calls.push([...args]);if(args[0]==='info')return ok('approved-engine');
+    if(args[1]==='create') {
+      const labels:Record<string,string>={};for(let n=0;n<args.length;n++)if(args[n]==='--label'){const [k,...v]=args[n+1].split('=');labels[k]=v.join('=');}
+      const name=args.at(-1)!,id=labels['paircoach.purpose']?OTHER:ID;
+      nets.set(name,{Id:id,Name:name,Driver:'bridge',Scope:'local',Internal:args.includes('--internal'),Labels:labels});
+      if(lose){failed=true;throw Error('lost create reply');}return {exitCode:0,stdout:id,stderr:''};
+    }
+    if(failed)throw Error('readback unavailable');
+    if(args[1]==='ls') {
+      const name=args[4].slice(6,-1),n=nets.get(name);return {exitCode:0,stdout:n?JSON.stringify({ID:n.Id,Name:n.Name}):'',stderr:''};
+    }
+    if(args[1]==='inspect')return ok([...nets.values()].filter(n=>n.Id===args[2]));
+    throw Error('unexpected command');
+  }};
+  const profile=JSON.parse(fs.readFileSync(new URL('../../runtimes/catalog.json',import.meta.url),'utf8')).profiles.find((p:any)=>p.adapterFamily==='java-maven'&&p.compilerRelease===21);
+  const settings:any={runProfiles:[{kind:'RUN_MAIN',timeoutMs:120000,task:{workingDirectory:'.',entry:{kind:'SPRING_BOOT',containerPort:8080,healthPath:'/health'},tests:{paths:[],names:[]}}}]};
+  const core:any={workspace:{rootPath:layout.workspaceRoot,projectId:layout.projectId,workspaceVersion:0,_withQueuedMutation:async(fn:()=>Promise<any>)=>fn()},
+    readSettings:()=>({sourceSha256:'source1',settings}),session:{state:{lifecycle:'ACTIVE',writeOwner:'STUDENT',controlEpoch:0}}};
+  const configuration:any={configurationGeneration:'cfg1',resolved:{profile,configurationGeneration:'cfg1'}};
+  const runtime=createRuntimeExecution({core,configuration,layout,transport,prepared:{resolve:async()=>({engineId:'approved-engine'})} as any,
+    serviceNetwork:nameOf(INSTALL,'http-nat-v1'),assertCurrent(){},emit(){}});
+  const request=(requestId:string)=>({requestId,clientId:'client',sessionId:'session',expectedWorkspaceVersion:0,configurationGeneration:'cfg1',controlEpoch:0});
+  const authorize=()=>{};
+  const owner=()=>new RuntimeNetworkMaintenance(directory,layout.projectId);
+  const execute=(m:RuntimeNetworkMaintenance,id:string)=>m.execute(request(id),authorize,(recovery,context,stage)=>runtime.prepareServiceNetwork(request(id),recovery,context,stage,authorize));
+  const legacy=(m:RuntimeNetworkMaintenance,id:string)=>m.execute(request(id),authorize,async(_recovery,_context,stage)=>{
+    stage({layout,engineId:'approved-engine'});
+    return prepare({...f.context,layout,transport,requestId:id});
+  });
+  const bytes=(dir:string)=>fs.existsSync(dir)?Object.fromEntries(fs.readdirSync(dir).map(n=>[n,fs.readFileSync(path.join(dir,n)).toString('hex')])):{};
+  return {f,layout,directory,transport,settings,request,owner,execute,legacy,bytes,calls,
+    creates:()=>calls.filter(a=>a[1]==='create').length,lose(){lose=true;},restore(){lose=false;failed=false;}};
+}
+test('legacy PREPARED restart returns SAME original, never current receipt/ledger; separate new click prepares NAT without rewriting history',async t=>{
+  const f=generations(t);let m=f.owner();const original=await f.legacy(m,'legacy1');await m.close();
+  const legacyDir=path.join(f.layout.stateDirectory,'service-network'),before=f.bytes(legacyDir),history=f.bytes(f.directory);
+  m=f.owner();try {
+    assert.deepEqual(await f.execute(m,'legacy1'),original);assert.equal(original.name,nameOf(INSTALL));
+    assert.equal(await inspect({layout:f.layout,transport:f.transport,engineId:'approved-engine',purpose:'http-nat-v1',assertCurrent(){}}),null);
+    assert.equal(f.creates(),1);assert.deepEqual(f.bytes(legacyDir),before);assert.deepEqual(f.bytes(f.directory),history);
+    const current=await f.execute(m,'new-click');assert.equal(current.name,nameOf(INSTALL,'http-nat-v1'));assert.equal(current.networkId,OTHER);
+    assert.equal(f.creates(),2);assert.deepEqual(await f.execute(m,'new-click'),current);assert.equal(f.creates(),2);
+    assert.deepEqual(await f.execute(m,'legacy1'),original);assert.deepEqual(f.bytes(legacyDir),before);
+    for(const [name,bytes]of Object.entries(history))assert.equal(f.bytes(f.directory)[name],bytes);
+  }finally{await m.close();}
+});
+test('legacy PENDING restart globally fences new click; SAME original read-first settles without second create then new generation is separately explicit',async t=>{
+  const f=generations(t);let m=f.owner();f.lose();await assert.rejects(f.legacy(m,'legacy1'),{code:'SERVICE_NETWORK_OUTCOME_UNKNOWN'});await m.close();
+  const legacyDir=path.join(f.layout.stateDirectory,'service-network'),before=f.bytes(legacyDir);
+  m=f.owner();try {
+    await assert.rejects(f.execute(m,'new-click'),{code:'SERVICE_NETWORK_OUTCOME_UNKNOWN'});assert.equal(f.creates(),1);
+    assert.equal(fs.existsSync(path.join(f.layout.stateDirectory,'service-network-http-v1')),false);f.restore();
+    const original=await f.execute(m,'legacy1');assert.equal(original.name,nameOf(INSTALL));assert.equal(f.creates(),1);
+    for(const name of ['intent-001.json','response-001.json'])assert.equal(f.bytes(legacyDir)[name],before[name]);
+    const history=f.bytes(f.directory);await f.execute(m,'new-click');assert.equal(f.creates(),2);
+    assert.deepEqual(await f.execute(m,'legacy1'),original);
+    for(const [name,bytes]of Object.entries(history))assert.equal(f.bytes(f.directory)[name],bytes);
+  }finally{await m.close();}
+});
+test('queued interleaving cannot bypass unresolved legacy operation or auto-create current',async t=>{
+  const f=generations(t),m=f.owner();f.lose();try {
+    const first=f.legacy(m,'legacy1'),second=f.execute(m,'new-click');
+    await assert.rejects(first,{code:'SERVICE_NETWORK_OUTCOME_UNKNOWN'});
+    await assert.rejects(second,{code:'SERVICE_NETWORK_OUTCOME_UNKNOWN'});assert.equal(f.creates(),1);
+    assert.equal(fs.existsSync(path.join(f.layout.stateDirectory,'service-network-http-v1')),false);
+  }finally{await m.close();}
+});
+for(const mode of ['SCRIPT','TESTS','missingMain'])test(`explicit new prepare refuses ${mode} before resolver/network; original recorded without dispatch`,async t=>{
+  const f=generations(t),m=f.owner();
+  if(mode==='missingMain')f.settings.runProfiles=[];
+  else {f.settings.runProfiles[0].task.entry=mode==='SCRIPT'?{kind:'SCRIPT',path:'main.js'}:{kind:'TESTS'};}
+  try {
+    await assert.rejects(f.execute(m,'new-click'),{code:'SERVICE_NETWORK_NOT_DISPATCHED'});
+    assert.equal(f.calls.length,0);assert.equal(f.creates(),0);
+    assert.equal(fs.existsSync(path.join(f.layout.stateDirectory,'service-network-http-v1')),false);
+    await assert.rejects(f.execute(m,'new-click'),{code:'SERVICE_NETWORK_NOT_DISPATCHED'});assert.equal(f.calls.length,0);
+  }finally{await m.close();}
+});
+
+test('private maintenance context refuses unknown purpose/extra fields before dispatch and on restart',async t=>{
+  for(const delta of [{purpose:'unknown'},{extra:true}]) {
+    const f=generations(t),m=f.owner();
+    try {
+      await assert.rejects(m.execute(f.request('bad-context'),()=>{},async(_r,_c,stage)=>{
+        stage({layout:f.layout,engineId:'approved-engine',...delta} as any);throw Error('must not dispatch');
+      }),{code:'SERVICE_NETWORK_NOT_DISPATCHED'});assert.equal(f.calls.length,0);
+    }finally{await m.close();}
+    // Corruption of an existing record is refused, never normalized or downgraded.
+    const file=fs.readdirSync(f.directory).find(n=>n.endsWith('.json'))!,p=path.join(f.directory,file);
+    const envelope=JSON.parse(fs.readFileSync(p,'utf8'));envelope.body.context={layout:f.layout,engineId:'approved-engine',...delta};
+    const {sha256}=await import('../../src/server/runtime-coordinator/storage');
+    envelope.sha256=sha256(canonical(envelope.body));fs.writeFileSync(p,canonical(envelope));
+    const bytes=fs.readFileSync(p);assert.throws(()=>f.owner(),/Invalid maintenance record/);assert.deepEqual(fs.readFileSync(p),bytes);
+    assert.equal(f.calls.length,0);
+  }
+});
+test('current generation concurrent helper prepare has one durable create and retains stable lease',async t=>{
+  const f=fixture(t,'http-nat-v1');let enter!:()=>void,release!:()=>void;
+  const entered=new Promise<void>(r=>enter=r),barrier=new Promise<void>(r=>release=r);
+  f.hook=async args=>{if(args[1]==='ls'&&!f.creates()){enter();await barrier;}};
+  const first=prepare(f.request());await entered;
+  await assert.rejects(prepare(f.request('second')),/live kernel owner/);release();const r=await first;
+  f.hook=undefined;assert.deepEqual(await prepare(f.request('second')),r);assert.equal(f.creates(),1);
 });

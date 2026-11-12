@@ -258,8 +258,25 @@ export class DockerExecutor implements ExecutionPort {
       const ready=await this.readiness(p.profile,p.input.identity.configurationGeneration);
       requireThat(ready.modes[p.mode].canRun,ready.modes[p.mode].problem?.message??'Not ready');
       if(p.service){
-        const net=JSON.parse((await this.checked(['network','inspect',this.policy.serviceNetwork!])).stdout);
-        requireThat(Array.isArray(net)&&net.length===1&&net[0].Name===this.policy.serviceNetwork&&net[0].Internal===true&&net[0].Driver==='bridge','Service requires approved internal bridge');
+        const identity=this.policy.serviceNetworkIdentity;
+        const currentName=`paircoach-${this.policy.installationId}-service-http-v1`;
+        if(this.policy.serviceNetwork===currentName || identity) {
+          requireThat(identity && identity.schemaVersion===1 && identity.status==='PREPARED' &&
+            identity.installationId===this.policy.installationId && identity.engineId===this.policy.engineId && typeof identity.projectId==='string' &&
+            identity.projectId===p.input.projectId && identity.name===currentName && identity.name===this.policy.serviceNetwork &&
+            /^[a-f0-9]{64}$/.test(identity.networkId),'Service requires exact approved current network identity');
+          const net=JSON.parse((await this.checked(['network','inspect',identity.networkId])).stdout);
+          const labels={'paircoach.installation':identity.installationId,'paircoach.project':identity.projectId,
+            'paircoach.engine':identity.engineId,'paircoach.role':'service-network','paircoach.purpose':'http-nat-v1'};
+          requireThat(Array.isArray(net)&&net.length===1&&net[0].Id===identity.networkId&&net[0].Name===currentName&&
+            net[0].Internal===false&&net[0].Driver==='bridge'&&net[0].Scope==='local'&&canonicalJson(net[0].Labels)===canonicalJson(labels),
+            'Service requires exact owned HTTP NAT bridge');
+          await this.engine();
+        } else {
+          // Retained original policies are never relabeled or silently upgraded during recovery.
+          const net=JSON.parse((await this.checked(['network','inspect',this.policy.serviceNetwork!])).stdout);
+          requireThat(Array.isArray(net)&&net.length===1&&net[0].Name===this.policy.serviceNetwork&&net[0].Internal===true&&net[0].Driver==='bridge','Service requires approved internal bridge');
+        }
       }
       await this.stage(p);
       const handle:ExecutionHandle={

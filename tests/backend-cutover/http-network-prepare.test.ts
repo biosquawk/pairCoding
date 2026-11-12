@@ -30,8 +30,8 @@ test('UNIT actual authenticated HTTP explicit prepare joins same factory identit
   const original=request(p),r=await f.http(port,'POST',route,original);assert.equal(r.status,200,JSON.stringify(r));
   const identity=JSON.parse(fs.readFileSync(path.join(f.state,'installation.json'),'utf8'));
   assert.equal(r.body.installationId,identity.installationId);assert.equal(r.body.projectId,p.projectId);assert.equal(r.body.engineId,f.fake.engineId);
-  assert.equal(r.body.name,`paircoach-${identity.installationId}-service`);assert.equal(r.body.networkId,f.getNetwork()!.Id);
-  const stored=JSON.parse(fs.readFileSync(path.join(f.state,'service-network','receipt.json'),'utf8'));assert.equal(stored.networkId,r.body.networkId);
+  assert.equal(r.body.name,`paircoach-${identity.installationId}-service-http-v1`);assert.equal(r.body.networkId,f.getNetwork()!.Id);
+  const stored=JSON.parse(fs.readFileSync(path.join(f.state,'service-network-http-v1','receipt.json'),'utf8'));assert.equal(stored.networkId,r.body.networkId);
   const directory=path.join(f.project,'.paircoach','runtime-network-maintenance'),file=fs.readdirSync(directory).find(n=>n.endsWith('.json'))!;
   const bytes=fs.readFileSync(path.join(directory,file));assert.deepEqual(JSON.parse(bytes.toString()).body.request,original);
   assert.equal((await f.http(port,'GET','/api/project?readiness=actual')).body.capabilities.execution.modes.RUN_MAIN.canRun,true);
@@ -62,7 +62,7 @@ test('UNIT exact HTTP maintenance schema/auth/student scope rejects all caller-s
 });
 
 test('UNIT actual lost network create reply persists complete original; same HTTP request after restart reconciles actual helper intent, never second create',async t=>{
-  const f=await httpNetworkFixture(t),a=f.app(),port=await a.listen(),p=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p.sessionId);f.loseCreate();
+  const f=await httpNetworkFixture(t,true),a=f.app(),port=await a.listen(),p=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p.sessionId);f.loseCreate();
   const original=request(p),r=await f.http(port,'POST',route,original);assert.equal(r.status,503,JSON.stringify(r));assert.equal(r.body.code,'SERVICE_NETWORK_OUTCOME_UNKNOWN');
   const directory=path.join(f.project,'.paircoach','runtime-network-maintenance'),file=fs.readdirSync(directory).find(n=>n.endsWith('.json'))!;
   const pending=JSON.parse(fs.readFileSync(path.join(directory,file),'utf8'));assert.deepEqual(pending.body.request,original);assert.equal(pending.body.result,null);
@@ -121,7 +121,7 @@ test('UNIT genuine SIGKILL durable Run orphan fences network maintenance after a
 });
 
 test('UNIT actual maintenance holds SAME source FIFO; Veto during lost effect preserves UNKNOWN ownership and exact original, no implicit retry',async t=>{
-  const f=await httpNetworkFixture(t),app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p.sessionId);
+  const f=await httpNetworkFixture(t,true),app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p.sessionId);
   let enter!:()=>void,release!:()=>void;const entered=new Promise<void>(r=>enter=r),held=new Promise<void>(r=>release=r);
   const doc=app.workspace.getDocument('main.js');
   f.holdCreate(async()=>{enter();await held;});const original=request(p),pending=f.http(port,'POST',route,original);await entered;
@@ -131,21 +131,34 @@ test('UNIT actual maintenance holds SAME source FIFO; Veto during lost effect pr
   try {await new Promise(r=>setTimeout(r,15));assert.equal(wrote,false);app.session.veto();} finally {release();}
   const unknown=await pending;assert.equal(unknown.status,503,JSON.stringify(unknown));assert.equal(unknown.body.code,'SERVICE_NETWORK_OUTCOME_UNKNOWN');
   await refusedWrite;assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
-  assert.equal(fs.existsSync(path.join(f.state,'service-network','receipt.json')),false,'late Veto cannot mint a successful receipt');
+  assert.equal(fs.existsSync(path.join(f.state,'service-network-http-v1','receipt.json')),false,'late Veto cannot mint a successful receipt');
   const directory=path.join(f.project,'.paircoach','runtime-network-maintenance'),file=fs.readdirSync(directory).find(n=>n.endsWith('.json'))!;
   const e=JSON.parse(fs.readFileSync(path.join(directory,file),'utf8'));assert.deepEqual(e.body.request,original);assert.equal(e.body.result,null);assert.ok(e.body.context);
 });
 
 test('UNIT unknown create requires fresh durable absence reconciliation; same original never recreates, only separately explicit NEW request may prepare',async t=>{
-  const f=await httpNetworkFixture(t),app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p.sessionId);
+  const f=await httpNetworkFixture(t,true),app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p.sessionId);
   f.failCreateBeforeEffect();const original=request(p),unknown=await f.http(port,'POST',route,original);
   assert.equal(unknown.status,503,JSON.stringify(unknown));assert.equal(f.getNetwork(),null);assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
   assert.equal((await f.http(port,'POST',route,request(p))).status,409);f.restoreReadback();f.allowCreate();
   const absent=await f.http(port,'POST',route,original);assert.equal(absent.status,409,JSON.stringify(absent));assert.equal(absent.body.code,'SERVICE_NETWORK_ABSENCE_CONFIRMED');
   assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
   const dir=path.join(f.project,'.paircoach','runtime-network-maintenance'),oldFile=fs.readdirSync(dir).find(n=>n.endsWith('.json'))!,oldBytes=fs.readFileSync(path.join(dir,oldFile));
-  assert.equal(JSON.parse(oldBytes.toString()).body.state,'ABSENCE_CONFIRMED');assert.ok(fs.existsSync(path.join(f.state,'service-network','absence-001.json')));
+  assert.equal(JSON.parse(oldBytes.toString()).body.state,'ABSENCE_CONFIRMED');assert.ok(fs.existsSync(path.join(f.state,'service-network-http-v1','absence-001.json')));
   assert.equal((await f.http(port,'POST',route,original)).status,409);assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
   const fresh=await f.http(port,'POST',route,request(p));assert.equal(fresh.status,200,JSON.stringify(fresh));assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,2);
   assert.deepEqual(fs.readFileSync(path.join(dir,oldFile)),oldBytes);assert.equal((await f.http(port,'POST',route,original)).body.code,'SERVICE_NETWORK_ABSENCE_CONFIRMED');
+});
+
+
+test('UNIT authenticated nonservice prepare is refused without network, while Tests remain network none/pullnever',async t=>{
+  const f=await httpNetworkFixture(t),app=f.app(),port=await app.listen();
+  const p=(await f.http(port,'GET','/api/project?readiness=actual')).body;await f.connect(port,p.sessionId);
+  const refused=await f.http(port,'POST',route,request(p));assert.equal(refused.status,409);
+  assert.equal(refused.body.code,'SERVICE_NETWORK_NOT_DISPATCHED');assert.equal(f.networkCalls.length,0);
+  const accepted=await f.http(port,'POST','/api/run',f.runRequest(p,'RUN_TESTS'));assert.equal(accepted.status,202,JSON.stringify(accepted));
+  const args=f.fake.calls.find(a=>a[0]==='create')!;
+  assert.equal(args[args.indexOf('--network')+1],'none');assert.equal(args.includes('--publish'),false);assert.ok(args.includes('--pull=never'));
+  assert.equal(f.networkCalls.length,0);
+  await f.http(port,'POST','/api/run/'+accepted.body.runId+'/stop',{requestId:randomUUID(),clientId:'tab',sessionId:p.sessionId});
 });

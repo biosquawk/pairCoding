@@ -426,7 +426,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           const client = startupTransports.get(owner)!;
           if(!options.runtimeTransport) client.install(createRuntimeDockerTransport({ stateDirectory:layout.stateDirectory, executable:options.dockerExecutable }));
           boundRuntime = createRuntimeExecution({core, configuration:owner.configuration, prepared:owner.prepared, layout,
-            transport:client.transport, serviceNetwork:`paircoach-${layout.installationId}-service`, emit:(type,payload)=>{
+            transport:client.transport, serviceNetwork:`paircoach-${layout.installationId}-service-http-v1`, emit:(type,payload)=>{
               // Old-session owners remain queryable/stoppable but NEVER become the new
               // session's lastRun/coach facts/report or authenticated Run stream.
               if(boundRuntime?.runner.belongsToSession((payload as {runId:string}).runId,boundSession.state.sessionId))publish(type,payload);

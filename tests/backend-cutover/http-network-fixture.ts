@@ -65,7 +65,7 @@ export async function httpNetworkFixture(t:TestContext,service=false) {
         if(!requests.length)throw Error('No original request persisted');
         const labels:Record<string,string>={};for(let i=0;i<args.length;i++)if(args[i]==='--label'){const [k,...v]=args[i+1].split('=');labels[k]=v.join('=');}
         if(noCreate){failReadback=true;throw Error('UNIT create failed before effect, reply untrusted');}
-        network={Name:args.at(-1),Id:'f'.repeat(64),Internal:true,Driver:'bridge',Scope:'local',Labels:labels};
+        network={Name:args.at(-1),Id:'f'.repeat(64),Internal:args.includes('--internal'),Driver:'bridge',Scope:'local',Labels:labels};
         if(lostCreate){failReadback=true;throw Error('UNIT lost create reply');}
         return {exitCode:0,stdout:network.Id,stderr:''};
       }

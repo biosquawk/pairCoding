@@ -426,3 +426,94 @@ test('UNIT service probe uses remaining global Run budget, not a fresh full time
     assert.equal((await f.executor.stop(handle,'USER')).confirmed,true);
   } finally {await f.cleanup();}
 });
+
+// HUMAN352072e3: exact current owned NAT generation; these are injected Docker UNIT checks.
+function currentServiceFixture(f:Awaited<ReturnType<typeof fixture>>) {
+  f.policy.serviceNetwork=`paircoach-${f.policy.installationId}-service-http-v1`;
+  f.policy.serviceNetworkIdentity={schemaVersion:1,status:'PREPARED',installationId:f.policy.installationId,
+    projectId:f.plan.input.projectId,engineId:f.policy.engineId,name:f.policy.serviceNetwork,networkId:'f'.repeat(64)};
+  const i=f.policy.serviceNetworkIdentity;
+  const net={Id:i.networkId,Name:i.name,Internal:false,Driver:'bridge',Scope:'local',Labels:{
+    'paircoach.installation':i.installationId,'paircoach.project':i.projectId,'paircoach.engine':i.engineId,
+    'paircoach.role':'service-network','paircoach.purpose':'http-nat-v1'}};
+  const run=f.fake.run.bind(f.fake);
+  f.fake.run=async args=>{
+    if(args[0]==='network'){
+      f.fake.calls.push([...args]);assert.deepEqual(args,['network','inspect',i.networkId]);
+      return {exitCode:0,stdout:JSON.stringify([net]),stderr:''};
+    }
+    return run(args);
+  };
+  f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+  f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:100};
+  return net;
+}
+for(const [title,mutate] of Object.entries({
+  internal:(n:any)=>{n.Internal=true;},driver:(n:any)=>{n.Driver='overlay';},scope:(n:any)=>{n.Scope='swarm';},
+  id:(n:any)=>{n.Id='e'.repeat(64);},name:(n:any)=>{n.Name='paircoach-install-service';},
+  purpose:(n:any)=>{n.Labels['paircoach.purpose']='other';},missingPurpose:(n:any)=>{delete n.Labels['paircoach.purpose'];},
+  installation:(n:any)=>{n.Labels['paircoach.installation']='foreign';},project:(n:any)=>{n.Labels['paircoach.project']='foreign';},
+  engine:(n:any)=>{n.Labels['paircoach.engine']='foreign';},role:(n:any)=>{n.Labels['paircoach.role']='execution';},
+  extraLabel:(n:any)=>{n.Labels.extra='foreign';},
+}))test(`UNIT executor independently rejects current NAT ${title} before container create`,async()=>{
+  const f=await fixture();try {
+    mutate(currentServiceFixture(f));setServiceFixture(f);
+    await assert.rejects(f.executor.start(f.plan),/exact owned HTTP NAT/);
+    assert.equal(f.fake.calls.some(a=>a[0]==='create'),false);
+  }finally{await f.cleanup();}
+});
+for(const title of ['missing','wrongID','wrongEngine','wrongProject','wrongName'])test(`UNIT current NAT trusted identity ${title} cannot downgrade to legacy`,async()=>{
+  const f=await fixture();try {
+    currentServiceFixture(f);
+    if(title==='missing')delete f.policy.serviceNetworkIdentity;
+    if(title==='wrongID')(f.policy.serviceNetworkIdentity as any).networkId='bad';
+    if(title==='wrongEngine')(f.policy.serviceNetworkIdentity as any).engineId='foreign';
+    if(title==='wrongProject')(f.policy.serviceNetworkIdentity as any).projectId='foreign';
+    if(title==='wrongName')(f.policy.serviceNetworkIdentity as any).name='paircoach-install-service';
+    setServiceFixture(f);await assert.rejects(f.executor.start(f.plan),/exact approved current network identity/);
+    assert.equal(f.fake.calls.some(a=>a[0]==='create'),false);
+  }finally{await f.cleanup();}
+});
+test('UNIT current NAT actual loopback HTTP remains nonterminal and exact publish/pullnever, Tests stay network none',async()=>{
+  const f=await fixture();let server:http.Server|undefined;
+  try {
+    currentServiceFixture(f);setServiceFixture(f);
+    server=http.createServer((_req,res)=>res.end('ok'));
+    await new Promise<void>(r=>server!.listen(0,'127.0.0.1',r));f.fake.port=(server.address() as any).port;
+    const h=await f.executor.start(f.plan),ready=await f.executor.serviceReadiness(h);
+    assert.equal(ready!.ready,true);assert.equal((await f.journal.read(h.runId)).phase,'RUNNING');
+    const args=f.fake.calls.find(a=>a[0]==='create')!;
+    assert.equal(args[args.indexOf('--network')+1],f.policy.serviceNetworkIdentity!.networkId);
+    assert.equal(args[args.indexOf('--publish')+1],'127.0.0.1::8080');assert.ok(args.includes('--pull=never'));
+    assert.equal((await f.executor.stop(h,'USER')).confirmed,false);
+    await new Promise<void>(r=>server!.close(()=>r()));server=undefined;
+    assert.equal((await f.executor.stop(h,'USER')).confirmed,true);
+  }finally{if(server)await new Promise<void>(r=>server!.close(()=>r()));await f.cleanup();}
+  const tests=await fixture();try {
+    tests.policy.serviceNetwork='paircoach-install-service-http-v1';
+    tests.executor=new DockerExecutor({policy:tests.policy,transport:tests.fake,journal:tests.journal});
+    await tests.executor.start(tests.plan);
+    const args=tests.fake.calls.find(a=>a[0]==='create')!;
+    assert.equal(args[args.indexOf('--network')+1],'none');assert.equal(args.includes('--publish'),false);
+    assert.equal(tests.fake.calls.some(a=>a[0]==='network'),false);assert.ok(args.includes('--pull=never'));
+  }finally{await tests.cleanup();}
+});
+for(const [title,ports] of Object.entries({null:null,empty:[],wildcard:[{HostIp:'0.0.0.0',HostPort:'12345'}],
+  ipv6:[{HostIp:'::1',HostPort:'12345'}],duplicate:[{HostIp:'127.0.0.1',HostPort:'12345'},{HostIp:'127.0.0.1',HostPort:'12345'}],
+  zero:[{HostIp:'127.0.0.1',HostPort:'0'}],overflow:[{HostIp:'127.0.0.1',HostPort:'65536'}],malformed:[{HostIp:'127.0.0.1',HostPort:'12x'}],
+}))test(`UNIT current NAT does not weaken actual service binding ${title}`,async()=>{
+  const f=await fixture();try {
+    currentServiceFixture(f);setServiceFixture(f);const h=await f.executor.start(f.plan);
+    f.fake.v.NetworkSettings.Ports['8080/tcp']=ports;
+    const ready=await f.executor.serviceReadiness(h);assert.equal(ready!.ready,false);assert.equal(ready!.url,null);
+    assert.equal(ready!.problem!.code,'SERVICE_NOT_READY');assert.match(ready!.problem!.message,/Unsafe service binding/);
+  }finally{await f.cleanup();}
+});
+test('UNIT current NAT engine drift after network readback cannot dispatch container create',async()=>{
+  const f=await fixture();try {
+    currentServiceFixture(f);const run=f.fake.run.bind(f.fake);
+    f.fake.run=async args=>{const reply=await run(args);if(args[0]==='network')f.fake.engineId='foreign';return reply;};
+    setServiceFixture(f);await assert.rejects(f.executor.start(f.plan),/Wrong Docker engine/);
+    assert.equal(f.fake.calls.some(a=>a[0]==='create'),false);
+  }finally{await f.cleanup();}
+});

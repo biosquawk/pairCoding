@@ -9,7 +9,7 @@ export class MemoryStorage {
   setItem(key:string,value:string){if(this.failSet)throw Error('quota refused');this.data.set(key,value);this.afterSet=true;}
   removeItem(key:string){this.data.delete(key);}
 }
-export const prepared=(projectId='p1')=>({schemaVersion:1,status:'PREPARED',installationId:'install1',projectId,engineId:'engine1',name:'paircoach-install1-service',networkId:'a'.repeat(64)});
+export const prepared=(projectId='p1')=>({schemaVersion:1,status:'PREPARED',installationId:'install1',projectId,engineId:'engine1',name:'paircoach-install1-service-http-v1',networkId:'a'.repeat(64)});
 export const storageKey='paircoach:service-prepare:v1:http://127.0.0.1:8080';
 export const deferred=()=>{let resolve!:(v:unknown)=>void;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
 export async function fixture(t:{after(fn:()=>void):void},options:{storage?:MemoryStorage;clientId?:string;autoId?:boolean}={}) {
