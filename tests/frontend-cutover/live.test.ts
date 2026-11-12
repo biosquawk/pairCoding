@@ -106,7 +106,7 @@ import { validateV2WireShape } from '../../src/shared/validation-v2';
 import { contentSha256 } from '../../src/language/uriCodec';
 import type { ModelSnapshot } from '../../src/services/monacoLspBridge';
 async function languageFixture(t:any) {
-  const f=await fixture(t);(f.b as any).languageBootstrap={connectionGeneration:'server-connection',shadowGeneration:'server-shadow',provider:'remote'};
+  const f=await fixture(t);(f.b as any).languageBootstrap={connectionGeneration:'server-connection',shadowGeneration:'opaque-local-lifetime',provider:'builtin'};
   assert.ok(validateV2WireShape('SessionBundle',f.b),'new fixture must satisfy actual frozen complete bundle schema');
   await f.snapshot();
   const binding=f.live.getEditorLanguageBinding()!;
@@ -115,26 +115,26 @@ async function languageFixture(t:any) {
   binding.sendDocument('OPEN',document('OPEN'));
   const type=(text:string)=>{f.live.saveFileContent(model.path,text);model.content=text;model.contentSha256=contentSha256(text);model.localModelVersion++;binding.sendDocument('CHANGE',document('TYPING'));};
   t.mock.timers.enable({apis:['setTimeout']});
-  const begin=()=>{type('typed');t.mock.timers.tick(150);const save=f.sent.filter(m=>m.type==='CODE_CHANGED').at(-1),source=f.sent.find(m=>m.messageId===save?.payload.languageDocumentMessageId);return {save,source};};
+  const begin=()=>{type('typed');t.mock.timers.tick(150);const save=f.sent.filter(m=>m.type==='CODE_CHANGED').at(-1),source={payload:structuredClone(document('TYPING'))};return {save,source};};
   const diagnostic=(source:any,receiptId='genuine-ack')=>({sourceStamp:source.payload.stamp,presentationStamp:document('TYPING').stamp,association:{saveReceiptId:receiptId},
     provenance:{kind:'IMMUTABLE_GENERATION' as const,launchId:'fixed-server-analysis',lspVersion:null,inputManifestSha256:contentSha256('server-whole-project-input')},items:[],truncated:false});
   const acknowledge=(save:any,status='OK',overrides:any={})=>f.receive('ACK',{replyTo:save.messageId,status,documentVersion:2,workspaceVersion:2,controlEpoch:0,error:null,...overrides},{messageId:'genuine-ack'});
   return {...f,binding,model,document,type,begin,diagnostic,acknowledge};
 }
-test('coherent server bootstrap enables actual LANGUAGE_OPEN; exact sent source -> sole save -> genuine envelope alias',async t=>{
-  const f=await languageFixture(t),{save,source}=f.begin();assert.ok(source);assert.equal(source.type,'LANGUAGE_CHANGE');
+test('coherent builtin bootstrap emits no language frames; sole ordinary save and genuine ACK need no association',async t=>{
+  const f=await languageFixture(t),{save,source}=f.begin();assert.ok(source);assert.equal(save.payload.languageDocumentMessageId,undefined);
   assert.equal(f.sent.filter(m=>m.type==='CODE_CHANGED').length,1);assert.equal(source.payload.content,save.payload.content);
   const before=f.sent.filter(m=>m.type==='LANGUAGE_CHANGE').length;
   f.acknowledge(save);assert.equal(f.live.getState().pendingPaths.length,0);
-  const r=f.diagnostic(source),copy=structuredClone(r);assert.equal(f.binding.verifyDiagnostics(r,[f.model]),true);
-  const events:any[]=[];f.binding.subscribe(e=>events.push(e));f.receive('DIAGNOSTICS',r);assert.equal(events.filter(e=>e.type==='DIAGNOSTICS').length,1);
+  const r=f.diagnostic(source),copy=structuredClone(r);assert.equal(f.binding.verifyDiagnostics(r,[f.model]),false);
+  const events:any[]=[];f.binding.subscribe(e=>events.push(e));f.receive('DIAGNOSTICS',r);assert.equal(events.filter(e=>e.type==='DIAGNOSTICS').length,0);
   assert.deepEqual(r,copy,'source and server provenance remain untouched');
   assert.equal(f.sent.filter(m=>m.type==='LANGUAGE_CHANGE').length,before,'ACK is not didChange');
   assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source,'forged-receipt'),[f.model]),false);
   assert.equal(f.sent.some(m=>m.type==='LANGUAGE_ACK'),false);
 });
-test('DUPLICATE exact original autosave ACK can alias, never another transaction or old disk version',async t=>{
-  const f=await languageFixture(t),{save,source}=f.begin();f.acknowledge(save,'DUPLICATE');assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source),[f.model]),true);
+test('DUPLICATE exact original autosave ACK acknowledges ordinary save without granting remote alias',async t=>{
+  const f=await languageFixture(t),{save,source}=f.begin();f.acknowledge(save,'DUPLICATE');assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source),[f.model]),false);assert.equal(f.live.getState().pendingPaths.length,0);
 });
 for(const mutation of ['ABA','new lifetime','inactive overlay','dependency','new draft','scope','foreign transaction','rejected','old disk','old workspace'] as const) {
   test(`ACK alias rejects ${mutation}, even same hash/receipt present`,async t=>{
@@ -149,6 +149,8 @@ for(const mutation of ['ABA','new lifetime','inactive overlay','dependency','new
     if(mutation==='scope'){(f.b as any).languageBootstrap.connectionGeneration='new-server-connection';await f.snapshot();}
     f.acknowledge(save,mutation==='rejected'?'REJECTED':'OK',mutation==='foreign transaction'?{replyTo:'foreign'}:mutation==='old disk'?{documentVersion:1}:mutation==='old workspace'?{workspaceVersion:1}:{});
     const r=f.diagnostic(source);assert.equal(f.binding.verifyDiagnostics(r,[f.model]),false);
+    if(['foreign transaction','rejected','old disk','new draft'].includes(mutation))assert.ok(f.live.getState().pendingPaths.includes('main.txt'),mutation+' must retain ordinary draft');
+    assert.equal(f.sent.some(m=>m.type.startsWith('LANGUAGE_')),false);
     assert.equal(f.sent.filter(m=>m.type==='CODE_CHANGED').length,1,'no second save invented by alias handling');
   });
 }
@@ -200,22 +202,22 @@ for(const invalid of ['different echo','foreign current','extra field','UNKNOWN 
   });
 }
 
-test('actual Monaco listener before React autosave mirror preserves exact source ID without receipt-time rebinding',async t=>{
+test('actual model observation before React autosave mirror needs no sent frame or receipt-time association',async t=>{
   const f=await languageFixture(t);
   f.model.content='typed';f.model.contentSha256=contentSha256('typed');f.model.localModelVersion++;
   f.binding.sendDocument('CHANGE',f.document('TYPING'));
-  const source=f.sent.filter(m=>m.type==='LANGUAGE_CHANGE').at(-1);
+  const source={payload:structuredClone(f.document('TYPING'))};
   f.live.saveFileContent('main.txt','typed');t.mock.timers.tick(150);
-  const save=f.sent.find(m=>m.type==='CODE_CHANGED');assert.equal(save.payload.languageDocumentMessageId,source.messageId);
-  f.acknowledge(save);assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source),[f.model]),true);
+  const save=f.sent.find(m=>m.type==='CODE_CHANGED');assert.equal(save.payload.languageDocumentMessageId,undefined);assert.equal(f.sent.some(m=>m.type.startsWith('LANGUAGE_')),false);
+  f.acknowledge(save);assert.equal(f.binding.verifyDiagnostics(f.diagnostic(source),[f.model]),false);assert.equal(f.live.getState().pendingPaths.length,0);
 });
 
-test('FAILED authoritative provider status cancels old authority and survives ordinary state publication',async t=>{
+test('retired remote FAILED status cannot impersonate local worker readiness; manual editing stays available',async t=>{
   const f=await languageFixture(t);f.begin();
   const problem={code:'LANGUAGE_UNAVAILABLE',message:'Provider unavailable',recovery:'Reconnect provider',retryable:true};
   f.receive('LANGUAGE_STATUS',{...f.b.project.capabilities.language,state:'FAILED',autocomplete:'FAILED',problem});
-  assert.equal(f.live.getState().language?.state,'FAILED');assert.equal(f.binding.readAuthority(f.model),null);
-  f.live.saveFileContent('main.txt','manual after failure');assert.equal(f.live.getState().language?.state,'FAILED');assert.equal(f.live.getState().languageProblem,problem.message);
+  assert.equal(f.live.getState().language?.autocomplete,'OFF');assert.ok(f.binding.readAuthority(f.model));
+  f.live.saveFileContent('main.txt','manual after failure');assert.equal(f.live.getState().language?.autocomplete,'OFF');assert.notEqual(f.live.getState().languageProblem,problem.message);
 });
 
 test('malformed ACK shape never grants a language alias while ordinary negative VIEW handling stays separate',async t=>{
@@ -240,4 +242,14 @@ test('actual LiveBackend wrapper resolves retained old-session exact original th
   unknown=false;assert.equal(await f.live.reconcileRuntimeMutation(),true);assert.equal(f.live.getState().runtime?.project?.sessionId,'s2');assert.equal(f.live.getState().runtime?.reconciliationRequired,false);
   assert.deepEqual(f.http.filter(v=>v.path==='/api/runtime/mutation/reconcile').map(v=>v.body.mutation.request),[original,original]);
   assert.equal(f.http.filter(v=>v.path==='/api/run').length,1,'no automatic replay of the original mutation');
+});
+test('CONTROL_STATE only genuinely newer epoch releases local prepare authority, not same/stale denial',async t=>{
+  const f=await languageFixture(t);
+  f.receive('CONTROL_PREPARE',{requestId:'prepare-local',purpose:'demo',path:'main.txt',basedOnWorkspaceVersion:1});
+  assert.equal(f.binding.readAuthority(f.model)?.controlPrepare,true);
+  const state={writeOwner:'STUDENT',controlEpoch:0,coachMode:'LISTENING',cooldownAfterVeto:false,interventionId:null,purpose:null};
+  f.receive('CONTROL_STATE',state);assert.equal(f.binding.readAuthority(f.model)?.controlPrepare,true);
+  f.receive('CONTROL_STATE',{...state,controlEpoch:1});assert.equal(f.binding.readAuthority(f.model)?.controlPrepare,false);
+  f.receive('CONTROL_PREPARE',{requestId:'next-prepare',purpose:'demo',path:'main.txt',basedOnWorkspaceVersion:1});
+  f.receive('CONTROL_STATE',state);assert.equal(f.binding.readAuthority(f.model)?.controlPrepare,true);
 });

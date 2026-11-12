@@ -18,6 +18,7 @@ export type ClientState = Omit<ReturnType<typeof simulator.getFullState>, 'fileC
   snapshotsError: string | null;
   runtime?: RuntimeClientV2State;
   language?: LanguageView | null;
+  languageDiagnostics?: 'OFF'|'INDEXING'|'ON'|'FAILED'|'N/A';
   languageProblem?: string | null;
 };
 export type UpdatedFile = ProjectFile & { isExternalOrSnapshot?: boolean };

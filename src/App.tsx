@@ -225,7 +225,7 @@ export default function App() {
       </div>
       {state.transportMode==='LIVE_BACKEND' && <details className="shrink-0 max-h-[35dvh] overflow-auto border-b border-zinc-800 px-3 text-xs">
         <summary className="cursor-pointer py-1">Środowisko: {state.runtime?.execution?.runtime.label || 'profil nieustalony'} · Autouzupełnianie {state.language?.autocomplete ?? 'OFF'} · Docs N/A</summary>
-        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ?? null}
+        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ?? null} diagnostics={state.languageDiagnostics}
           run={state.runtime?.run ?? null} connected={!state.isOffline} canExecute={!state.isOffline}
           preparation={state.runtime?.maintenance} onPrepare={state.transportMode==='LIVE_BACKEND'?reconcile=>{void client.prepareRuntimeEnvironment(reconcile);}:undefined}
           pending={!!state.runtime?.pending}

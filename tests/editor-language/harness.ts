@@ -54,6 +54,8 @@ export function harness() {
     return {...flags,revision,stamp:scope};
   };
   const binding:EditorLanguageBinding={projectId:'projekt',readAuthority,sendDocument:(kind,document)=>sync.push({kind,document:structuredClone(document)}),
+    features:()=>({completion:true,diagnostics:true}),
+    builtin:(model,request,signal)=>{requests.push(structuredClone(request));return complete(request,signal);},
     complete:(request,signal)=>{requests.push(structuredClone(request));return complete(request,signal);},cancel:r=>cancelled.push(r),
     subscribe:cb=>{listener=cb;return()=>{listener=()=>{};};},verifyDiagnostics:(...a)=>verify(...a),onProblem:message=>problems.push(message)};
   const dom=new Node();

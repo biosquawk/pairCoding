@@ -7,7 +7,7 @@ import type { DocumentStamp, CompleteResult } from '../../src/shared/language-v2
 import type { EditorLanguageBinding, ModelSnapshot } from '../../src/services/monacoLspBridge';
 function fixture(t:any){
  const c:WiringControllerV2={projectId:'p1',sessionId:'s1',clientId:'c1',connectionGeneration:'transport1',connected:true,synced:true,writeOwner:'STUDENT',controlEpoch:0,preparing:false,vetoPending:false,
-  language:{projectId:'p1',sessionId:'s1',profileId:'profile',connectionGeneration:'server1',configurationGeneration:'cfg1',providerGeneration:'provider1',shadowGeneration:'shadow1',provider:'remote'},document:()=>({content:'draft',version:1,readOnly:false,conflict:false})};
+  language:{projectId:'p1',sessionId:'s1',profileId:'profile',connectionGeneration:'server1',configurationGeneration:'cfg1',providerGeneration:'provider1',shadowGeneration:'shadow1',provider:'builtin',features:{completion:true,diagnostics:true}},document:()=>({content:'draft',version:1,readOnly:false,conflict:false})};
  const sent:any[]=[],problems:string[]=[];
  const w=new RuntimeWiringV2({current:()=>c,messageId:()=>crypto.randomUUID(),send:m=>sent.push(m),problem:m=>problems.push(m),status:()=>{},runtime:{current:()=>null,requestId:()=>crypto.randomUUID(),http:{run:async()=>null,stop:async()=>null,saveSettings:async()=>null}}});t.after(()=>w.invalidate('DISCONNECTED'));
  const model=(lifetime:string,content='draft'):ModelSnapshot=>({path:'main.txt',modelLifetime:lifetime,localModelVersion:1,content,contentSha256:contentSha256(content)});
@@ -25,25 +25,26 @@ for(const change of ['project','session','reconnect'] as const){
   assert.notEqual(binding,old);assert.equal(oldEvents.at(-1),'DISCONNECTED');const boundary=oldEvents.length;
   const current=f.model('new'),d=f.document(binding,current);binding.sendDocument('OPEN',d);
   const diagnostics={sourceStamp:d.stamp,presentationStamp:d.stamp,association:null,provenance:{kind:'IMMUTABLE_GENERATION' as const,launchId:'launch',lspVersion:null,inputManifestSha256:contentSha256('input')},items:[],truncated:false};
-  assert.equal(binding.verifyDiagnostics(diagnostics,[current]),true);
+  assert.equal(binding.verifyDiagnostics(diagnostics,[current]),false);
   const count=f.sent.length;assert.equal(old.readAuthority(m),null);
   old.sendDocument('OPEN',{...d,content:m.content});old.sendDocument('CHANGE',oldDoc);old.sendDocument('CLOSE',d);
   assert.equal(old.verifyDiagnostics(diagnostics,[current]),false);old.onProblem?.('old problem');assert.deepEqual(f.problems,[]);
   await assert.rejects(old.complete({requestId:'retired-request',stamp:d.stamp,position:{line:1,column:1},trigger:null},new AbortController().signal));
   let builtinCalls=0;f.c.language!.provider='builtin';f.w.setBuiltin(async(_m,r)=>{builtinCalls++;return f.result(r.stamp,r.requestId);});
-  assert.equal(old.builtin?.({} as any,{requestId:'retired-builtin',stamp:d.stamp,position:{line:1,column:1},trigger:null},new AbortController().signal),null);assert.equal(builtinCalls,0);f.c.language!.provider='remote';
+  assert.equal(old.builtin?.({} as any,{requestId:'retired-builtin',stamp:d.stamp,position:{line:1,column:1},trigger:null},new AbortController().signal),null);assert.equal(builtinCalls,0);f.c.language!.provider='builtin';
   const lateEvents:string[]=[];const unsubscribe=old.subscribe(e=>lateEvents.push(e.type));f.w.authoritativeState(1);unsubscribe();
   assert.equal(oldEvents.length,boundary);assert.deepEqual(lateEvents,[]);assert.equal(f.sent.length,count);
-  assert.equal(binding.verifyDiagnostics(diagnostics,[current]),true,'old CLOSE did not erase new model/ledger');
+  assert.ok(binding.readAuthority(current),'old CLOSE did not erase new model');
  });
  test(`retired ${change} CLOSE/cancel cannot erase new same-path lifetime or cancel its pending completion`,async t=>{
   const f=fixture(t),old=f.w.getBinding('p1'),oldDoc=f.document(old,f.model('old'));old.sendDocument('OPEN',oldDoc);
   const binding=f.switchTo(change==='project'?'p2':'p1',change==='session'||change==='project'?'s2':'s1','new');
   const d=f.document(binding,f.model('new'));binding.sendDocument('OPEN',d);
   const request={requestId:'current-request',stamp:d.stamp,position:{line:1,column:1},trigger:null};
-  const pending=binding.complete(request,new AbortController().signal);pending.catch(()=>{});assert.equal(f.sent.at(-1).type,'LANGUAGE_COMPLETE');const count=f.sent.length;
+  let release!:(r:CompleteResult)=>void;f.w.setBuiltin(()=>new Promise(resolve=>release=resolve));
+  const pending=binding.builtin!({} as any,request,new AbortController().signal)!;const count=f.sent.length;
   old.cancel({requestId:request.requestId,stamp:d.stamp});old.sendDocument('CLOSE',d);old.sendDocument('CLOSE',oldDoc);
-  assert.equal(f.sent.length,count);assert.equal(f.reply(f.result(d.stamp,request.requestId)),true);
+  assert.equal(f.sent.length,count);assert.equal(f.reply(f.result(d.stamp,request.requestId)),false);release(f.result(d.stamp,request.requestId));
   assert.deepEqual(await pending,f.result(d.stamp,request.requestId));
  });
 }
@@ -71,7 +72,8 @@ test('current capability rejects old same-path CLOSE lifetime and unrelated canc
  const f=fixture(t),binding=f.w.getBinding('p1'),old=f.document(binding,f.model('old'));binding.sendDocument('OPEN',old);
  const current=f.document(binding,f.model('new'));binding.sendDocument('OPEN',current);
  const request={requestId:'current',stamp:current.stamp,position:{line:1,column:1},trigger:null};
- const pending=binding.complete(request,new AbortController().signal);pending.catch(()=>{});const count=f.sent.length;
+ let release!:(r:CompleteResult)=>void;f.w.setBuiltin(()=>new Promise(resolve=>release=resolve));
+ const pending=binding.builtin!({} as any,request,new AbortController().signal)!;const count=f.sent.length;
  binding.sendDocument('CLOSE',old);binding.cancel({requestId:'retired-request',stamp:current.stamp});assert.equal(f.sent.length,count);
- assert.equal(f.reply(f.result(current.stamp,request.requestId)),true);await pending;
+ assert.equal(f.reply(f.result(current.stamp,request.requestId)),false);release(f.result(current.stamp,request.requestId));await pending;
 });

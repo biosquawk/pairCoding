@@ -1,6 +1,6 @@
 import type * as M from 'monaco-editor';
 import type { AcceptanceState, CompleteRequest, CompleteResult, CompletionAcceptanceFacade, CompletionCandidate, DiagnosticsResult, DocumentStamp, MutationReason, OpenOrChange } from '../shared/language-v2';
-import { validateCompletionEdits, validateDiagnosticsResult, validateDocumentStamp } from '../shared/validation-v2';
+import { validateDocumentStamp } from '../shared/validation-v2';
 import { disableNativeCompletionProviders } from './editor-language/native';
 export { disableNativeCompletionProviders } from './editor-language/native';
 import { createCompletionAcceptance, mayAccept, sameStamp } from './editor-language/acceptance';
@@ -21,11 +21,17 @@ export type BridgeEvent = { type: 'CONTROL_PREPARE' | 'VETO' | 'DISCONNECTED' | 
   | { type: 'DIAGNOSTICS'; result: DiagnosticsResult }
   | { type: 'FILE_OPERATION'; operation: 'CREATE' | 'RENAME' | 'DELETE'; path: string; newPath?: string };
 /**
- * Injection over the SAME authenticated ordered transport; no constructor/peer imports or socket/save API.
+ * Local adapter over synchronous session authority; no socket/save API.
  * CONTROL_PREPARE MUST be emitted synchronously as the FIRST receive action, before any await/flush/React.
  * A newer authoritative revision is required to release its local latch, including a denied prepare.
- * Authority reads must inspect current client state (not render-time captures). sendDocument enqueues in order.
+ * Authority reads inspect current client state, never render-time captures. Legacy transport methods are inert.
  */
+export type LocalFeatureState = 'OFF' | 'INDEXING' | 'ON' | 'FAILED';
+export type LocalBuiltinProvider = ((model: M.editor.ITextModel, request: CompleteRequest, signal: AbortSignal) => Promise<CompleteResult> | null) & {
+  ready?(model: M.editor.ITextModel): Promise<boolean>;
+  diagnostics?(model: M.editor.ITextModel): Promise<M.editor.IMarkerData[] | null>;
+  hasDiagnostics?(model: M.editor.ITextModel): boolean;
+};
 export interface EditorLanguageBinding {
   readonly projectId: string;
   readAuthority(model: Readonly<ModelSnapshot>): BridgeAuthority | null;
@@ -36,16 +42,18 @@ export interface EditorLanguageBinding {
   /** Exact immutable sent-source/provenance ledger and verified ACK receipt; presence of association is NOT proof.
    * Must also verify ALL current open overlays/dependencies, not just this file. Never receipt-time association. */
   verifyDiagnostics(result: DiagnosticsResult, currentModels: readonly ModelSnapshot[]): boolean;
-  /** Optional worker provider uses the SAME request/facade as server completion, never Monaco's native widget. */
-  builtin?: (model: M.editor.ITextModel, request: CompleteRequest, signal: AbortSignal) => Promise<CompleteResult> | null;
+  /** Local provider uses the sole facade, never Monaco's native widget. */
+  builtin?: LocalBuiltinProvider;
+  features?(): {completion:boolean;diagnostics:boolean} | null;
+  localStatus?(completion:LocalFeatureState, diagnostics:LocalFeatureState|'N/A', problem:string|null):void;
   onProblem?(message: string): void;
 }
 interface Entry {
   model: M.editor.ITextModel; path: string; lifetime: string;
-  listener: M.IDisposable; reason?: MutationReason; sent?: OpenOrChange;
+  listener: M.IDisposable; reason?: MutationReason;
   tombstone: boolean;
 }
-const sameScope = (a:DocumentStamp,b:DocumentStamp) => (['projectId','sessionId','path','profileId','connectionGeneration','configurationGeneration','providerGeneration','shadowGeneration','modelLifetime','controlEpoch'] as const).every(k=>a[k]===b[k]);
+
 interface Flight { request: CompleteRequest; abort: AbortController; entry: Entry }
 /** Defense in depth: native registered providers are separately disabled via public mode configuration. */
 export const SAFE_SUGGEST_OPTIONS: M.editor.IStandaloneEditorConstructionOptions = {
@@ -105,11 +113,14 @@ export class MonacoLspBridge {
     editor.updateOptions(SAFE_SUGGEST_OPTIONS);
     this.disposables.push(monaco.editor.onDidCreateModel(model => this.attach(model)),
       monaco.editor.onWillDisposeModel(model => this.detach(model)),
-      editor.onDidChangeModel(() => this.invalidate('SCOPE')),
+      editor.onDidChangeModel(() => { this.invalidate('SCOPE'); void this.refreshLocalFeatures(); }),
       editor.onDidChangeCursorPosition(e => { if (e.reason !== monaco.editor.CursorChangeReason.ContentFlush) this.acceptance.cancel(); }),
       editor.onKeyDown(e => {
         if ((e.ctrlKey || e.metaKey) && e.code === 'Space') { e.preventDefault(); e.stopPropagation(); void this.requestCompletion(null); return; }
         if (e.keyCode === monaco.KeyCode.Escape) { this.acceptance.cancel(); return; }
+        if (e.keyCode===monaco.KeyCode.Enter || e.keyCode===monaco.KeyCode.Tab) {
+          try { const state=this.current(); if(state.controlPrepare || state.vetoPending || state.writeOwner!=='STUDENT' || state.conflict) { e.preventDefault(); e.stopPropagation(); return; } } catch { /* No authority: manual typing remains available. */ }
+        }
         if (this.widget.key(e.keyCode)) { e.preventDefault(); e.stopPropagation(); }
       }), editor.onDidDispose(() => this.dispose()));
     try {
@@ -129,7 +140,8 @@ export class MonacoLspBridge {
     if (!validateDocumentStamp(stamp)) throw new Error('Invalid document authority');
     this.lastAuthorityRevision=Math.max(this.lastAuthorityRevision,auth.revision);
     return { ...auth, stamp, content:snapshot.content,
-      controlPrepare:auth.controlPrepare || this.prepareFloor !== null, connected:auth.connected && !this.blocked };
+      controlPrepare:auth.controlPrepare || this.prepareFloor !== null, connected:auth.connected && !this.blocked,
+      readOnly:auth.readOnly || this.binding.features?.()?.completion !== true };
   }
   private active() { const model = this.editor.getModel(); return model ? this.entries.get(model) : undefined; }
   private current() { const entry = this.active(); if (!entry) throw new Error('No active project model'); return this.state(entry); }
@@ -141,7 +153,7 @@ export class MonacoLspBridge {
     entry.listener = model.onDidChangeContent(event => {
       const reason = entry.reason ?? (event.isUndoing ? 'UNDO' : event.isRedoing ? 'REDO' : 'TYPING');
       this.invalidate('MODEL_CHANGED'); // immediately clears ALL project markers, before transport or debounce.
-      this.sync(entry,'CHANGE',reason);
+      void this.refreshLocalFeatures();
       // Monaco's public content event precedes its final cursor update. Capture, never rebind a stale queue.
       const ticket=this.workGeneration,version=model.getVersionId(),change=event.changes.length===1 ? event.changes[0] : null;
       const text=change?.text ?? '',offset=change ? change.rangeOffset+text.length : -1;
@@ -157,30 +169,17 @@ export class MonacoLspBridge {
       }
 
     });
-    this.sync(entry,'OPEN','OPEN');
+    if (model === this.editor.getModel()) void this.refreshLocalFeatures();
   }
   private detach(model: M.editor.ITextModel) {
     const entry = this.entries.get(model); if (!entry) return;
     this.invalidate('SCOPE');
-    if (!entry.tombstone && entry.sent) {
-      try { this.binding.sendDocument('CLOSE',{ ...entry.sent,reason:'OPEN' }); } catch (e) { this.problem(e); }
-    }
     entry.listener.dispose(); this.entries.delete(model);
     this.monaco.editor.setModelMarkers(model,this.markerOwner,[]);
   }
-  private sync(entry: Entry, kind: 'OPEN'|'CHANGE', reason: MutationReason) {
-    try {
-      if (entry.tombstone) return;
-      const state = this.state(entry);
-      if (!state.connected || !state.synced) return;
-      const document: OpenOrChange = {stamp:state.stamp,content:state.content,reason};
-      this.binding.sendDocument(entry.sent ? kind : 'OPEN',entry.sent ? document : {...document,reason:'OPEN'});
-      entry.sent = JSON.parse(JSON.stringify(document));
-    } catch (e) { this.problem(e); }
-  }
   /** Scope/model invalidation is synchronous; no cancellation acknowledgement is required for correctness. */
   private invalidate(reason: Parameters<CompletionAcceptanceFacade['invalidate']>[0]) {
-    this.workGeneration++;
+    this.workGeneration++; this.featureGeneration++;
     if (['CONTROL_PREPARE','VETO','DISCONNECTED','CONFLICT'].includes(reason)) {
       let revision = -1;
       for (const entry of this.entries.values()) { try { revision = Math.max(revision,this.binding.readAuthority(this.snapshot(entry))?.revision ?? -1); } catch {} }
@@ -194,27 +193,32 @@ export class MonacoLspBridge {
     const flight = this.flight; this.flight = undefined;
     if (!flight) return;
     flight.abort.abort();
-    try { this.binding.cancel({requestId:flight.request.requestId,stamp:flight.request.stamp}); } catch (e) { this.problem(e); }
+    // Local cancellation never writes a transport frame.
   }
   private problem(e: unknown) { try { this.binding.onProblem?.(e instanceof Error ? e.message : String(e)); } catch { /* UI error cannot mutate a model or bypass the gate. */ } }
   /** Public Ctrl+Space/dot request; captured request never rebound to newer models, ACKs or authority. */
   requestCompletion(trigger: string | null): Promise<void> { return this.requestAt(trigger); }
   private async requestAt(trigger: string | null, expected?: {stamp:DocumentStamp;position:M.IPosition}): Promise<void> {
     this.acceptance.cancel();
+    let task:Flight|undefined;
     try {
       const entry = this.active(); if (!entry) return;
       const state = this.state(entry), pos = this.editor.getPosition();
-      if (!mayAccept(state) || !pos || !entry.sent ||
-        (!sameScope(entry.sent.stamp,state.stamp) || entry.sent.content !== state.content || entry.sent.stamp.localModelVersion !== state.stamp.localModelVersion)) return;
+      if (!mayAccept(state) || !pos || this.binding.features?.()?.completion !== true) return;
       if (expected && (!sameStamp(state.stamp,expected.stamp) || pos.lineNumber!==expected.position.lineNumber || pos.column!==expected.position.column)) return;
       const request: CompleteRequest = {requestId:crypto.randomUUID(),stamp:{...state.stamp},position:{line:pos.lineNumber,column:pos.column},trigger};
-      const flight: Flight = {request,abort:new AbortController(),entry}; this.flight = flight;
-      const response = await (this.binding.builtin?.(entry.model,request,flight.abort.signal) ?? this.binding.complete(request,flight.abort.signal));
+      const flight: Flight = {request,abort:new AbortController(),entry}; this.flight = flight; task=flight;
+      const provided = this.binding.builtin?.(entry.model,request,flight.abort.signal);
+      if (!provided) { this.flight=undefined; return; }
+      const response = await provided;
       if (this.dead || this.flight !== flight || flight.abort.signal.aborted || this.active() !== entry ||
         response.requestId !== request.requestId || !sameStamp(response.stamp,request.stamp)) return;
       this.flight = undefined;
+      if (response.items.some(item=>item.additionalTextEdits.length!==0)) return;
+      if (this.binding.features?.()?.completion !== true) return;
+      this.binding.localStatus?.('ON',this.effectiveDiagnostics,null);
       this.acceptance.present(response);
-    } catch (e) { this.cancelFlight(); this.problem(e); }
+    } catch (e) { if(task && this.flight===task) { this.cancelFlight(); this.binding.localStatus?.('FAILED',this.effectiveDiagnostics,String(e)); this.problem(e); } }
   }
   getModelSnapshots(): readonly ModelSnapshot[] { return [...this.entries.values()].filter(e => !e.tombstone && !e.model.isDisposed()).map(e => this.snapshot(e)); }
   /** Tags a real Monaco mutation, never performs a second persistence write. */
@@ -225,7 +229,7 @@ export class MonacoLspBridge {
   }
   private receive(event: BridgeEvent) {
     if (this.dead) return;
-    if (event.type === 'DIAGNOSTICS') { this.diagnostics(event.result); return; }
+    if (event.type === 'DIAGNOSTICS') return; // Retired remote analysis is never a local authority.
     if (event.type === 'AUTHORITY_CHANGED') {
       this.workGeneration++;
       // ACK-only: clear/cancel, but NO didChange/setValue/save/provider restart. New envelope retains source.
@@ -235,45 +239,54 @@ export class MonacoLspBridge {
       if (states.length && states.every(s => s && (this.prepareFloor === null || s.revision > this.prepareFloor) && !s.controlPrepare && !s.vetoPending && s.connected && s.synced && s.writeOwner === 'STUDENT' && !s.conflict)) {
         this.prepareFloor = null; this.blocked = false;
       }
-      // New server scope opens CURRENT buffers, never replays mutations. ACK metadata alone is NOT a new scope.
-      this.entries.forEach(entry => {
-        if (entry.tombstone) return;
-        try { if (entry.sent && !sameScope(entry.sent.stamp,this.state(entry).stamp)) entry.sent=undefined; }
-        catch { return; }
-        if (!entry.sent) this.sync(entry,'OPEN','OPEN');
-      });
+      void this.refreshLocalFeatures();
       return;
     }
     if (event.type === 'FILE_OPERATION') {
       this.invalidate('SCOPE');
       // Successful authorized feed only. Keep old model bytes as a tombstone until UI retires/migrates it.
       if (event.operation !== 'CREATE') this.entries.forEach(entry => {
-        if (entry.path === event.path) { if (entry.sent) { try { this.binding.sendDocument('CLOSE',{...entry.sent,reason:'OPEN'}); } catch (e) { this.problem(e); } } entry.tombstone = true; }
+        if (entry.path === event.path) entry.tombstone = true;
       });
       return;
     }
     if (event.type === 'DISCONNECTED' || event.type === 'SCOPE') {
       if (event.type === 'SCOPE') this.invalidate('DISCONNECTED');
-      this.blocked = true; this.entries.forEach(entry => { entry.sent = undefined; }); }
+      this.blocked = true; }
     this.invalidate(event.type);
   }
-  private diagnostics(result: DiagnosticsResult) {
+  private diagnosticState(): LocalFeatureState | 'N/A' {
+    const entry=this.active();
+    if (!entry || !this.binding.builtin?.hasDiagnostics?.(entry.model)) return 'N/A';
+    return this.binding.features?.()?.diagnostics === true ? 'INDEXING' : 'OFF';
+  }
+  private featureGeneration=0;
+  private effectiveDiagnostics:LocalFeatureState|'N/A'='N/A';
+  private async refreshLocalFeatures() {
+    const generation=++this.featureGeneration, entry=this.active(), provider=this.binding.builtin;
+    const flags=this.binding.features?.();
+    const current=()=>!this.dead && generation===this.featureGeneration && entry===this.active() && !!entry && !entry.model.isDisposed() && !!this.binding.readAuthority(this.snapshot(entry));
+    if (!entry || !provider) { this.binding.localStatus?.('OFF','N/A',null); return; }
+    const version=entry.model.getVersionId(), diagnosticState=this.diagnosticState();
+    this.effectiveDiagnostics=diagnosticState;
+    this.binding.localStatus?.(flags?.completion ? 'INDEXING':'OFF',diagnosticState,null);
+    if (!flags?.completion && diagnosticState!=='INDEXING') return;
     try {
-      if (!validateDiagnosticsResult(result)) return;
-      const entry = [...this.entries.values()].find(e => !e.tombstone && e.path === result.presentationStamp.path);
-      if (!entry) return;
-      const state = this.state(entry);
-      if (!mayAccept(state) ||
-        !sameStamp(result.presentationStamp,state.stamp) || !this.binding.verifyDiagnostics(result,[...this.entries.values()].filter(e => !e.tombstone).map(e => this.snapshot(e)))) return;
-      const items: M.editor.IMarkerData[] = [];
-      for (const item of result.items) {
-        // Shared edit validator enforces exact UTF16 boundaries, without silently clamping marker positions.
-        if (!validateCompletionEdits({id:'marker',label:'marker',detail:null,primary:{path:entry.path,range:item.range,text:''},additionalTextEdits:[]},state.stamp,state.content)) return;
-        items.push({startLineNumber:item.range.startLine,startColumn:item.range.startColumn,endLineNumber:item.range.endLine,endColumn:item.range.endColumn,
-          message:item.message,severity:this.monaco.MarkerSeverity[item.severity === 'ERROR' ? 'Error' : item.severity === 'WARNING' ? 'Warning' : item.severity === 'INFO' ? 'Info' : 'Hint'],code:item.code ?? undefined});
-      }
-      this.monaco.editor.setModelMarkers(entry.model,this.markerOwner,items);
-    } catch (e) { this.problem(e); }
+      const ready=await provider.ready?.(entry.model);
+      if (!current() || entry.model.getVersionId()!==version) return;
+      if (!ready) { this.binding.localStatus?.('OFF',diagnosticState==='N/A'?'N/A':'OFF',null); return; }
+      const markers=diagnosticState==='INDEXING' ? await provider.diagnostics?.(entry.model) : null;
+      if (!current() || entry.model.getVersionId()!==version) return;
+      this.monaco.editor.setModelMarkers(entry.model,this.markerOwner,markers ?? []);
+      this.effectiveDiagnostics=diagnosticState==='INDEXING'?'ON':diagnosticState;
+      this.binding.localStatus?.(flags?.completion?'ON':'OFF',this.effectiveDiagnostics,null);
+    } catch (e) {
+      if (!current()) return;
+      this.monaco.editor.setModelMarkers(entry.model,this.markerOwner,[]);
+      this.effectiveDiagnostics=diagnosticState==='N/A'?'N/A':flags?.diagnostics?'FAILED':'OFF';
+      this.binding.localStatus?.(flags?.completion?'FAILED':'OFF',this.effectiveDiagnostics,String(e));
+      this.problem(e);
+    }
   }
   dispose() {
     if (this.dead) return;

@@ -1,16 +1,46 @@
 import type * as M from 'monaco-editor';
 import { createBuiltinCompletionProvider, type BuiltinWorkerFactory } from './editor-language/builtin';
-import type { EditorLanguageBinding } from './monacoLspBridge';
-/** Public factories only, invoked after server approval. No competing native provider/widget. */
-export function createBuiltinLanguageRegistry(monaco:typeof M):NonNullable<EditorLanguageBinding['builtin']> {
+import { createCurrentDocumentWordsProvider } from './editor-language/currentDocumentWords';
+import type { LocalBuiltinProvider } from './monacoLspBridge';
+/** Public local workers and current-model words only. Never register a native completion provider. */
+export function createBuiltinLanguageRegistry(monaco:typeof M):LocalBuiltinProvider {
+  // Only this adapter owns TS/JS markers; native diagnostics would ignore configuration flags.
+  for(const mode of [monaco.typescript.typescriptDefaults,monaco.typescript.javascriptDefaults])
+    mode.setModeConfiguration({...mode.modeConfiguration,diagnostics:false});
   const factories:Record<string,BuiltinWorkerFactory>={
     javascript:async model=>(await monaco.typescript.getJavaScriptWorker())(model.uri),
     typescript:async model=>(await monaco.typescript.getTypeScriptWorker())(model.uri),
   };
-  const providers=Object.fromEntries(Object.entries(factories).map(([key,factory])=>[key,createBuiltinCompletionProvider(factory)]));
-  return (model,request,signal)=>providers[model.getLanguageId()]?.(model,request,signal)??null;
+  const workers:Record<string,(model:M.editor.ITextModel)=>Promise<M.typescript.TypeScriptWorker>>={
+    javascript:async model=>(await monaco.typescript.getJavaScriptWorker())(model.uri),
+    typescript:async model=>(await monaco.typescript.getTypeScriptWorker())(model.uri),
+  };
+  const words=createCurrentDocumentWordsProvider();
+  const providers:Record<string,ReturnType<typeof createBuiltinCompletionProvider>>={
+    ...Object.fromEntries(Object.entries(factories).map(([key,factory])=>[key,createBuiltinCompletionProvider(factory)])),
+    java:words,python:words,
+  };
+  return Object.assign(((model,request,signal)=>providers[model.getLanguageId()]?.(model,request,signal)??null) as LocalBuiltinProvider,{
+    ready:async(model:M.editor.ITextModel)=>{
+      const worker=workers[model.getLanguageId()];
+      if(worker) { const proxy=await worker(model);await proxy.getSyntacticDiagnostics(model.uri.toString());return true; }
+      return !!providers[model.getLanguageId()];
+    },
+    hasDiagnostics:(model:M.editor.ITextModel)=>!!workers[model.getLanguageId()],
+    diagnostics:async(model:M.editor.ITextModel)=>{
+      const worker=workers[model.getLanguageId()];if(!worker)return null;
+      const proxy=await worker(model),uri=model.uri.toString();
+      const diagnostics=[...await proxy.getSyntacticDiagnostics(uri),...await proxy.getSemanticDiagnostics(uri)];
+      const message=(m:string|{messageText:string;next?:readonly {messageText:string}[]}):string=>typeof m==='string'?m:[m.messageText,...(m.next??[]).map(message)].join('\n');
+      return diagnostics.slice(0,500).flatMap(d=>{
+        if(!Number.isSafeInteger(d.start)||!Number.isSafeInteger(d.length)||d.start!<0||d.length!<0||d.start!+d.length!>model.getValueLength())return [];
+        const start=model.getPositionAt(d.start!),end=model.getPositionAt(d.start!+d.length!);
+        return [{startLineNumber:start.lineNumber,startColumn:start.column,endLineNumber:end.lineNumber,endColumn:end.column,
+          message:message(d.messageText),severity:d.category===1?monaco.MarkerSeverity.Error:d.category===0?monaco.MarkerSeverity.Warning:monaco.MarkerSeverity.Info,code:String(d.code)}];
+      });
+    },
+  });
 }
-
 /** Syntax language is data, separate from approved completion provider. */
 export function languageForPath(path:string):string {
   const languages:Record<string,string>={java:'java',py:'python',js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',md:'markdown',markdown:'markdown',json:'json',html:'html',css:'css'};

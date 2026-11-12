@@ -48,11 +48,10 @@ export class LanguageClientV2 {
     return a;
   }
   private send(type: LanguageClientMessage['type'], payload: LanguageClientMessage['payload']): boolean {
-    const id = this.dependencies.identity(); if (this.disposed || !id) return false;
-    const message = { protocolVersion: '3.0', messageId: this.dependencies.messageId(), sessionId: id.sessionId, clientId: id.clientId, type, payload };
-    if (!validateLanguageClientMessage(message)) return false;
-    this.dependencies.send(copy(message)); return true;
+    // Historical compatibility surface only. Lightweight never emits remote language frames.
+    return false;
   }
+
   private syncConnection() {
     const connection = this.dependencies.identity()?.connectionGeneration ?? null;
     if (connection !== this.connection) {

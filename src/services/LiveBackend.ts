@@ -125,6 +125,7 @@ export class LiveBackend {
   // Metadata from RuntimeClient alone cannot reconstruct lost mode/settings. No guessed read is called.
   private runtimeMutations=new Map<string,MutationIdentity>();
   private languageScope:LanguageAuthorityV2|null=null;
+  private localLanguageStatusScope='';
   private releaseConfirmedRuntimeMutation(metadata:Readonly<RuntimeUnconfirmedMutationV2>) {
     const key=JSON.stringify([metadata.projectId,metadata.sessionId,metadata.clientId,metadata.requestId]);
     const original=this.runtimeMutations.get(key);
@@ -184,6 +185,12 @@ export class LiveBackend {
     current: () => this.wiringController(), messageId: id,
     send: message => { this.send(message.type, message.payload, message.messageId); },
     problem: message => { this.state.languageProblem = message; },
+    localStatus: (completion,diagnostics,problem) => {
+      const view=this.project&&'language' in this.project.capabilities?this.project.capabilities.language:null;
+      if (!view) return;
+      this.state.language={...view,state:diagnostics==='N/A'?'OFF':diagnostics,autocomplete:completion,problem:null};
+      this.state.languageDiagnostics=diagnostics;this.state.languageProblem=problem;this.publish();
+    },
     status: view => {
       if(this.project&&'language' in this.project.capabilities)this.project.capabilities.language=structuredClone(view);
       this.state.language=structuredClone(view);this.state.languageProblem=view.problem?.message??null;
@@ -220,7 +227,7 @@ export class LiveBackend {
   private currentLanguageScope():LanguageAuthorityV2|null {
     const scope=this.languageScope,p=this.project,s=this.session,v=p&&'language' in p.capabilities?p.capabilities.language:null;
     const execution=p&&'execution' in p.capabilities?p.capabilities.execution:null;
-    return scope&&p&&s&&v&&v.state!=='FAILED'&&v.state!=='OFF'&&execution&&p.projectId===s.projectId&&p.sessionId===s.sessionId&&scope.projectId===p.projectId&&scope.sessionId===s.sessionId&&
+    return scope&&p&&s&&v&&execution&&p.projectId===s.projectId&&p.sessionId===s.sessionId&&scope.projectId===p.projectId&&scope.sessionId===s.sessionId&&
       scope.profileId===v.profileId&&scope.profileId===execution.runtime.profileId&&scope.configurationGeneration===v.configurationGeneration&&
       scope.configurationGeneration===execution.runtime.configurationGeneration&&scope.providerGeneration===v.providerGeneration ? scope : null;
   }
@@ -235,10 +242,17 @@ export class LiveBackend {
   }
   private languagePresentation() {
     const scope=this.currentLanguageScope(),view=this.project&&'language' in this.project.capabilities?this.project.capabilities.language:null;
-    const enabled=!!scope&&scope.provider!=='off';
-    this.state.language=view?enabled||view.state==='FAILED'?structuredClone(view):{...view,state:'OFF',autocomplete:'OFF'}:null;
-    this.state.languageProblem=enabled||view?.state==='FAILED' ? view?.problem?.message??null : 'Autouzupełnianie OFF: brak aktualnego autoryzowanego zakresu serwera. Ręczna edycja dostępna.';
+    const enabled=!!scope&&scope.provider==='builtin'&&!!scope.features;
+    // Only browser-local readiness can turn features ON. Preserve it within this exact local scope.
+    const prior=this.state.language;
+    const key=enabled?JSON.stringify(scope):'';
+    const same=key!==''&&key===this.localLanguageStatusScope&&prior&&view&&prior.projectId===view.projectId&&prior.profileId===view.profileId&&prior.configurationGeneration===view.configurationGeneration&&prior.providerGeneration===view.providerGeneration;
+    this.state.language=view?{...view,state:same?prior.state:'OFF',autocomplete:same?prior.autocomplete:'OFF',problem:null}:null;
+    this.localLanguageStatusScope=key;
+    if(!same)this.state.languageDiagnostics='N/A';
+    if(!enabled)this.state.languageProblem='Podpowiedzi OFF: brak lokalnego providera lub konfiguracji. Ręczna edycja dostępna.';
   }
+
   getEditorLanguageBinding(): EditorLanguageBinding | undefined { return this.project ? this.wiring.getBinding(this.project.projectId) : undefined; }
   retainModelTombstone(path:string,content:string):boolean {
     try {if(!this.storage)throw new Error('localStorage niedostępne');
@@ -616,9 +630,9 @@ export class LiveBackend {
         if (!this.session || message.payload.controlEpoch < this.session.controlEpoch) break;
         this.wiring.sourceChanged();
         this.session = { ...this.session, ...message.payload };
+        this.preparing = null;
         this.wiring.authoritativeState(message.payload.controlEpoch);
         this.state.controlEpoch = message.payload.controlEpoch; this.state.coachMode = message.payload.coachMode;
-        this.preparing = null;
         // Student CONTROL_STATE acknowledges the cutoff, not permission to overwrite a draft.
         if (message.payload.writeOwner === 'STUDENT') { this.pendingSteps.clear(); this.saves.forEach((_, path) => this.schedule(path)); }
         break;
@@ -697,9 +711,7 @@ export class LiveBackend {
     save.flight = { messageId, content: save.draft.content, projectId:this.project?.projectId,sessionId:this.session.sessionId,generation:this.generation,baseVersion:doc.version,controlEpoch:this.session.controlEpoch, timer: setTimeout(() => {
       this.fail(new Error('Brak ACK zapisu. Draft zachowany; sprawdzam stan serwera.')); this.resync();
     }, 5000) };
-    const sourceId=this.wiring.beginAutosave(messageId,path,save.flight.content,doc.version,this.session.controlEpoch);
-    try { this.send('CODE_CHANGED', { path, baseVersion: doc.version, controlEpoch: this.session.controlEpoch, content: save.flight.content, editKind: 'TYPING',
-      ...(sourceId?{languageDocumentMessageId:sourceId}:{}) }, messageId); }
+    try { this.send('CODE_CHANGED', { path, baseVersion: doc.version, controlEpoch: this.session.controlEpoch, content: save.flight.content, editKind: 'TYPING' }, messageId); }
     catch (error) { this.wiring.cancelAutosave(messageId);clearTimeout(save.flight?.timer); save.flight = undefined; this.fail(error); }
     this.publish();
   }

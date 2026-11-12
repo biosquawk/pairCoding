@@ -3,13 +3,14 @@ import React, { useId } from 'react';
 import type { ExecutionView, RunKind, RunV2 } from '../shared/runtime-v2';
 import type { LanguageView } from '../shared/language-v2';
 export interface RuntimeStatusV2Props {
+  diagnostics?: 'OFF'|'INDEXING'|'ON'|'FAILED'|'N/A';
   execution: ExecutionView | null; language: LanguageView | null; run: RunV2 | null;
   connected: boolean; canExecute: boolean; pending?: boolean; error?: string | null;
   preparation?: ServicePreparationState; onPrepare?(reconcile:boolean):void;
   onRun(mode: RunKind): void; onStop(runId: string): void; onSettings(): void;
 }
 /** Neutral status surface; container/service readiness never means terminal success. No editing controls are disabled. */
-export function RuntimeStatusV2({ execution, language, run, connected, canExecute, pending = false, error, preparation, onPrepare, onRun, onStop, onSettings }: RuntimeStatusV2Props) {
+export function RuntimeStatusV2({ execution, language, diagnostics, run, connected, canExecute, pending = false, error, preparation, onPrepare, onRun, onStop, onSettings }: RuntimeStatusV2Props) {
   const id = useId();
   const active = run && ['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(run.status);
   const disabled = !connected || !canExecute || pending;
@@ -20,7 +21,8 @@ export function RuntimeStatusV2({ execution, language, run, connected, canExecut
     </div>
     <div role="status" aria-live="polite">
       {!connected ? 'Offline — uruchamianie niedostępne. Połącz ponownie; ręczna edycja i draft pozostają dostępne.' : preparation?.pending || preparation?.uncertain ? 'Przygotowanie niepotwierdzone — gotowość wymaga bieżącego odczytu.' : !execution ? 'Ładowanie gotowości środowiska…' : `Środowisko: ${execution.runtime.state}`}
-      {language && <p>Autouzupełnianie: {language.autocomplete} · Diagnostyka: {language.state} · Docs: {language.docs}</p>}
+      {language && <p>Autouzupełnianie: {language.autocomplete} · Diagnostyka: {diagnostics ?? language.state} · Docs: {language.docs}</p>}
+      {diagnostics==='N/A' && <p>Podpowiedzi słów z bieżącego dokumentu (Ctrl+Space). Diagnostyka podczas pisania nie dotyczy tego pliku; błędy wykonania i kompilacji zobaczysz po Run/Test.</p>}
       {language?.problem && <p>{language.problem.message} {language.problem.recovery} Pisanie pozostaje dostępne.</p>}
       {execution?.runtime.problem && <p>{execution.runtime.problem.message} {execution.runtime.problem.recovery}</p>}
       {run && <p>Wykonanie {run.runId}: {run.status} · Testy: {run.testOutcome}{run.testCount !== null ? ` (${run.testCount})` : ''}</p>}
