@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {setImmediate} from 'node:timers/promises';
 import {fixture,prepared,deferred,MemoryStorage,storageKey} from './fixture';
 import {run} from '../client-v2/fixtures';
 
@@ -61,7 +62,23 @@ test('refresh failure never forces READY, retains confirmed receipt; later chang
   f.post=async()=>Object.fromEntries(Object.entries(prepared()).reverse());
   assert.equal(await f.live.prepareRuntimeEnvironment(true),true);
 });
-for(const change of ['project','session','epoch','generation','version','snapshot','veto'] as const)test(`late prepare response fenced by ${change}`,async t=>{
+// HUMAN1c206172: ONLY the byte-identical snapshot row is now a neutral publication.
+// All six realdrift cases and assertions below retain their previous contract.
+test('neutral snapshot during original POST still requires positive original receipt and one fresh measured GET',{timeout:5000},async t=>{
+  const f=await fixture(t),post=deferred(),get=deferred();let reads=0;
+  t.after(()=>{post.resolve(prepared());get.resolve(f.b.project);});
+  f.post=()=>post.promise;f.get=()=>{reads++;return get.promise;};
+  const pending=f.live.prepareRuntimeEnvironment();const original=structuredClone(JSON.parse(f.storage.data.get(storageKey)!).entries[0]);
+  await f.snapshot();assert.equal(reads,0);assert.equal(f.maintenance().pending,true);assert.equal(f.maintenance().uncertain,true);
+  assert.deepEqual(JSON.parse(f.storage.data.get(storageKey)!).entries[0],original);
+  post.resolve(prepared());await setImmediate();assert.equal(reads,1);assert.equal(f.maintenance().pending,true);
+  assert.deepEqual(JSON.parse(f.storage.data.get(storageKey)!).entries[0].receipt,prepared());
+  const measured=structuredClone(f.b.project);measured.capabilities.execution.modes.RUN_MAIN={canRun:true,problem:null};
+  get.resolve(measured);assert.equal(await pending,true);assert.equal(reads,1);assert.equal(f.posts().length,1);
+  assert.deepEqual(f.posts()[0].body,original.request);assert.deepEqual(JSON.parse(f.storage.data.get(storageKey)!).entries,[]);
+  assert.equal(f.live.getState().runtime!.execution!.modes.RUN_MAIN.canRun,true);
+});
+for(const change of ['project','session','epoch','generation','version','veto'] as const)test(`late prepare response fenced by ${change}`,async t=>{
   const f=await fixture(t),g=deferred();f.post=async()=>g.promise;const pending=f.live.prepareRuntimeEnvironment();
   if(change==='project')f.b.project.projectId=f.b.session.projectId='p2';
   if(change==='session')f.b.project.sessionId=f.b.session.sessionId='s2';

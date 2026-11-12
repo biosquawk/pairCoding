@@ -127,11 +127,20 @@ for(const failure of ['lost','unreadable','unauthorized','malformed','inconsiste
   await setImmediate();assert.equal(f.posts().length,1);assert.equal(f.reads().length,1);
 });
 
-for(const drift of ['seq-only','WS-ready','session','project','workspace','config','source','source-request','local-draft','epoch','connection','closed','finished','coach'] as const)test(`concurrent ${drift} fences measured installation and preserves original`,async t=>{
+// HUMAN35aa / K TASKfc77: seq-only and same-binding WS readiness are presentation,
+// not source/control drift. Genuine negatives below retain their original assertions.
+for(const neutral of ['seq-only','WS-ready'] as const)test(`neutral ${neutral} accepts only the fresh measured GET`,async t=>{
   const f=await fixture(t),gate=deferred<unknown>();f.measured=()=>gate.promise;t.after(()=>gate.resolve(readyProject()));
   const pending=f.live.prepareRuntimeEnvironment();await setImmediate();assert.equal(f.reads().length,1);const original=structuredClone(f.original());
-  if(drift==='seq-only')f.receive('SESSION_STATE',structuredClone(f.b.session));
-  if(drift==='WS-ready'){f.b.project=readyProject();await f.snapshot();}
+  if(neutral==='seq-only')f.receive('SESSION_STATE',structuredClone(f.b.session));
+  if(neutral==='WS-ready'){f.b.project=readyProject();await f.snapshot();}
+  assert.equal(f.maintenance().pending,true);assert.equal(f.maintenance().uncertain,true);assert.deepEqual(f.original(),original);
+  gate.resolve(readyProject());assert.equal(await pending,true);assert.equal(f.posts().length,1);assert.equal(f.reads().length,1);
+  assert.deepEqual(JSON.parse(f.storage.getItem(storageKey)!).entries,[]);assert.equal(f.execution().modes.RUN_MAIN.canRun,true);
+});
+for(const drift of ['session','project','workspace','config','source','source-request','local-draft','epoch','connection','closed','finished','coach'] as const)test(`concurrent ${drift} fences measured installation and preserves original`,async t=>{
+  const f=await fixture(t),gate=deferred<unknown>();f.measured=()=>gate.promise;t.after(()=>gate.resolve(readyProject()));
+  const pending=f.live.prepareRuntimeEnvironment();await setImmediate();assert.equal(f.reads().length,1);const original=structuredClone(f.original());
   if(drift==='session'){f.b.session.sessionId=f.b.project.sessionId='s2';await f.snapshot();}
   if(drift==='project'){f.b.session.projectId=f.b.project.projectId=f.b.project.capabilities.language.projectId='p2';await f.snapshot();}
   if(drift==='workspace'){f.b.session.workspaceVersion=f.b.project.workspaceVersion=2;await f.snapshot();}

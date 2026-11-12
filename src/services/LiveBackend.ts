@@ -147,23 +147,31 @@ export class LiveBackend {
   private connectionGeneration = id();
   private maintenanceSourceRevision = 0;
   private sourceRequests = 0;
+  private maintenanceRevision = 0;
+  private maintenanceVector: unknown;
+  /** Maintenance authority, not the editor cache/WS publication generation. Observe at
+   * semantic transitions, BEFORE snapshot handlers can clear hard guards. The monotonic
+   * revision retains real change-and-return (ABA); READY/PENDING, presence and seq do not.
+   */
+  private maintenanceStamp(): string {
+    const p=this.project,s=this.session,r=this.wiring.runtime.snapshot();
+    const e=p&&'execution' in p.capabilities?p.capabilities.execution:null;
+    const vector=[this.connectionGeneration,this.stopped,this.ws?.readyState,this.clientId,
+      this.maintenanceSourceRevision,this.sourceRequests,this.state.workspaceVersion,
+      p&&[p.projectId,p.sessionId,p.rootPath,p.workspaceVersion,p.settings,
+        [...p.files].sort((a,b)=>a.path.localeCompare(b.path)),e?.runtime.profileId,e?.runtime.configurationGeneration],
+      s&&[s.projectId,s.sessionId,s.workspaceVersion,s.lifecycle,s.controlEpoch,s.writeOwner,s.interventionId,s.cooldownAfterVeto],
+      this.preparing,this.vetoPending,this.vetoCutoff,[...this.pendingSteps].sort(([a],[b])=>a.localeCompare(b)),
+      [...this.saves].map(([path,save])=>[path,save.draft,save.conflict]).sort(),this.state.fileConflict,
+      !!this.finishAttempt,this.finishStarting,!!this.proposalDecision,
+      r.pending,r.reconciliationRequired,r.run&&[r.run.runId,r.run.status]];
+    if(!sameJSON(vector,this.maintenanceVector)) {
+      this.maintenanceVector=structuredClone(vector);this.maintenanceRevision++;
+    }
+    return String(this.maintenanceRevision);
+  }
   private readonly servicePreparation = new ServicePreparationV2({
-    current: () => {
-      const p=this.project,s=this.session,e=p&&'execution' in p.capabilities?p.capabilities.execution:null,r=this.wiring.runtime.snapshot();
-      if(!p||!s||!e)return null;
-      const active=r.run&&['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.run.status);
-      const reason=!this.synced||this.stopped||this.ws?.readyState!==1||p.projectId!==s.projectId||p.sessionId!==s.sessionId?'Połącz i zsynchronizuj bieżący projekt przed przygotowaniem.':
-        s.lifecycle==='FINISHED'?'Sesja zakończona; przygotowanie niedostępne.':
-        s.writeOwner!=='STUDENT'||this.preparing||this.vetoPending?'Poczekaj na rozliczenie sterowania i Veto.':
-        this.finishAttempt||this.finishStarting||this.proposalDecision||this.pendingSteps.size?'Najpierw rozstrzygnij bieżącą operację sesji.':
-        this.saves.size||this.state.fileConflict||this.sourceRequests?'Poczekaj na potwierdzenie zapisu i rozstrzygnij konflikt pliku.':
-        r.pending||r.reconciliationRequired?'Najpierw rozstrzygnij bieżący Run lub zapis ustawień.':
-        active?'Zatrzymaj i rozlicz bieżące wykonanie przed przygotowaniem.':undefined;
-      return {projectId:p.projectId,clientId:this.clientId,sessionId:s.sessionId,workspaceVersion:this.state.workspaceVersion,
-        configurationGeneration:e.runtime.configurationGeneration,controlEpoch:s.controlEpoch,
-        stamp:JSON.stringify([this.connectionGeneration,this.generation,this.lastSeq,this.maintenanceSourceRevision,p.files]),
-        allowed:reason===undefined,reason};
-    },requestId:id,publish:()=>this.publish(),
+    current: () => this.servicePreparationAuthority(),requestId:id,publish:()=>this.publish(),
     // Explicit maintenance is not a 5s editor read. PreparedRuntimeResolver permits
     // 16 output roots: one engine read plus up to three Docker reads/root at3s.
     // RuntimeServiceNetwork needs at most ten sequential 10s commands (fresh create
@@ -174,22 +182,44 @@ export class LiveBackend {
     isAbsence:error=>error instanceof HttpRejectedError&&error.status===409&&!error.bodyUnreadable&&
       (error.code==='SERVICE_NETWORK_NOT_DISPATCHED'||error.code==='SERVICE_NETWORK_ABSENCE_CONFIRMED'),
     refresh:async authority=>{
-      const project=this.project,session=this.session,seq=this.lastSeq,generation=this.generation,source=this.maintenanceSourceRevision,connection=this.connectionGeneration;
+      // Same semantic authority as the POST lifecycle, with the original hard guards.
+      const current=()=>this.servicePreparationAuthorityMatches(authority);
       // Only a confirmed original PREPARED reaches this refresh. Bootstrap/HELLO stay cheap;
       // PREPARED itself is not runtime readiness. The measured endpoint can spend the schema
       // maximum 120s in EACH of three sequential phases (execution, Main probe, Tests probe).
       // Allow those phases plus a 5s response margin, only for this authenticated read.
       const value=await this.http<import('../shared/runtime-v2').ProjectV2>('/api/project?readiness=actual','GET',undefined,true,undefined,3*120000+5000);
-      if(!this.synced||this.stopped||this.project!==project||this.session!==session||!session||seq!==this.lastSeq||generation!==this.generation||source!==this.maintenanceSourceRevision||
-        connection!==this.connectionGeneration||this.preparing||this.vetoPending||this.saves.size||this.sourceRequests||
-        session.writeOwner!=='STUDENT'||session.controlEpoch!==authority.controlEpoch||!validateV2WireShape('Project',value)||
+      if(!current()||!validateV2WireShape('Project',value)||
         value.projectId!==authority.projectId||value.sessionId!==authority.sessionId||value.workspaceVersion!==authority.workspaceVersion||
-        value.capabilities.execution.runtime.configurationGeneration!==authority.configurationGeneration)return false;
+        value.capabilities.execution.runtime.configurationGeneration!==authority.configurationGeneration||
+        !sameJSON(value.settings,this.project?.settings)||!sameJSON([...value.files].sort((a,b)=>a.path.localeCompare(b.path)),[...this.project!.files].sort((a,b)=>a.path.localeCompare(b.path)))||
+        value.rootPath!==this.project?.rootPath||!this.project||!('execution' in this.project.capabilities)||value.capabilities.execution.runtime.profileId!==this.project.capabilities.execution.runtime.profileId)return false;
       // Shared RuntimeClient validates Settings/language/execution consistency BEFORE installation.
-      if(!this.wiring.runtime.applyProject(value,this.wiring.runtime.snapshot().run))return false;
-      this.projectState(value);this.publish();return true;
+      if(!this.wiring.runtime.applyProject(value,this.wiring.runtime.snapshot().run)||!current())return false;
+      this.projectState(value);this.publish();return current();
     },
   });
+
+  private servicePreparationAuthority() {
+    const p=this.project,s=this.session,e=p&&'execution' in p.capabilities?p.capabilities.execution:null,r=this.wiring.runtime.snapshot();
+    if(!p||!s||!e)return null;
+    const active=r.run&&['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.run.status);
+    const reason=!this.synced||this.stopped||this.ws?.readyState!==1||p.projectId!==s.projectId||p.sessionId!==s.sessionId?'Połącz i zsynchronizuj bieżący projekt przed przygotowaniem.':
+      s.lifecycle==='FINISHED'?'Sesja zakończona; przygotowanie niedostępne.':
+      s.writeOwner!=='STUDENT'||this.preparing||this.vetoPending?'Poczekaj na rozliczenie sterowania i Veto.':
+      this.finishAttempt||this.finishStarting||this.proposalDecision||this.pendingSteps.size?'Najpierw rozstrzygnij bieżącą operację sesji.':
+      this.saves.size||this.state.fileConflict||this.sourceRequests?'Poczekaj na potwierdzenie zapisu i rozstrzygnij konflikt pliku.':
+      r.pending||r.reconciliationRequired?'Najpierw rozstrzygnij bieżący Run lub zapis ustawień.':
+      active?'Zatrzymaj i rozlicz bieżące wykonanie przed przygotowaniem.':undefined;
+    return {projectId:p.projectId,clientId:this.clientId,sessionId:s.sessionId,workspaceVersion:this.state.workspaceVersion,
+      configurationGeneration:e.runtime.configurationGeneration,controlEpoch:s.controlEpoch,
+      stamp:this.maintenanceStamp(),
+      allowed:reason===undefined,reason};
+  }
+  private servicePreparationAuthorityMatches(a: Omit<NonNullable<ReturnType<LiveBackend['servicePreparationAuthority']>>,'reason'> & {reason?:string}): boolean {
+    const current=this.servicePreparationAuthority();
+    return !!current?.allowed&&sameJSON(current,a);
+  }
 
   private readonly wiring = new RuntimeWiringV2({
     current: () => this.wiringController(), messageId: id,
@@ -408,6 +438,7 @@ export class LiveBackend {
   }
   reconnect() { this.retries = 0; this.stopped = false; clearTimeout(this.reconnectTimer); this.resync(); }
   private disconnected() {
+    this.maintenanceRevision++;
     this.languageScope=null;this.languagePresentation();
     this.wiring.invalidate('DISCONNECTED');
     if (this.stopped) return;
@@ -430,6 +461,7 @@ export class LiveBackend {
     }
   }
   private resync() {
+    this.maintenanceRevision++;
     this.languageScope=null;this.languagePresentation();
     this.wiring.invalidate('DISCONNECTED');
     this.invalidateEditorView();
@@ -437,6 +469,7 @@ export class LiveBackend {
     if (this.ws) this.ws.close(); else this.disconnected();
   }
   close() {
+    this.maintenanceRevision++;
     this.languageScope=null;this.languagePresentation();
     this.wiring.invalidate('DISCONNECTED');
     this.invalidateEditorView();
@@ -457,10 +490,12 @@ export class LiveBackend {
     }
   }
   private projectState(project: ProjectSnapshot) {
+    this.maintenanceStamp();
     this.clearForeignSnapshots(project.projectId);
     const previous=this.project;
     if(previous && (previous.projectId!==project.projectId || JSON.stringify(previous.files)!==JSON.stringify(project.files))) this.wiring.sourceChanged();
     this.project = project;
+    this.maintenanceStamp();
     this.languagePresentation();
     this.state.workspaceVersion = project.workspaceVersion;
     this.state.projectSettings = mapSettings(project.settings);
@@ -481,12 +516,14 @@ export class LiveBackend {
       content: this.saves.get(f.path)?.draft.content ?? this.documents.get(f.path)?.content ?? '', loaded: this.documents.has(f.path) || this.saves.has(f.path), loadError: this.loadErrors.get(f.path), readOnly: this.documents.get(f.path)?.readOnly }));
   }
   private sessionState(session: Wire.Session) {
+    this.maintenanceStamp();
     this.replaceFinishSession(session.sessionId);
     if (this.session && session.controlEpoch < this.session.controlEpoch) return;
     const authorityChanged=!this.session || session.sessionId!==this.session.sessionId ||
       session.controlEpoch!==this.session.controlEpoch || session.writeOwner!==this.session.writeOwner;
     if(this.session && authorityChanged) this.wiring.sourceChanged();
     this.session = session;
+    this.maintenanceStamp();
     // VIEW_CHANGED/timer/presence publications do not change editor authority. Clearing a
     // current completion here races its keyboard acceptance with our own view ACK.
     // Real ownership/epoch changes still invalidate synchronously; same-epoch PREPARE
@@ -538,6 +575,11 @@ export class LiveBackend {
     this.installDocument(doc, external); this.publish();
   }
   private async snapshot(bundle: BundleSnapshot, seq: number) {
+    // Never let synchronous cache replacement erase an observed PREPARE/Veto/write
+    // or operation guard before maintenance has recorded its invalidation.
+    this.maintenanceStamp();
+    const incoming=bundle.activeDocument,prior=incoming&&this.documents.get(incoming.path);
+    if(prior&&incoming&&(prior.version!==incoming.version||prior.content!==incoming.content||prior.readOnly!==incoming.readOnly))this.maintenanceSourceRevision++;
     this.wiring.invalidate('SCOPE');
     this.invalidateEditorView();
     const generation = ++this.generation;
@@ -622,6 +664,7 @@ export class LiveBackend {
       // A shaped V2 project may not silently downgrade a missing/malformed REQUIRED bootstrap
       // to legacy/null. Mixed raw settings retain their explicit manual-migration path only.
       if(validateV2WireShape('Project',message.payload.project)&&!validateV2WireShape('SessionBundle',message.payload)) {
+        this.maintenanceRevision++;
         this.wiring.invalidate('SCOPE');this.languageScope=null;this.synced=false;this.languagePresentation();
         throw new Error('Niepoprawny SESSION_SNAPSHOT V2: wymagany ścisły languageBootstrap.');
       }
@@ -662,6 +705,7 @@ export class LiveBackend {
       case 'COACH_STEP_EDIT': void this.coachStep(message.payload); break;
       case 'SESSION_STATE': this.sessionState(message.payload); void this.reconcileFinish(); break;
       case 'EXTERNAL_FILE_SYNC': {
+        this.maintenanceSourceRevision++;
         this.wiring.sourceChanged();
         const p = message.payload; this.state.workspaceVersion = p.workspaceVersion;
         if(p.operation==='DELETED'||p.operation==='CREATED')this.wiring.fileOperation(p.operation==='DELETED'?'DELETE':'CREATE',p.path);

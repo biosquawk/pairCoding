@@ -12,7 +12,17 @@ const request=(p:any,epoch=0)=>({requestId:randomUUID(),clientId:'tab',sessionId
 
 test('UNIT actual authenticated HTTP explicit prepare joins same factory identity, exact receipt readiness, immutable original and restart readback; no implicit prepare',async t=>{
   const f=await httpNetworkFixture(t,true),a=f.app(),port=await a.listen();
-  const p=(await f.http(port,'GET','/api/project')).body;
+  // HUMAN8085b4b4: cheap bootstrap stays independent; actual facts require an explicit measured read.
+  const cheap=(await f.http(port,'GET','/api/project')).body;
+  for(const mode of ['RUN_MAIN','RUN_TESTS']) {
+    assert.equal(cheap.capabilities.execution.modes[mode].canRun,false);
+    assert.equal(cheap.capabilities.execution.modes[mode].problem.code,'RUNTIME_READINESS_PENDING');
+  }
+  assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,0);
+  const p=(await f.http(port,'GET','/api/project?readiness=actual')).body;
+  assert.equal(p.projectId,cheap.projectId);assert.equal(p.sessionId,cheap.sessionId);
+  assert.equal(p.workspaceVersion,cheap.workspaceVersion);
+  assert.equal(p.capabilities.execution.runtime.configurationGeneration,cheap.capabilities.execution.runtime.configurationGeneration);
   assert.equal(p.capabilities.execution.modes.RUN_MAIN.canRun,false);assert.equal(p.capabilities.execution.modes.RUN_MAIN.problem.code,'SERVICE_NETWORK_PREPARE_REQUIRED');
   assert.equal(p.capabilities.execution.modes.RUN_TESTS.canRun,true,JSON.stringify(p));
   await f.connect(port,p.sessionId);await f.http(port,'GET','/api/project');
@@ -24,7 +34,7 @@ test('UNIT actual authenticated HTTP explicit prepare joins same factory identit
   const stored=JSON.parse(fs.readFileSync(path.join(f.state,'service-network','receipt.json'),'utf8'));assert.equal(stored.networkId,r.body.networkId);
   const directory=path.join(f.project,'.paircoach','runtime-network-maintenance'),file=fs.readdirSync(directory).find(n=>n.endsWith('.json'))!;
   const bytes=fs.readFileSync(path.join(directory,file));assert.deepEqual(JSON.parse(bytes.toString()).body.request,original);
-  assert.equal((await f.http(port,'GET','/api/project')).body.capabilities.execution.modes.RUN_MAIN.canRun,true);
+  assert.equal((await f.http(port,'GET','/api/project?readiness=actual')).body.capabilities.execution.modes.RUN_MAIN.canRun,true);
   assert.deepEqual((await f.http(port,'POST',route,original)).body,r.body);assert.deepEqual(fs.readFileSync(path.join(directory,file)),bytes);
   assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
   const conflicting=await f.http(port,'POST',route,{...original,expectedWorkspaceVersion:123});assert.equal(conflicting.status,409);assert.equal(conflicting.body.code,'IDEMPOTENCY_CONFLICT');
@@ -33,7 +43,7 @@ test('UNIT actual authenticated HTTP explicit prepare joins same factory identit
   assert.deepEqual(fs.readFileSync(path.join(directory,file)),bytes);assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
   // A same-name external/replaced bridge cannot inherit readiness from an old public response.
   f.setNetwork({...f.getNetwork()!,Id:'1'.repeat(64)});
-  const changed=(await f.http(port2,'GET','/api/project')).body;assert.equal(changed.capabilities.execution.modes.RUN_MAIN.canRun,false);
+  const changed=(await f.http(port2,'GET','/api/project?readiness=actual')).body;assert.equal(changed.capabilities.execution.modes.RUN_MAIN.canRun,false);
   assert.equal(changed.capabilities.execution.modes.RUN_MAIN.problem.code,'SERVICE_NETWORK_PREPARE_REQUIRED');assert.equal(changed.capabilities.execution.modes.RUN_TESTS.canRun,true);
   assert.equal((await f.http(port2,'POST',route,original)).status,503);assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
 });
@@ -72,7 +82,8 @@ test('UNIT actual active Run excludes maintenance; network-none Run and manual e
   await f.http(port,'POST','/api/run/'+accepted.body.runId+'/stop',{requestId:randomUUID(),clientId:'tab',sessionId:p.sessionId});
 });
 
-test('UNIT genuine SIGKILL durable Run orphan fences network maintenance after real restart with empty Runner RAM; no Docker create replay',async t=>{
+test('UNIT genuine SIGKILL durable Run orphan fences network maintenance after authentic owner recovery; no Docker create replay',async t=>{
+  const {validateRunV2}=await import('../../src/shared/validation-v2');
   const f=await httpNetworkFixture(t);
   const child=fork(new URL('./http-network-orphan-child.ts',import.meta.url),[],{execArgv:['--import','tsx'],stdio:['ignore','ignore','pipe','ipc'],
     env:{...process.env,NETWORK_CHILD:JSON.stringify({project:f.project,config:f.config,prepared:f.prepared,token:f.token})}});
@@ -81,14 +92,32 @@ test('UNIT genuine SIGKILL durable Run orphan fences network maintenance after r
   const p=(await f.http(ready.port,'GET','/api/project')).body;await f.connect(ready.port,p.sessionId);
   const accepted=await f.http(ready.port,'POST','/api/run',f.runRequest(p,'RUN_MAIN'));assert.equal(accepted.status,202,JSON.stringify(accepted));
   const journal=path.join(f.state,'journal',accepted.body.runId+'.json'),before=fs.readFileSync(journal);assert.equal(JSON.parse(before.toString()).phase,'RUNNING');
-  const exited=once(child,'exit');child.kill('SIGKILL');await exited;
-  const app=f.app(),port=await app.listen(),p2=(await f.http(port,'GET','/api/project')).body;await f.connect(port,p2.sessionId);
-  // No reconstructed runner yet: the durable journal, not RAM, is the fence exercised here.
-  assert.equal((await f.http(port,'GET','/api/run/'+accepted.body.runId)).status,404);
+  const exited=once(child,'exit');child.kill('SIGKILL');const [,signal]=await exited;assert.equal(signal,'SIGKILL');
+  const app=f.app(),port=await app.listen(),p2=(await f.http(port,'GET','/api/project')).body;const connection=await f.connect(port,p2.sessionId);
+  assert.notEqual(p2.sessionId,p.sessionId);
+  // HUMAN8085b4b4 / AC106: startup retains the authentic old owner. This is not an empty-RAM journal-only branch.
+  const recovered=await f.http(port,'GET','/api/run/'+accepted.body.runId);
+  assert.equal(recovered.status,200,JSON.stringify(recovered));assert.ok(validateRunV2(recovered.body));
+  assert.equal(recovered.body.runId,accepted.body.runId);assert.equal(recovered.body.profileId,accepted.body.profileId);
+  assert.equal(recovered.body.configurationGeneration,accepted.body.configurationGeneration);
+  assert.equal(recovered.body.status,'PROCESS_STOP_UNCONFIRMED');assert.equal(recovered.body.finishedAt,null);
+  assert.ok(recovered.body.processProblem);assert.equal(recovered.body.processProblem.code,'PROCESS_STOP_UNCONFIRMED');
+  assert.equal(connection.bundle.lastRun,null);assert.equal(connection.bundle.report,null);
+  // HUMAN46c08f87: authentic recovered owner is fenced before maintenance creates an entry.
+  const maintenance=path.join(f.project,'.paircoach','runtime-network-maintenance');
+  assert.deepEqual(fs.readdirSync(maintenance).filter(n=>n.endsWith('.json')),[]);
   const denied=await f.http(port,'POST',route,request(p2));assert.equal(denied.status,409,JSON.stringify(denied));
-  assert.equal(denied.body.code,'SERVICE_NETWORK_NOT_DISPATCHED');assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,0);
-  assert.deepEqual(fs.readFileSync(journal),before);assert.equal(f.fake.calls.filter(a=>a[0]==='create').length,0);
+  assert.equal(denied.body.code,'RUN_IN_PROGRESS');assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,0);
+  assert.deepEqual(fs.readdirSync(maintenance).filter(n=>n.endsWith('.json')),[]);
+  assert.deepEqual(fs.readFileSync(journal),before);assert.equal(f.fake.calls.filter(a=>a[0]==='create'||a[0]==='start').length,0);
   assert.equal((await f.http(port,'GET','/api/file?path=main.js')).status,200);
+  const reconnected=await f.connect(port,p2.sessionId);
+  assert.equal(reconnected.bundle.lastRun,null);assert.equal(reconnected.bundle.report,null);
+  for(const frames of [connection.frames,reconnected.frames])
+    assert.equal(frames.some(m=>['RUN_STATE','RUN_OUTPUT'].includes(m.type)),false,'old Run never enters current-session publication');
+  // HUMAN8085b4b4 permits this exact fail-closed teardown: child and parent have independent FakeDocker RAM.
+  assert.equal(f.fake.v,null,'parent fixture never received the killed child container state');
+  f.expectUnconfirmedClose(); // fixture asserts app.close rejects exactly PROCESS_STOP_UNCONFIRMED, never success
 });
 
 test('UNIT actual maintenance holds SAME source FIFO; Veto during lost effect preserves UNKNOWN ownership and exact original, no implicit retry',async t=>{
