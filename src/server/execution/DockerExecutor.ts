@@ -82,6 +82,9 @@ export class DockerExecutor implements ExecutionPort {
   private queue:Promise<unknown>=Promise.resolve();
   private listeners=new Map<string,Set<(output:ExecutionOutput)=>void>>();
   private outputUnavailable=new Set<string>();
+  /** Trusted only after strict binding validation on this exact owned RUNNING container.
+   * Docker can discard Ports on exit. This is not durable recovery authority. */
+  private serviceUrls=new Map<string,{containerId:string;url:string}>();
   private outputs=new Map<string,{
     stdout:string;
     stderr:string;
@@ -416,7 +419,9 @@ export class DockerExecutor implements ExecutionPort {
     if(!s)return null;
     const bindings=v.NetworkSettings?.Ports?.[s.containerPort+'/tcp'];
     requireThat(bindings?.length===1&&bindings[0].HostIp==='127.0.0.1'&&/^[0-9]{1,5}$/.test(bindings[0].HostPort)&&Number(bindings[0].HostPort)>0&&Number(bindings[0].HostPort)<=65535,'Unsafe service binding');
-    return `http://127.0.0.1:${bindings[0].HostPort}${s.healthPath}`;
+    const url=`http://127.0.0.1:${bindings[0].HostPort}${s.healthPath}`;
+    if(v.State.Running)this.serviceUrls.set(r.handle.runId+':'+r.handle.opaqueId,{containerId:v.Id,url});
+    return url;
   }
   private async httpReady(url:string,healthOnly=true):Promise<boolean>{
     return new Promise(resolve=>{
@@ -481,6 +486,9 @@ export class DockerExecutor implements ExecutionPort {
       try{
         let v=await this.inspect(r);
         requireThat(v,'No exit proof for missing container');
+        // Retain the owned pre-Stop snapshot before Docker can discard published Ports.
+        // Binding validation must not prevent physically stopping an owned container.
+        const beforeStop=v;
         if(v.State.Running || v.State.Status==='created'){
           if(v.State.Status==='created'){
             // Never started: no genuine exit proof. Do NOT start the task or delete it to manufacture recovery success.
@@ -498,7 +506,13 @@ export class DockerExecutor implements ExecutionPort {
         }
         const exit=this.exit(r,v);
         if(r.plan.service){
-          const url=await this.serviceUrl(r,v);
+          // Validate the RUNNING snapshot strictly; an older URL cannot hide unsafe drift.
+          if(beforeStop.State.Running)await this.serviceUrl(r,beforeStop);
+          const prior=this.serviceUrls.get(r.handle.runId+':'+r.handle.opaqueId);
+          const bindings=v.NetworkSettings?.Ports?.[r.plan.service.containerPort+'/tcp'];
+          // Only missing EXITED port metadata may use the exact-container prior URL.
+          // Cold restart without it stays uncertain; a present binding is still validated.
+          const url=bindings==null&&prior?.containerId===v.Id?prior.url:await this.serviceUrl(r,v);
           requireThat(!await this.httpReady(url!,false),'Endpoint still responds after container Stop');
         }
         if(r.exit)requireThat(canonicalJson(r.exit)===canonicalJson(exit),'Exit proof changed');
@@ -826,6 +840,7 @@ export class DockerExecutor implements ExecutionPort {
       }
       r.phase='REMOVED';
       await this.journal.update(r);
+      this.serviceUrls.delete(r.handle.runId+':'+r.handle.opaqueId);
       this.outputs.delete(r.handle.runId+':'+r.handle.opaqueId);
       this.outputUnavailable.delete(r.handle.runId+':'+r.handle.opaqueId);
       this.listeners.delete(r.handle.runId+':'+r.handle.opaqueId);

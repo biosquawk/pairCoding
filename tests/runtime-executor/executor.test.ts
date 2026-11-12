@@ -517,3 +517,104 @@ test('UNIT current NAT engine drift after network readback cannot dispatch conta
     assert.equal(f.fake.calls.some(a=>a[0]==='create'),false);
   }finally{await f.cleanup();}
 });
+
+
+// Regression: Docker may discard published Ports when the owned HTTP service exits.
+for(const lostReply of [false,true])test(`UNIT Stop lost Ports: running service stops with trusted pre-Stop URL (lost reply=${lostReply})`,async()=>{
+  const f=await fixture();let server:http.Server|undefined;
+  try {
+    server=http.createServer((_req,res)=>res.end('health'));
+    await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve));f.fake.port=(server.address() as any).port;
+    f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+    f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:100};setServiceFixture(f);
+    const h=await f.executor.start(f.plan); // deliberately no serviceReadiness beforehand
+    f.fake.stopThrowsAfterCommit=lostReply;
+    f.fake.onStop=async()=>{f.fake.v.NetworkSettings.Ports={};await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;};
+    const stopped=await f.executor.stop(h,'USER');assert.equal(stopped.confirmed,true,JSON.stringify(stopped));
+    if(stopped.confirmed)assert.equal(stopped.exit.exitCode,137);
+    assert.equal((await f.journal.read(h.runId)).phase,'EXITED');
+    assert.equal(f.fake.calls.filter(a=>a[0]==='stop').length,1);assert.ok(!f.fake.calls.some(a=>a[0]==='rm'));
+  } finally {if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));await f.cleanup();}
+});
+
+test('UNIT Stop lost Ports: prior ready URL survives spontaneous exit, reachable 503 blocks confirmation, same-handle retry succeeds only after closure',async()=>{
+  const f=await fixture();let server:http.Server|undefined;let status=200,requests=0;
+  try {
+    server=http.createServer((_req,res)=>{requests++;res.statusCode=status;res.end('health');});
+    await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve));f.fake.port=(server.address() as any).port;
+    f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+    f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:100};setServiceFixture(f);
+    const h=await f.executor.start(f.plan);assert.equal((await f.executor.serviceReadiness(h))?.ready,true);
+    status=503;f.fake.finish(143);f.fake.v.NetworkSettings={};const priorRequests=requests;
+    const refused=await f.executor.stop(h,'USER');assert.equal(refused.confirmed,false);
+    if(!refused.confirmed)assert.match(refused.problem.message,/Endpoint still responds/);
+    assert.ok(requests>priorRequests,'must probe the actual prior endpoint, not accept exit alone');
+    assert.equal((await f.journal.read(h.runId)).phase,'STOP_UNCONFIRMED');assert.equal((await f.journal.read(h.runId)).exit,null);
+    await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;
+    const stopped=await f.executor.stop(h,'USER');assert.equal(stopped.confirmed,true,JSON.stringify(stopped));
+    if(stopped.confirmed)assert.equal(stopped.exit.exitCode,143);
+    assert.equal(f.fake.calls.filter(a=>a[0]==='stop').length,0);assert.equal((await f.journal.read(h.runId)).handle.opaqueId,h.opaqueId);
+  } finally {if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));await f.cleanup();}
+});
+
+test('UNIT Stop lost Ports: cold restart without trusted URL remains uncertain and retains ownership',async()=>{
+  const f=await fixture();
+  try {
+    f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+    f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:100};setServiceFixture(f);
+    const h=await f.executor.start(f.plan);f.fake.finish(143);f.fake.v.NetworkSettings.Ports={};
+    const restarted=new DockerExecutor({policy:f.policy,transport:f.fake,journal:f.journal});
+    assert.equal((await restarted.stop(h,'RECOVERY')).confirmed,false);
+    const r=await f.journal.read(h.runId);assert.equal(r.phase,'STOP_UNCONFIRMED');assert.equal(r.exit,null);assert.deepEqual(r.handle,h);
+    assert.ok(!f.fake.calls.some(a=>a[0]==='stop'||a[0]==='rm'));
+  } finally {await f.cleanup();}
+});
+
+for(const mutation of ['running-binding','engine','owner','id','missing','invalid-exit'] as const)test(`UNIT Stop lost Ports: trusted URL cannot bypass ${mutation} guard`,async()=>{
+  const f=await fixture();let server:http.Server|undefined;
+  try {
+    server=http.createServer((_req,res)=>res.end('health'));
+    await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve));f.fake.port=(server.address() as any).port;
+    f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+    f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:100};setServiceFixture(f);
+    const h=await f.executor.start(f.plan);assert.equal((await f.executor.serviceReadiness(h))?.ready,true);
+    if(mutation==='running-binding')f.fake.v.NetworkSettings.Ports['8080/tcp'][0].HostIp='0.0.0.0';
+    else {
+      f.fake.finish(143);f.fake.v.NetworkSettings.Ports={};
+      if(mutation==='engine')f.fake.engineId='foreign-engine';
+      if(mutation==='owner')f.fake.v.Config.Labels['paircoach.run']='foreign';
+      if(mutation==='id')f.fake.v.Id='d'.repeat(64);
+      if(mutation==='missing')f.fake.v=null;
+      if(mutation==='invalid-exit')f.fake.v.State.FinishedAt='0001-01-01T00:00:00Z';
+    }
+    assert.equal((await f.executor.stop(h,'USER')).confirmed,false);
+    assert.equal((await f.journal.read(h.runId)).exit,null);assert.equal((await f.journal.read(h.runId)).phase,'STOP_UNCONFIRMED');
+    if(mutation==='running-binding')assert.equal(f.fake.calls.filter(a=>a[0]==='stop').length,1,'unsafe binding cannot block physical Stop of the owned container');
+    assert.ok(!f.fake.calls.some(a=>a[0]==='rm')); // no fabricated terminal cleanup
+  } finally {if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));await f.cleanup();}
+});
+
+
+test('UNIT Stop lost Ports: late actual exit/collection after unconfirmed Stop preserves first refusal without a second Stop',async()=>{
+  const f=await fixture();let server:http.Server|undefined;
+  try {
+    server=http.createServer((_req,res)=>res.end('still responds'));
+    await new Promise<void>(resolve=>server!.listen(0,'127.0.0.1',resolve));f.fake.port=(server.address() as any).port;
+    f.plan.mode='RUN_MAIN';f.plan.isolation.network='loopback';
+    f.plan.service={containerPort:8080,bindHost:'127.0.0.1',healthPath:'/health',readinessTimeoutMs:100};setServiceFixture(f);
+    const h=await f.executor.start(f.plan);
+    f.fake.onStop=async()=>{f.fake.finish(143);f.fake.v.NetworkSettings.Ports={};};
+    const first=await f.executor.stop(h,'USER');assert.equal(first.confirmed,false);
+    if(!first.confirmed)assert.match(first.problem.message,/Endpoint still responds/);
+    assert.equal((await f.journal.read(h.runId)).phase,'STOP_UNCONFIRMED');
+    await new Promise<void>(resolve=>server!.close(()=>resolve()));server=undefined;
+    const exit=await f.executor.wait(h);assert.equal(exit.exitCode,143);assert.deepEqual(exit.handle,h);
+    const collection=await f.executor.collect(h,exit);assert.deepEqual(collection.handle,h);
+    assert.equal(await fs.readFile(collection.stdoutPath,'utf8'),f.fake.logs.stdout);
+    const receipt=await f.executor.persistTerminal(h,{status:'FAILED',testOutcome:'NOT_APPLICABLE',testCount:null,skipped:null,failures:null,errors:null,problem:null});
+    await f.executor.cleanup(receipt);
+    const final=await f.journal.read(h.runId);assert.equal(final.phase,'REMOVED');assert.equal(final.exit?.exitCode,143);assert.deepEqual(final.handle,h);
+    assert.equal(first.confirmed,false,'late collection must not rewrite the first Stop result');
+    assert.equal(f.fake.calls.filter(a=>a[0]==='stop').length,1);assert.deepEqual(f.fake.calls.filter(a=>a[0]==='rm'),[['rm','c'.repeat(64)]]);
+  } finally {if(server)await new Promise<void>(resolve=>server!.close(()=>resolve()));await f.cleanup();}
+});
