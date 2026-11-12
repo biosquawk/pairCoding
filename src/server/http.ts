@@ -118,17 +118,17 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   server.requestTimeout = 10000; server.headersTimeout = 10000; server.maxHeadersCount = 64;
   const wss = new WebSocketServer({ noServer:true, maxPayload: 6*1024*1024, perMessageDeflate:false });
 
-  function envelope(type:string,payload:unknown) {
-    const message = {protocolVersion:'3.0',messageId:randomUUID(),sessionId:session.state.sessionId,seq:++seq,type,payload};
+  function envelope(type:string,payload:unknown,messageId:string=randomUUID()) {
+    const message = {protocolVersion:'3.0',messageId,sessionId:session.state.sessionId,seq:++seq,type,payload};
     session.state.lastServerSeq = seq;
     if(type==='SESSION_SNAPSHOT') (payload as SessionBundleV2).session.lastServerSeq=seq;
     return message;
   }
   // All authenticated peers see every seq, including targeted ACKs. Payloads contain no credentials.
-  function emit(type:string,payload:unknown) {
+  function emit(type:string,payload:unknown,messageId?:string) {
     if (closing) return;
     if (type==='SESSION_REPORT' && (payload as Report).sessionId!==session.state.sessionId) return;
-    const message = envelope(type,payload), encoded = JSON.stringify(message);
+    const message = envelope(type,payload,messageId), encoded = JSON.stringify(message);
     if (['COACH_STEP_EDIT','CONTROL_STATE'].includes(type)) facts.push(clone(message));
     if (type==='RUN_STATE') {
       lastRun = clone(payload as Run);
@@ -748,16 +748,42 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(message.type==='PING') {ack(message,'OK');return;}
       const command=message;
       const commandLedger=ledger;
+      if(command.type==='CODE_CHANGED') {
+        // Only the envelope identity is reserved ahead of commit. A sequence is allocated by
+        // emit at the ORIGINAL broadcast, never before an asynchronous held preparation.
+        // The ledger retains this original payload/identity, not latest workspace state or
+        // a guessed baseVersion+1; replay cannot mint a different language receipt.
+        const operation=commandLedger.run(`WS:${command.messageId}`,command,async()=>{
+          assertPeerCurrent();
+          const receiptId=randomUUID();
+          let receipt: {messageId:string;payload:{replyTo:string;status:'OK';documentVersion:number;
+            workspaceVersion:number;controlEpoch:number;error:null}} | undefined;
+          await admittedGate._writeWithLanguageCommit({...authInput(command.clientId,command.sessionId,p.controlEpoch),
+            path:p.path,baseVersion:p.baseVersion,content:p.content},{
+            assertCurrent:assertPeerCurrent,beforeCommit:()=>null,
+            afterCommit:async document=>{
+              assertPeerCurrent();
+              receipt={messageId:receiptId,payload:{replyTo:command.messageId,status:'OK',documentVersion:document.version,
+                workspaceVersion:workspace.workspaceVersion,controlEpoch:session.state.controlEpoch,error:null}};
+              emit('ACK',receipt.payload,receipt.messageId);
+            },
+          });
+          if(!receipt)throw Error('Missing original committed CODE_CHANGED receipt');
+          // A coach observer cannot retroactively turn the already committed/published save
+          // into REJECTED or replace its retained transaction receipt.
+          try {coach?.trigger('EDIT');} catch(error) {emit('ERROR',apiError(error,command.messageId));}
+          return receipt;
+        });
+        const receipt=await operation.result;
+        assertPeerCurrent();
+        if(operation.duplicate)emit('ACK',{...receipt.payload,status:'DUPLICATE'},receipt.messageId);
+        return;
+      }
       const op=commandLedger.run(`WS:${message.messageId}`,message,async()=>{
         if(closing) fail(503,'SESSION_CLOSED','Serwer zamyka sesję.');
         assertPeerCurrent();
         if(transitioning && !['PING','PROPOSAL_RESPONSE','WINDOW_STATE','TIMER_ACTION'].includes(command.type)) fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
         switch(command.type) {
-          case 'CODE_CHANGED': {
-            const doc=await admittedGate.writeAsync({...authInput(command.clientId,command.sessionId,p.controlEpoch),path:p.path,baseVersion:p.baseVersion,content:p.content},assertPeerCurrent);
-            coach?.trigger('EDIT');
-            return doc.version;
-          }
           case 'VIEW_CHANGED': {
             const viewVersion=session.setEditorView(command.clientId,command.sessionId,{path:p.path,documentVersion:p.documentVersion,cursor:p.cursor,selection:p.selection});
             emit('SESSION_STATE',session.getSession());return viewVersion;

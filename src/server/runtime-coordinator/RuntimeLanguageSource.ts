@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual as same } from 'node:util';
 import * as codec from '../../language/uriCodec';
+import type { Document } from '../../shared/protocol';
 import type { LanguageClientMessage, OpenOrChange } from '../../shared/language-v2';
 import { validateLanguageClientMessage } from '../../shared/validation-v2';
 import type { LanguageProjectScope } from '../language/ports';
@@ -161,7 +162,7 @@ export class RuntimeLanguageSource implements RegistryAuthority {
    * Preparation failure withholds association only, never rolls back a successful ordinary save. */
   writeWithAck(input:MutationAuth & {path:string;baseVersion:number;content:string},
       correlation:{peerId:string;transactionMessageId:string;languageDocumentMessageId:string|null;receiptId:string},
-      binding:ReturnType<typeof createRuntimeLanguageBinding>,assertPeerCurrent:()=>void,publish:()=>void):Promise<import('../../shared/protocol').Document> {
+      binding:ReturnType<typeof createRuntimeLanguageBinding>,assertPeerCurrent:()=>void,publish:(document:Readonly<Document>)=>void):Promise<Document> {
     const accepted=copy(input),ids=copy(correlation);
     const request:LanguageSaveInput={peerId:ids.peerId,transactionMessageId:ids.transactionMessageId,
       languageDocumentMessageId:ids.languageDocumentMessageId ?? '',path:accepted.path,baseVersion:accepted.baseVersion,
@@ -192,7 +193,7 @@ export class RuntimeLanguageSource implements RegistryAuthority {
         }
       } else this.invalidate();
       } catch {pending=null;this.invalidate();} // only language preparation; NEVER catch/retry publication
-      binding.publishSaveAck(pending,ids.receiptId,publish);
+      binding.publishSaveAck(pending,ids.receiptId,()=>publish(copy(document)));
     }});
   }
   readCurrent(peerId:string,path:string):LanguageAckCurrent|null {
