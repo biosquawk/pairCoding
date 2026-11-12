@@ -56,7 +56,11 @@ test('OWNER bothfalse retains actual remote identity without receipt; admitted m
     {peerId:'actual-peer',transactionMessageId:'save',languageDocumentMessageId:'model',receiptId:'ordinary-receipt'},
     ()=>core.session.assertClient('tab',core.session.state.sessionId),d=>{publishes++;assert.equal(d.version,2);},()=>{captures++;});
   assert.equal(saved.version,2);assert.equal(publishes,1);assert.equal(captures,1);assert.equal(core.workspace.workspaceVersion,1);
-  assert.equal(fs.readFileSync(path.join(f.workspace,f.path),'utf8'),document.content);
+  // Existing WorkspaceService.atomicWrite preserves the ORIGINAL disk EOL (CRLF),
+  // while the admitted language overlay uses canonical LF; both identities stay explicit.
+  assert.equal(saved.eol,'CRLF');
+  assert.equal(saved.content,document.content);
+  assert.equal(fs.readFileSync(path.join(f.workspace,f.path),'utf8'),document.content.replace(/\n/g,'\r\n'));
   await core.workspace._withQueuedMutation(async()=>{});
   assert.equal(owner.view().state,'OFF');assert.equal(owner.view().autocomplete,'OFF');assert.equal(owner.view().problem,null);
   assert.equal(f.calls.length,0,'No selected image/cache/receipt verifier');assert.equal(f.driver.commands.length,0);assert.equal(f.driver.frames.length,0);
