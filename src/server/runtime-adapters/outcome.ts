@@ -1,9 +1,10 @@
 import path from 'node:path';
 import { constants } from 'node:fs';
-import { open, lstat } from 'node:fs/promises';
+import { open, lstat, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import type { AdapterOutcome, CollectedArtifacts, ExecutionExit, ExecutionPlan } from '../execution/ports';
 import { parseJUnit, REPORT_LIMIT, type JUnitCounts } from './junit';
+import { safeId } from '../execution/files';
 export type ArtifactReader = (file: string, maxBytes: number) => Promise<Uint8Array>;
 /** Bounded regular non-symlink read. Executor supplies scoped, immutable collection, never workspace. */
 /** noFollowFlag is an optimization, NEVER the authority; tests can emulate Windows absence with0. */
@@ -11,13 +12,13 @@ export async function readRegularArtifact(file: string, maxBytes: number, noFoll
   if (!path.isAbsolute(file) || !Number.isSafeInteger(maxBytes) || maxBytes < 0) throw new Error('Invalid artifact read');
   for(let parent=path.dirname(file);;) {
     const info=await lstat(parent,{bigint:true});
-    if(info.isSymbolicLink() || !info.isDirectory()) throw new Error('Symlink/non-directory artifact parent');
+    if(info.isSymbolicLink() || !info.isDirectory() || await realpath(parent)!==parent) throw new Error('Noncanonical artifact parent');
     const next=path.dirname(parent);if(next===parent)break;parent=next;
   }
   const before=await lstat(file,{bigint:true});
-  if(before.isSymbolicLink() || !before.isFile() || before.size>BigInt(maxBytes)) throw new Error('Artifact not bounded regular file');
+  if(before.isSymbolicLink() || !before.isFile() || before.nlink!==1n || before.size>BigInt(maxBytes)) throw new Error('Artifact not bounded single-link regular file');
   const fd=await open(file,constants.O_RDONLY | noFollowFlag);
-  const same=(a:typeof before,b:typeof before)=>a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs;
+  const same=(a:typeof before,b:typeof before)=>a.dev===b.dev && a.ino===b.ino && a.size===b.size && a.mtimeNs===b.mtimeNs && a.ctimeNs===b.ctimeNs && a.nlink===b.nlink;
   try {
     const stat=await fd.stat({bigint:true});
     if(!stat.isFile() || !same(before,stat))throw new Error('Artifact identity changed before open');
@@ -29,6 +30,15 @@ export async function readRegularArtifact(file: string, maxBytes: number, noFoll
 }
 export const readArtifact: ArtifactReader = (file,maxBytes)=>readRegularArtifact(file,maxBytes);
 const base = (): AdapterOutcome => ({ status: 'FAILED', testOutcome: 'UNKNOWN', testCount: null, skipped: null, failures: null, errors: null, problem: null });
+/** The trusted, executor-validated plan fixes ONE sibling layout. Collection paths
+ * cannot choose authority: artifacts is still container-writable, collected/files is not. */
+function collectedFilesRoot(plan: ExecutionPlan): string | null {
+  const input = plan.input, runId = plan.ownership.runId;
+  if (!safeId(runId) || input.identity.runId !== runId || !path.isAbsolute(input.immutableDirectory) || path.resolve(input.immutableDirectory) !== input.immutableDirectory) return null;
+  const run = path.dirname(input.immutableDirectory);
+  if (path.basename(run) !== runId || input.immutableDirectory !== path.join(run, 'input') || input.buildDirectory !== path.join(run, 'build') || input.artifactsDirectory !== path.join(run, 'artifacts')) return null;
+  return path.join(run, 'collected', 'files');
+}
 export async function interpretOutcome(plan: ExecutionPlan, exit: ExecutionExit, artifacts: CollectedArtifacts, read: ArtifactReader = readArtifact): Promise<AdapterOutcome> {
   const result = base();
   const sameHandle = exit.handle.runId === plan.ownership.runId && artifacts.handle.runId === exit.handle.runId && artifacts.handle.opaqueId === exit.handle.opaqueId;
@@ -36,13 +46,15 @@ export async function interpretOutcome(plan: ExecutionPlan, exit: ExecutionExit,
     result.problem = { code: 'ARTIFACT_IDENTITY_MISMATCH', message: 'Exit/collection/input do not belong to this Run.', recovery: 'Reconcile the retained Run collection; never reuse old reports.', retryable: false }; return result;
   }
   if (plan.mode === 'RUN_MAIN') { result.status = exit.exitCode === 0 ? 'SUCCEEDED' : 'FAILED'; result.testOutcome = 'NOT_APPLICABLE'; return result; }
+  const root = collectedFilesRoot(plan);
+  if (!root) return result;
   const files = artifacts.files.filter(f => f.kind === 'JUNIT_XML');
   if (!files.length) return result; // exit0 is NOT test proof
   if (files.length > 64 || new Set(files.map(f => f.path)).size !== files.length) return result;
   const sum: JUnitCounts = { count: 0, failures: 0, errors: 0, skipped: 0 }; let total = 0;
   try {
     for (const file of files) {
-      const root = path.resolve(plan.input.artifactsDirectory), location = path.resolve(file.path), relative = path.relative(root,location);
+      const location = path.resolve(file.path), relative = path.relative(root,location);
       if (!path.isAbsolute(file.path) || location !== file.path || !relative || relative === '..' || relative.startsWith('..'+path.sep) || path.isAbsolute(relative)) return result;
       if (!file.freshForRun || !/\.xml$/i.test(file.path) || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || file.bytes > REPORT_LIMIT || (total += file.bytes) > 16*1024*1024) return result;
       const bytes = await read(file.path, REPORT_LIMIT);
