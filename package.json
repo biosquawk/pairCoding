@@ -12,7 +12,7 @@
     "server": "tsx src/server/index.ts",
     "start": "tsx src/server/index.ts",
     "dev:full": "concurrently --kill-others \"npm run server\" \"npm run dev\"",
-    "test": "tsx --test tests/**/*.test.ts",
+    "test": "tsx --test \"tests/**/*.test.ts\" \"tests/**/*.test.mjs\"",
     "typecheck": "tsc --noEmit",
     "runtime:prepare": "node scripts/runtime-prepare-cli.mjs"
   },

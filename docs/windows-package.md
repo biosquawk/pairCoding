@@ -80,7 +80,7 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run dev` | Vite3000, nie samodzielna integracja backendu. |
 | `npm.cmd run dev:full` | concurrently + server/dev; development. |
 | `npm.cmd run preview` | Najpierw build; frontend preview bez API, nie odbiór produktu. |
-| `npm.cmd test` | Źródła testów są w ZIP; tsx --test tests/**/*.test.ts. Nie uruchamiaj całych historycznych kampanii podczas smoke. |
+| `npm.cmd test` | Źródła obu rodzin są w ZIP; `tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"`. Teraz tylko izolowany dowód selekcji; pełne wykonanie na spójnej rewizji po implementacji9, nie podczas smoke. |
 
 Manifest.sourceVerification opisuje dodatkowe skończone komendy operatora (PowerShell/portable Node),
 wymagane docs/config/helper i zaufanie do zewnętrznego manifestu; te wejścia są obowiązkowe
