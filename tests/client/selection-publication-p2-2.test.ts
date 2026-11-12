@@ -171,7 +171,7 @@ test('queued path-only tick rechecks latest observation and pending write; no st
 test('REAL selection/reconnect ordering: old server path never supplants settled selection or caches its document', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selection-publication-'));
   const root = path.join(dir, 'root'); fs.mkdirSync(root); fs.writeFileSync(path.join(root, 'challenge.md'), '# Task\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true, enableCoach: false });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, devBootstrap: true, enableCoach: false });
   const port = await app.listen(), trace: any[] = [], sent: any[] = [], received: any[] = [];
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, clientId: 'publication-real',
     socket: url => {
