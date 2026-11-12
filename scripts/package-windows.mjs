@@ -108,13 +108,19 @@ function commandClosure(pkg, paths) {
     start: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
     'dev:full': ['concurrently --kill-others "npm run server" "npm run dev"', ['src/server/index.ts', 'vite.config.ts', 'index.html'], ['concurrently', 'tsx', 'vite']],
     typecheck: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
-    test: ['tsx --test tests/**/*.test.ts', ['playwright.config.ts'], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
+    test: ['tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"', ['playwright.config.ts'], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
   };
   if (!pkg.scripts || typeof pkg.scripts !== 'object' || Array.isArray(pkg.scripts)) throw new Error('Brak poprawnych npm scripts.');
   for (const name of ['clean', 'build', 'start', 'typecheck', 'runtime:prepare']) {
     if (!Object.hasOwn(pkg.scripts, name)) throw new Error(`Brak wymaganego npm script: ${name}`);
   }
-  if (Object.hasOwn(pkg.scripts, 'test') && ![...paths].some(p => /^tests\/.+\.test\.ts$/.test(p))) throw new Error('npm test: brak źródeł *.test.ts w ZIP.');
+  if (Object.hasOwn(pkg.scripts, 'test')) {
+    for (const extension of ['ts', 'mjs']) {
+      if (![...paths].some(p => p.startsWith('tests/') && p.endsWith(`.test.${extension}`))) {
+        throw new Error(`npm test: brak źródeł *.test.${extension} w ZIP.`);
+      }
+    }
+  }
   if (Object.hasOwn(pkg.scripts, 'dev:full') && (!Object.hasOwn(pkg.scripts, 'dev') || !Object.hasOwn(pkg.scripts, 'server'))) throw new Error('npm dev:full: brak zależnych scripts dev/server.');
   const deps = { ...pkg.dependencies, ...pkg.devDependencies };
   const commands = [];
