@@ -24,13 +24,17 @@ export interface RegistryCallbacks {
 }
 export type RegistrySession = Pick<LanguageServerSession, 'launchId' | 'start' | 'open' | 'change' | 'close' | 'cancelCompletions' | 'complete' | 'cancel' | 'invalidate' | 'retire'>;
 export interface RegistryLaunch { session: RegistrySession; generation: ImmutableDiagnosticGeneration | null }
+export type RegistryCaptureOperationHint = Readonly<{
+  kind: 'CREATE' | 'REFRESH';
+  phase: 'completion' | 'diagnostics';
+}>;
 export interface RegistryFactory {
   /** Reacquire actual backend FIFO and prepare this exact full snapshot, then invoke action ONCE
    * synchronously while the SAME lease is held. Never start a provider or await inside action.
    * Registry retains any new owner inside action, including when final lease release fails.
    * Optional for legacy factories only; selected production composition MUST supply it.
    */
-  withCaptureLease?(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void): Promise<void>;
+  withCaptureLease?(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void, operation?: RegistryCaptureOperationHint): Promise<void>;
   /** Bind once at construction, never chosen by wire/callers of acknowledge. */
   bindAckLedger?(ledger: LanguageAckLedger): void;
   /** Synchronous ownership transfer BEFORE start/any await. Compose actual private shadow/process/session.
@@ -354,7 +358,8 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
       action(); applied = true;
     };
     try {
-      if (this.options.factory.withCaptureLease) await this.options.factory.withCaptureLease(scope, next.snapshot, capture);
+      if (this.options.factory.withCaptureLease) await this.options.factory.withCaptureLease(scope, next.snapshot, capture,
+        Object.freeze({ kind: expected === null ? 'CREATE' : 'REFRESH', phase: l.phase }));
       else capture(); // Legacy factory compatibility, never selected-cache production fallback.
       if (!invoked) throw new Error('Capture lease omitted synchronous ownership transfer');
       return applied;

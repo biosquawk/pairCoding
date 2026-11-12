@@ -5,10 +5,10 @@ import { LANGUAGE_LIMITS } from '../../shared/language-v2';
 import * as codec from '../../language/uriCodec';
 import { DockerLanguageProcess, type DockerLanguageProcessOptions } from './DockerLanguageProcess';
 import { LanguageServerSession } from './LanguageServerSession';
-import { LanguageShadowStore, type LanguageShadow, type LanguageSnapshotAuthority, type TrustedLanguageSnapshot } from './LanguageShadowStore';
+import { LanguageShadowStore, type LanguageShadow, type LanguageSnapshotAuthority, type TrustedLanguageSnapshot, type UnlaunchedLanguageStage } from './LanguageShadowStore';
 import { LanguageBootPublisher, type LanguageBootPublication } from './LanguageBootPublisher';
 import { buildLanguageProviderConfiguration, readLanguageProviderConfiguration, type LanguageProviderConfiguration, type TrustedPreparedLanguageDependencies } from './LanguageProviderConfiguration';
-import type { RegistryCallbacks, RegistryFactory, RegistryLaunch, RegistrySession, RegistrySnapshot } from './LanguageFeatureRegistry';
+import type { RegistryCallbacks, RegistryFactory, RegistryLaunch, RegistrySession, RegistrySnapshot, RegistryCaptureOperationHint } from './LanguageFeatureRegistry';
 import type { ImmutableDiagnosticGeneration, LanguageProjectScope } from './ports';
 
 /** Required trusted backend dependency, NOT a wire shape, prepare receipt parser or readiness flag.
@@ -55,12 +55,39 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
     if (this.ackLedger && this.ackLedger !== ledger) throw new Error('Production language issuer already bound');
     this.ackLedger = ledger;
   }
-  withCaptureLease(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void): Promise<void> {
-    if (this.options.withCaptureLease) return this.options.withCaptureLease(scope, snapshot, action);
+  withCaptureLease(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void, operation?: RegistryCaptureOperationHint): Promise<void> {
+    if (this.options.withCaptureLease) return this.options.withCaptureLease(scope, snapshot, action, operation);
     action(); return Promise.resolve(); // Legacy authority only; selected composition supplies a required guard.
   }
   private readonly store: LanguageShadowStore;
   private readonly boot: LanguageBootPublisher;
+  private staged: { scope: Readonly<LanguageProjectScope>; snapshot: RegistrySnapshot;
+    phase: 'completion' | 'diagnostics'; captured: ReturnType<ProductionLanguageRegistryFactory['capture']>; token: UnlaunchedLanguageStage | null; used: boolean } | null = null;
+  /** Selected composition only, under the SAME backend FIFO. No token survives synchronous action. */
+  async stageCapture(scope: Readonly<LanguageProjectScope>, snapshot: RegistrySnapshot, action: () => void,
+    operation?: RegistryCaptureOperationHint): Promise<void> {
+    // Scheduling hint is NOT authority. REFRESH and legacy absent/ambiguous hints never eagerly copy.
+    // Legacy three-argument/manual-held callers retain their original guarded synchronous behavior.
+    if (!operation || operation.kind !== 'CREATE' || !['completion','diagnostics'].includes(operation.phase) ||
+      Object.keys(operation).length !== 2) { action(); return; }
+    const phase = operation.phase;
+    if (this.staged) throw new Error('Concurrent/reentrant staged capture');
+    const capturedScope = copy(scope), capturedSnapshot = copy(snapshot), captured = this.capture(capturedScope, capturedSnapshot);
+    const context = { scope: capturedScope, snapshot: capturedSnapshot, phase, captured, token: null as UnlaunchedLanguageStage | null, used: false };
+    this.staged = context;
+    try {
+      context.token = await this.store.stage(this.authority(capturedScope, capturedSnapshot, captured.binding, captured.source));
+      if (!same(scope, capturedScope) || !same(snapshot, capturedSnapshot) || operation.kind !== 'CREATE' || operation.phase !== phase) throw new Error('Staged caller scope/snapshot changed');
+      this.current(capturedScope, capturedSnapshot, captured.binding);
+      this.options.authority.assertCopyLease?.(capturedScope, capturedSnapshot, captured.binding);
+      action(); // Still synchronous: registry transfers owner BEFORE this SAME held lease can release.
+      this.current(capturedScope, capturedSnapshot, captured.binding);
+      this.options.authority.assertCopyLease?.(capturedScope, capturedSnapshot, captured.binding);
+    } finally {
+      try { if (context.token) this.store.discardStage(context.token); }
+      finally { this.staged = null; }
+    }
+  }
   private readonly states = new WeakMap<RegistrySession, LaunchState>();
   constructor(private readonly options: ProductionLanguageRegistryFactoryOptions) {
     this.store = new LanguageShadowStore(options.ownedRoot, codec);
@@ -109,7 +136,15 @@ export class ProductionLanguageRegistryFactory implements RegistryFactory {
   create(scope: Readonly<LanguageProjectScope>, phase: 'completion' | 'diagnostics', snapshot: RegistrySnapshot,
     callbacks: RegistryCallbacks, requested?: Readonly<ImmutableDiagnosticGeneration>): RegistryLaunch {
     const capturedScope = copy(scope), capturedSnapshot = copy(snapshot), { binding, config, source } = this.capture(capturedScope, capturedSnapshot);
-    const shadow = this.store.materialize(phase, this.authority(capturedScope, capturedSnapshot, binding, source));
+    let shadow: LanguageShadow;
+    if (this.staged) {
+      const stage = this.staged;
+      if (stage.used || !stage.token || stage.phase !== phase || !same(stage.scope, capturedScope) || !same(stage.snapshot, capturedSnapshot) ||
+        !same(stage.captured, { binding, config, source })) throw new Error('Mismatched/reused staged language capture');
+      stage.used = true;
+      // Clear BEFORE consumption: failure cannot downgrade to the legacy synchronous materializer.
+      const token = stage.token; stage.token = null; shadow = this.store.consumeStage(token, phase);
+    } else shadow = this.store.materialize(phase, this.authority(capturedScope, capturedSnapshot, binding, source));
     const generation: ImmutableDiagnosticGeneration | null = phase === 'diagnostics' ? copy({ launchId: shadow.launchId,
       inputManifestSha256: shadow.inputManifestSha256, wholeProjectManifestPath: shadow.wholeProjectManifestPath,
       immutableShadowDirectory: shadow.workspaceDirectory, policy: 'IMMUTABLE_WHOLE_PROJECT',

@@ -118,13 +118,13 @@ export function createSelectedCacheLanguageFactory(options: SelectedCacheLanguag
   const authority = new SelectedCacheLanguageAuthority(createPreparedRuntimeResolver({ outputRoots: options.preparedOutputRoots }, options.transport),
     selectedImages, sources);
   const factory = new ProductionLanguageRegistryFactory({ ownedRoot: options.ownedRoot, driver: options.driver, journal: options.journal,
-    admission: options.admission, authority, withCaptureLease: async (scope, snapshot, action) => {
+    admission: options.admission, authority, withCaptureLease: async (scope, snapshot, action, operation) => {
       if (!options.withSourceLease) throw new Error('Actual backend language source FIFO acquisition required');
       await options.withSourceLease(scope, snapshot, async lease => {
         assertLease(lease);
         await authority.prepare(scope, snapshot, lease);
         assertLease(lease);
-        action(); // Copy/refresh AND registry owner transfer occur before releasing this SAME lease.
+        await factory.stageCapture(scope, snapshot, action, operation); // Stage + sync transfer remain inside this SAME held lease.
         assertLease(lease);
       });
     } });
