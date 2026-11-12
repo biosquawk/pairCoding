@@ -10,16 +10,17 @@ import WebSocket from 'ws';
 import {fixture as assets} from '../runtime-language-binding/fixture';
 import {loadRuntimeConfiguration} from '../../src/server/runtime-config';
 import {createPairCoachServer} from '../../src/server/http';
+import type {CoachProvider} from '../../src/server/CoachAdapter';
 import {validateV2WireShape} from '../../src/shared/validation-v2';
 import type {OpenOrChange,LanguageClientMessage} from '../../src/shared/language-v2';
 import * as codec from '../../src/language/uriCodec';
 export async function until(check:()=>boolean,detail:string){const end=Date.now()+15000;while(!check()&&Date.now()<end)await new Promise(r=>setTimeout(r,10));assert.ok(check(),detail);}
-export async function httpLanguage(t:TestContext,receipt=true) {
+export async function httpLanguage(t:TestContext,receipt=true,coachProvider?:CoachProvider) {
   let cleanup=async()=>{};t.after(()=>cleanup());
   const f=await assets(t,'java-maven'),runtime=f.lease().runtime,run=f.lease().run;
   f.driver.beforeCreate=null;
   fs.mkdirSync(path.join(f.workspace,'.paircoach'),{mode:0o700});
-  fs.writeFileSync(path.join(f.workspace,'.paircoach','settings.json'),JSON.stringify({schemaVersion:2,taskFilePath:null,taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',runProfiles:[run],aiConsent:false,contextPatterns:[]}));
+  fs.writeFileSync(path.join(f.workspace,'.paircoach','settings.json'),JSON.stringify({schemaVersion:2,taskFilePath:null,taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',runProfiles:[run],aiConsent:!!coachProvider,contextPatterns:coachProvider?['**/*']:[]}));
   fs.writeFileSync(path.join(f.root,'catalog.json'),JSON.stringify({...runtime.catalog,profiles:runtime.catalog.profiles.filter(p=>p.adapterFamily==='java-maven')}));
   fs.writeFileSync(path.join(f.root,'lock.json'),JSON.stringify({schemaVersion:1,images:[...runtime.imageLock.images,...runtime.catalog.profiles.filter(p=>p.adapterFamily==='java-maven'&&p.id!==runtime.profile.id).map(p=>({...runtime.image,key:p.imageLockKey,image:'paircoach/runtime-'+p.id+':stage09',tools:p.expectedTools}))]}));
   fs.writeFileSync(runtime.configPath,JSON.stringify(runtime.config));
@@ -28,6 +29,7 @@ export async function httpLanguage(t:TestContext,receipt=true) {
   const token='local-language-unit-token',clientId='tab';
   const app=createPairCoachServer({rootPath:f.workspace,port:0,token,runtimeEnvironment:{},runtimeTransport:f.options.selected.transport,
     runtimeLanguageDriver:f.driver,
+    ...(coachProvider?{enableCoach:true,coachProvider}:{}),
     runtimeArguments:['--runtime-config',runtime.configPath,'--prepared-runtime',f.options.selected.preparedOutputRoots[0],
       ...(receipt?['--language-receipt',languageReceiptPath]:[])]});
   const sockets:WebSocket[]=[];
