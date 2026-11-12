@@ -3,6 +3,8 @@
 **Kandydat, nie potwierdzone wydanie.** Aktualny SHA oraz wyniki są w raporcie K.
 Publiczne wykonanie prepare, Java21/Spring21 GUI, native Windows i świeży ZIP
 pozostają **NOT_RUN**, dopóki raport nie zawiera rzeczywistego wyniku.
+Wymagane jest wydanie zawierające obsługę `--prepare-timeout-ms`, logu postępu
+i anulowania prepare. Nie używaj tych opcji na wcześniejszej rewizji aplikacji.
 Ten przewodnik opisuje obsługę; nie zastępuje [instalacji](windows-start.md)
 ani [weryfikacji paczki](windows-package.md).
 
@@ -158,14 +160,16 @@ npm.cmd run runtime:prepare -- --project $project --profile $profile --output $p
 if ($LASTEXITCODE -ne 0) { throw 'Plan FAIL: odczytaj blad; nie zmieniaj POM dla nowszego JDK' }
 # Zwykle jawne prepare uzytkownika: pobieranie/budowanie moze wymagac internetu.
 $executeOut = Join-Path $base 'prepared'
-npm.cmd run runtime:prepare -- --project $project --profile $profile --output $executeOut --execute
+$prepareLog = Join-Path $base 'prepare.log'
+npm.cmd run runtime:prepare -- --project $project --profile $profile --output $executeOut --prepare-timeout-ms 3600000 --execute 2> $prepareLog
 if ($LASTEXITCODE -ne 0) { throw 'Prepare nieukonczone: zachowaj output i odczytaj log' }
 ```
 
 W WSL odpowiednikiem jest:
 
 ```bash
-npm run runtime:prepare -- --project "$project" --profile "$profile" --output "$executeOut" --execute
+prepareLog="$base/prepare.log"
+npm run runtime:prepare -- --project "$project" --profile "$profile" --output "$executeOut" --prepare-timeout-ms 3600000 --execute 2> "$prepareLog"
 ```
 
 Zmienne WSL mają być absolutnymi ścieżkami WSL; istniejący prywatny rodzic outputu
@@ -173,11 +177,34 @@ musi mieć uprawnienia0700 (`umask 077` przed tworzeniem własnego katalogu).
 Output ma być NOWY i poza aplikacją/projektem. Plan i execute to osobne działania;
 wynik `PLAN_ONLY` nie stanowi zgody ROOT ani receipt do ręcznego wypełnienia.
 
-**Timeout/log/cancel prepare: implementacja P1 jest w toku.** Nie ma jeszcze
-potwierdzonej składni dodatkowych parametrów w tej rewizji; nie używaj
-wymyślonych flag. Ta luka musi być uzupełniona przed odbiorem publicznego prepare.
-Timeout przygotowania jest oddzielny od limitu120000ms programu ucznia;
-nie zwiększaj z tego powodu limitów Run, autosave ani weta.
+**Timeout przygotowania:** opcjonalny `--prepare-timeout-ms` przyjmuje jedną
+liczbę całkowitą1000..86400000ms; domyślnie2700000ms (45min). Powyżej jawnie
+wybrano3600000ms (1h) dla prepare. To nie zmienia limitu120000ms programu ucznia,
+autosave ani weta. Limit pojedynczej komendy Docker pozostaje480000ms (8min);
+wybrana godzina jest budżetem całego prepare, nie pojedynczej komendy.
+Bez `--execute` pozostaje `PLAN_ONLY`: bez procesów potomnych,
+pobierania i zapisów, również z podanym timeoutem.
+
+**Log:** postęp prepare i wyjście aktywnej komendy Docker trafiają na stderr na
+bieżąco; pokazane `2>` zapisuje je w `$prepareLog`. W drugim terminalu odczytuj
+`Get-Content -LiteralPath $prepareLog -Wait` (PowerShell) lub `tail -f "$prepareLog"`
+(WSL, z ustawioną tą samą ścieżką). Aby widzieć postęp w pierwszym terminalu,
+pomiń przekierowanie. JSON wyniku CLI pozostaje na stdout; wrapper npm może tam
+również wypisać własny nagłówek, więc nie parsuj całego wyjścia npm jako JSON.
+Nie nadpisuj logu wcześniejszej próby; zachowaj go wraz z outputem.
+
+**Przerwanie:** Ctrl+C (SIGINT), a w WSL także SIGTERM własnego procesu prepare,
+zleca anulowanie pobierania i aktywnego Docker CLI. Poczekaj na zakończenie i
+odczytaj log/receipts; samo zabicie CLI nie dowodzi wycofania operacji daemona.
+Zatrzymanie kontenera cache jest dopuszczane tylko po odczycie jego dokładnego
+owned ID, engine, obrazu, labels i mountów; zasoby pozostają zachowane, bez `rm`.
+Jeśli wynik lub tożsamość są nieznane, nie zatrzymuj kontenera po samej nazwie.
+Po komunikacie `publish` okno anulowania jest już zamknięte: poczekaj na wynik
+publikacji konfiguracji, zamiast ponawiać prepare. Status
+`CANCELLED_RETAIN_AND_RECONCILE` wymaga odczytu istniejącego wyniku i zasobów.
+Przerwanie nie daje automatycznej ponownej próby ani READY. Natywne Windows
+Ctrl+C oraz rzeczywisty Docker wymagają osobnego dowodu; odczyt kodu i test
+transportu go nie zastępują.
 
 Oczekiwany wynik wykonania to `PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE`,
 nie końcowe READY. `NOTREADY`, błąd albo przerwanie nie dowodzą braku skutków:
