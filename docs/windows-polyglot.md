@@ -255,14 +255,17 @@ To trzy różne działania, nie jeden limit120s:
   engine, nie z timeoutu całego łańcucha. Napraw przyczynę lub skoryguj budżet,
   a potem zmierz bieżącą gotowość; nigdy nie wymuszaj Run z błędem.
 - **Kompilacja/testy/program:** `timeoutMs` w osobnym profilu RUN_MAIN/RUN_TESTS
-  ustawień GUI jest już konfigurowalne1000..300000ms.120000 w przykładach to
+  ustawień GUI jest już konfigurowalne1000..3600000ms.120000 w przykładach to
   wybór dla przykładu, nie sztywny limit produktu. Dla wolniejszej kompilacji
-  ustaw np.180000 lub300000, jawnie zapisz ustawienia i zaczekaj na ich
+  ustaw np.900000 (15min), maksymalnie3600000 (1h), jawnie zapisz ustawienia i zaczekaj na ich
   potwierdzenie przed Run. Ten sam budżet przechodzi przez adapter i plan do
   wykonawcy; po wyczerpaniu zlecany jest prawdziwy Stop, nie pozorny sukces.
 - **Spring Main:** oczekiwanie na HTTP ma teraz budżet tego samego jawnie
   wybranego `RUN_MAIN.timeoutMs`, bez wcześniejszego sztywnego30s. Nie wydłuża
-  globalnego czasu Run. Gotowy endpoint nie kończy Main; serwer pozostaje
+  globalnego czasu Run. Nowy przykład Spring ma900000ms (15min), a maksymalny
+  jawny budżet wynosi3600000ms (1h). Istniejące120000ms w prywatnym projekcie
+  pozostaje bez automigracji; zmień je jawnie w ustawieniach, jeżeli potrzebujesz
+  dłuższego uruchomienia. Gotowy endpoint nie kończy Main; serwer pozostaje
   RUNNING do Stop/wyjścia. Ręczny Stop i niepotwierdzony Stop zachowują znaczenie.
 
 Prepare ma nadal swój osobny `--prepare-timeout-ms`. Limity pojedynczych operacji

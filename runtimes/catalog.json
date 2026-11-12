@@ -24,6 +24,16 @@
       },
       "taskFields": [
         {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
+        {
           "key": "workingDirectory",
           "label": "Task directory",
           "input": "PATH",
@@ -110,6 +120,16 @@
         "serverJvm": null
       },
       "taskFields": [
+        {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
         {
           "key": "workingDirectory",
           "label": "Task directory",
@@ -201,6 +221,16 @@
         "serverJvm": null
       },
       "taskFields": [
+        {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
         {
           "key": "workingDirectory",
           "label": "Task directory",
@@ -311,6 +341,16 @@
       },
       "taskFields": [
         {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
+        {
           "key": "workingDirectory",
           "label": "Task directory",
           "input": "PATH",
@@ -406,6 +446,16 @@
       },
       "taskFields": [
         {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
+        {
           "key": "workingDirectory",
           "label": "Task directory",
           "input": "PATH",
@@ -500,6 +550,16 @@
         "serverJvm": null
       },
       "taskFields": [
+        {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
         {
           "key": "workingDirectory",
           "label": "Task directory",
@@ -619,6 +679,16 @@
         "serverJvm": null
       },
       "taskFields": [
+        {
+          "key": "timeoutMs",
+          "label": "Run timeout (ms)",
+          "input": "INTEGER",
+          "help": "Total compile/test/program and service startup budget; Stop remains available.",
+          "required": true,
+          "choices": [],
+          "min": 1000,
+          "max": 3600000
+        },
         {
           "key": "workingDirectory",
           "label": "Task directory",

@@ -12,7 +12,7 @@ export const TaskRunConfigSchema = object({
   tests: object({ paths: { ...array(path,100), uniqueItems: true }, names: { ...array({ ...string(256), pattern: '^[^\\u0000-\\u001f\\u007f]+$' },100), uniqueItems: true } }),
 });
 export const RunProfileV2Schema = {
-  ...object({ kind: enumeration('RUN_MAIN','RUN_TESTS'), task: TaskRunConfigSchema, timeoutMs: integer(1000,300000) }),
+  ...object({ kind: enumeration('RUN_MAIN','RUN_TESTS'), task: TaskRunConfigSchema, timeoutMs: integer(1000,3600000) }),
   not: { type: 'object', properties: {
     kind: { const: 'RUN_MAIN' },
     task: { type: 'object', properties: { entry: { type: 'object', properties: { kind: { const: 'TESTS' } }, required: ['kind'] } }, required: ['entry'] },

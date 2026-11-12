@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ExecutionPort } from '../execution/ports';
-import type { ExecutionView, ImageLock, ImageLockEntry, ModeReadiness, RunKind, RunProfileV2, RuntimeCatalog, RuntimeConfigV1, RuntimeProblem, RuntimeProfile } from '../../shared/runtime-v2';
+import type { ExecutionView, ImageLock, ImageLockEntry, ModeReadiness, RunKind, RunProfileV2, RuntimeCatalog, RuntimeConfigV1, RuntimeProblem, RuntimeProfile, TaskField } from '../../shared/runtime-v2';
 import { validateCatalogImageReferences, validateImageLock, validateRuntimeCatalog, validateRuntimeConfigV1, validateSettingsV2, validateTaskForProfile } from '../../shared/validation-v2';
 
 export interface RuntimeEnvironment { PAIRCOACH_RUNTIME_PROFILE?: string; PAIRCOACH_WORKSPACE_DIR?: string }
@@ -76,6 +76,15 @@ export function loadRuntimeConfiguration(options: { configPath: string; environm
     return freeze({ configurationGeneration, resolved: null, ...(local?{local}:{}), problem: runtimeProblem('RUNTIME_CONFIG_INVALID', 'Runtime configuration, catalog or image lock is unavailable or invalid.', 'Repair paircoach.runtime.json and its config-relative catalog/image lock. Explicitly prepare approved images, then restart. Editing and recovery remain available.') });
   }
 }
+/** UI projection only: older prepared catalogs omitted the existing timeout setting.
+ * Never changes selected profile/config/cache/receipt authority or saved settings. */
+export function runtimeTaskFields(profile: RuntimeProfile | undefined): TaskField[] {
+  const fields = structuredClone(profile?.taskFields ?? []);
+  if (profile && !fields.some(field => field.key === 'timeoutMs')) fields.push({ key: 'timeoutMs', label: 'Run timeout (ms)',
+    input: 'INTEGER', help: 'Total compile/test/program and service startup budget; Stop remains available.', required: true,
+    choices: [], min: 1000, max: 3600000 });
+  return fields;
+}
 /** Inject adapter/dependency/cache validation; this must inspect the current project, never return stale prepared state. */
 export interface RuntimeModeProbe {
   probe(runtime: ResolvedRuntime, mode: RunKind, run: RunProfileV2): Promise<ModeReadiness>;
@@ -94,7 +103,7 @@ export async function aggregateRuntimeReadiness(configuration: RuntimeConfigurat
   const selected=configuration.resolved??configuration.local;
   const runtime = { profileId: selected?.profile.id ?? null, label: selected?.profile.label ?? '',
     configurationGeneration: configuration.configurationGeneration, state: 'READY' as ExecutionView['runtime']['state'], problem: null as RuntimeProblem | null,
-    taskFields: structuredClone(selected?.profile.taskFields ?? []) };
+    taskFields: runtimeTaskFields(selected?.profile) };
   const failBoth = (problem: RuntimeProblem, state: ExecutionView['runtime']['state']): ExecutionView => ({ runtime: { ...runtime, state, problem }, modes: { RUN_MAIN: denied(problem), RUN_TESTS: denied(problem) } });
   if (configuration.problem !== null) return failBoth(configuration.problem, 'CONFIG_ERROR');
   if (!validateSettingsV2(settings)) return failBoth(runtimeProblem('LEGACY_RUN_PROFILE_REQUIRES_MIGRATION', 'Execution requires explicitly saved V2 settings; original settings are preserved.', 'Review task selectors and explicitly save V2 settings. No commands are inferred. You can keep editing.'), 'CONFIG_ERROR');

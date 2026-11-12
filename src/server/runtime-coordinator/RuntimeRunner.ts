@@ -73,7 +73,7 @@ export class RuntimeRunner {
     const runProfile = freeze(snapshot(admission.runProfile));
     admission.assertCurrent();
     requireThat(request.mode === runProfile.kind && admission.adapter.family===profile.adapterFamily && validId(projectId) && validId(request.configurationGeneration) && validId(profile.id) &&
-      Number.isSafeInteger(runProfile.timeoutMs) && runProfile.timeoutMs >= 1000 && runProfile.timeoutMs <= 300000,
+      Number.isSafeInteger(runProfile.timeoutMs) && runProfile.timeoutMs >= 1000 && runProfile.timeoutMs <= 3600000,
     'Run admission does not match approved mode/configuration.');
     const runId = (this.options.newRunId ?? randomUUID)();
     requireThat(validId(runId) && !this.jobs.has(runId),'Run identity collision.');

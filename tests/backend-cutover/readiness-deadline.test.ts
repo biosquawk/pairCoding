@@ -60,3 +60,32 @@ test('COMPOSITION changed dependency and malformed prepared evidence stay PREPAR
   assert.deepEqual(snapshot(f.preparedRoot),cache); assert.deepEqual(fs.readFileSync(path.join(f.workspace,'package.json')),original);
   assert.equal(f.fake.calls.some(args=>['create','start','stop','rm'].includes(args[0])),false);
 });
+
+for(const budget of [900000,3600000]) test(`COMPOSITION explicit settings save ${budget}ms reaches actual executor plan unchanged; Stop does not wait`,async t=>{
+  const f=await executionFixture(t), source=f.core.readSettings(), settings=structuredClone(source.settings!);
+  for(const run of settings.runProfiles)run.timeoutMs=budget;
+  await f.core.settingsStore.save({humanConfirmed:true,expectedSourceSha256:source.sourceSha256,
+    request:{requestId:'save-long',clientId:'tab',sessionId:f.core.session.state.sessionId,expectedWorkspaceVersion:f.core.workspace.workspaceVersion,settings}});
+  assert.equal(f.core.readSettings().settings!.runProfiles[0].timeoutMs,budget);
+  const run=await f.execution.start(f.request()), record=await f.execution.journal.read(run.runId);
+  assert.equal(record.plan.timeoutMs,budget);assert.equal(run.status,'RUNNING');
+  const stopped=await f.execution.runner.stop(run.runId);
+  assert.equal(stopped.status,'CANCELLED');assert.equal(f.fake.calls.filter(a=>a[0]==='stop').length,1);
+  assert.equal((await f.execution.journal.read(run.runId)).phase,'REMOVED');
+});
+
+test('COMPOSITION old catalog PENDING and measured fields agree; explicit existing descriptor is never overwritten',async t=>{
+  const {readRuntimeProject}=await import('../../src/server/runtime-coordinator/RuntimeProject');
+  const {runtimeTaskFields}=await import('../../src/server/runtime-config');
+  const f=await executionFixture(t), config={configurationGeneration:'cfg',resolved:f.runtime,problem:null} as const;
+  const read=(measureReadiness:boolean)=>readRuntimeProject({core:f.core,configuration:config,sessionId:f.core.session.state.sessionId,readiness:f.execution.readiness,measureReadiness,assertCurrent:()=>{},
+    readLanguage:()=>({projectId:f.core.workspace.projectId,profileId:f.runtime.profile.id,configurationGeneration:'cfg',providerGeneration:'unit',state:'OFF',autocomplete:'OFF',docs:'N/A',problem:null})});
+  const pending=await read(false), measured=await read(true);
+  assert.deepEqual(pending.capabilities.execution.runtime.taskFields,measured.capabilities.execution.runtime.taskFields);
+  assert.equal(pending.capabilities.execution.modes.RUN_MAIN.canRun,false);
+  assert.equal(pending.capabilities.execution.runtime.taskFields.find(f=>f.key==='timeoutMs')?.max,3600000);
+  assert.equal(f.runtime.profile.taskFields.length,0);
+  const explicit={key:'timeoutMs' as const,label:'Custom budget',input:'INTEGER' as const,help:'Explicit policy',required:true,choices:[],min:1000,max:120000};
+  const profile={...f.runtime.profile,taskFields:[explicit]};
+  assert.deepEqual(runtimeTaskFields(profile),[explicit]);assert.deepEqual(profile.taskFields,[explicit]);
+});

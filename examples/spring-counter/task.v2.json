@@ -2,7 +2,7 @@
   "runProfiles": [
     {
       "kind": "RUN_MAIN",
-      "timeoutMs": 120000,
+      "timeoutMs": 900000,
       "task": {
         "workingDirectory": ".",
         "entry": {
@@ -20,7 +20,7 @@
     },
     {
       "kind": "RUN_TESTS",
-      "timeoutMs": 120000,
+      "timeoutMs": 900000,
       "task": {
         "workingDirectory": ".",
         "entry": {

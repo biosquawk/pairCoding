@@ -40,7 +40,7 @@ const invalid:Record<string,(p:any)=>void>={
   }, 'unbounded CPU':p=>{
     p.resources.cpus=128;
   }, 'unbounded timeout':p=>{
-    p.timeoutMs=300001;
+    p.timeoutMs=3600001;
   }, 'foreign cache':p=>{
     p.caches=[{
       directory:'/home',family:'node',toolchainHash:'a'.repeat(64),dependencyHash:'b'.repeat(64),readOnly:false

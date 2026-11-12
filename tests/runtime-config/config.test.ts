@@ -168,3 +168,20 @@ test('default budget waits beyond historical 3s; explicit configured deadline is
   assert.equal(expired.runtime.problem?.code,'RUNTIME_READINESS_TIMEOUT'); assert.equal(expired.modes.RUN_MAIN.canRun,false); assert.equal(expired.modes.RUN_TESTS.canRun,false);
   assert.ok(validateExecutionView(expired));
 });
+
+test('existing prepared catalog lacking timeout descriptor exposes explicit 15min/1h GUI setting without mutating policy or saved settings', async t => {
+  const {buildRuntimeSettingsV2,createRuntimeSettingsDraftV2}=await import('../../src/services/RuntimeClientV2');
+  const {validateUpdateSettingsRequestV2}=await import('../../src/shared/validation-v2');
+  const c=fixture(t).load(), original=structuredClone(c), base=settings();
+  const view=await aggregateRuntimeReadiness(c,base,deps(c)), fields=view.runtime.taskFields;
+  assert.deepEqual(c,original);assert.equal(c.resolved!.profile.taskFields.length,0);
+  assert.equal(fields.find(f=>f.key==='timeoutMs')?.max,3600000);
+  for(const budget of [900000,3600000]) {
+    const draft=createRuntimeSettingsDraftV2(base);draft.RUN_MAIN.fields.timeoutMs=String(budget);
+    const built=buildRuntimeSettingsV2(base,draft,fields);
+    assert.equal(built.runProfiles[0].timeoutMs,budget);assert.equal(base.runProfiles[0].timeoutMs,1000);
+    assert.ok(validateUpdateSettingsRequestV2({requestId:'save',clientId:'tab',sessionId:'session',expectedWorkspaceVersion:1,settings:built}));
+  }
+  const invalid=createRuntimeSettingsDraftV2(base);invalid.RUN_MAIN.fields.timeoutMs='3600001';
+  assert.throws(()=>buildRuntimeSettingsV2(base,invalid,fields));
+});

@@ -120,3 +120,17 @@ test('UNIT Stop during capture cancels admission before invocation; no phantom t
   barrier.resolve(f.context);await assert.rejects(starting,{code:'RUN_CANCELLED_BEFORE_START'});
   assert.deepEqual(f.runner.list(),[]);assert.ok(!f.calls.includes('start'));
 });
+
+for(const budget of [900000,3600000]) test(`UNIT explicit ${budget}ms budget reaches same plan unchanged; user Stop is immediate and keeps uncertainty fence`,async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const f=fixture(),build=f.adapter.buildPlan;let captured:ExecutionPlan|undefined;
+  f.admission.runProfile.timeoutMs=budget;
+  f.adapter.buildPlan=async(c,r)=>({...await build(c,r),timeoutMs:r.timeoutMs});
+  f.port.start=async plan=>{captured=plan;f.calls.push('start');return handle;};
+  const run=await f.runner.start(f.admission);
+  assert.equal(run.status,'RUNNING');assert.equal(captured!.timeoutMs,budget);
+  t.mock.timers.tick(budget-1);await tick();assert.equal(f.calls.includes('stop'),false);
+  await assert.rejects(f.runner.stop(run.runId),{code:'PROCESS_STOP_UNCONFIRMED'});
+  assert.equal(f.calls.filter(c=>c==='stop').length,1);assert.equal(f.runner.get(run.runId).status,'PROCESS_STOP_UNCONFIRMED');
+  await assert.rejects(f.runner.start(f.admission),{code:'RUN_IN_PROGRESS'});
+});

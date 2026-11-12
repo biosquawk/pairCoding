@@ -179,11 +179,11 @@ test('selected actual javac guard remains strict while Maven target is independe
  for(const output of ['', 'javac 21spoof', 'java 21.0.1', 'ignored\njavac 21.0.1']) assert.throws(()=>verifySelectedJdk(output,21),/actual javac/);
 });
 
-test('Spring startup budget follows the explicitly approved 180s Run timeout, never a hidden 30s cap', async()=>{
+test('Spring startup budget follows the explicitly approved 15min Run timeout, never a hidden 30s cap', async()=>{
  const p=profile('java-maven',21), r=run('java-maven','RUN_MAIN');
- r.timeoutMs=180000; r.task.entry={kind:'SPRING_BOOT',containerPort:8123,healthPath:'/ready'};
+ r.timeoutMs=900000; r.task.entry={kind:'SPRING_BOOT',containerPort:8123,healthPath:'/ready'};
  const plan=await new JavaMavenAdapter(javaDeps(21)).buildPlan(context(p,r),r);
- assert.equal(plan.timeoutMs,180000); assert.equal(plan.service?.readinessTimeoutMs,180000);
+ assert.equal(plan.timeoutMs,900000); assert.equal(plan.service?.readinessTimeoutMs,900000);
  assert.equal(plan.service?.bindHost,'127.0.0.1'); assert.equal(plan.service?.healthPath,'/ready'); assert.equal(plan.isolation.network,'loopback');
- for(const budget of [0,300001]) {const invalid=structuredClone(r);invalid.timeoutMs=budget;assert.equal((await new JavaMavenAdapter(javaDeps(21)).validate(p,invalid)).valid,false);}
+ for(const budget of [0,3600001]) {const invalid=structuredClone(r);invalid.timeoutMs=budget;assert.equal((await new JavaMavenAdapter(javaDeps(21)).validate(p,invalid)).valid,false);}
 });

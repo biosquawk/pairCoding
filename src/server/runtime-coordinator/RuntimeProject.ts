@@ -2,7 +2,7 @@
 import type { SettingsV2Store, SettingsReadResult } from '../settings-v2';
 import type { WorkspaceService } from '../WorkspaceService';
 import type { RuntimeConfiguration, RuntimeReadinessDependencies } from '../runtime-config';
-import { aggregateRuntimeReadiness } from '../runtime-config';
+import { aggregateRuntimeReadiness, runtimeTaskFields } from '../runtime-config';
 import type { ExecutionView, ProjectV2, SettingsV2 } from '../../shared/runtime-v2';
 import type { LanguageView } from '../../shared/language-v2';
 import { validateLanguageView, validateSettingsV2, validateV2WireShape } from '../../shared/validation-v2';
@@ -72,7 +72,7 @@ export async function readRuntimeProject(options: {
     const problem = { code: 'RUNTIME_READINESS_PENDING', message: 'Execution readiness has not been measured for this editor snapshot.',
       recovery: 'Keep editing. The connected session will receive the actual runtime readiness separately.', retryable: true };
     execution = { runtime: { profileId: selected?.profile.id ?? null, label: selected?.profile.label ?? '',
-      configurationGeneration: configuration.configurationGeneration, taskFields: structuredClone(selected?.profile.taskFields ?? []),
+      configurationGeneration: configuration.configurationGeneration, taskFields: runtimeTaskFields(selected?.profile),
       state: 'PREPARE_REQUIRED', problem },
       modes: { RUN_MAIN: { canRun: false, problem }, RUN_TESTS: { canRun: false, problem } } };
   }

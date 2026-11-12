@@ -77,7 +77,7 @@ export async function validatePlan(policy:ExecutorPolicy,plan:ExecutionPlan) {
   requireThat((await verifyAcknowledgedInput(i)).length<=4096,'Input limit');
   const r=plan.resources;
   requireThat(Number.isSafeInteger(r.memoryBytes)&&r.memoryBytes>=64*1024*1024&&r.memoryBytes<=2*1024*1024*1024 && Number.isFinite(r.cpus)&&r.cpus>=0.1&&r.cpus<=2 && Number.isInteger(r.pids)&&r.pids>=16&&r.pids<=256 && r.logBytes===10485760&&r.logFiles===1,'Resource bounds');
-  requireThat(Number.isInteger(plan.timeoutMs)&&plan.timeoutMs>=1000&&plan.timeoutMs<=300000 && ['RUN_MAIN','RUN_TESTS'].includes(plan.mode),'Execution bounds');
+  requireThat(Number.isInteger(plan.timeoutMs)&&plan.timeoutMs>=1000&&plan.timeoutMs<=3600000 && ['RUN_MAIN','RUN_TESTS'].includes(plan.mode),'Execution bounds');
   requireThat(/^[1-9][0-9]{0,5}:[1-9][0-9]{0,5}$/.test(policy.nonRootUser) && plan.isolation.nonRootUser===policy.nonRootUser && plan.isolation.capDropAll===true&&plan.isolation.noNewPrivileges===true&&plan.isolation.readOnlyRoot===true,'Isolation policy');
   requireThat(plan.isolation.network===(plan.service?'loopback':'none'),'Network policy');
   const c=plan.command;
@@ -93,7 +93,7 @@ export async function validatePlan(policy:ExecutorPolicy,plan:ExecutionPlan) {
   requireThat(plan.artifacts.length<=2&&new Set(plan.artifacts).size===plan.artifacts.length&&plan.artifacts.every(k=>['JUNIT_XML','COMPILER_DIAGNOSTICS'].includes(k)),'Unapproved artifact type');
   if(plan.service){
     const s=plan.service;
-    requireThat(plan.mode==='RUN_MAIN'&&s.bindHost==='127.0.0.1'&&Number.isInteger(s.containerPort)&&s.containerPort>=1024&&s.containerPort<=65535&&/^\/[a-zA-Z0-9/_-]*$/.test(s.healthPath)&&s.healthPath.length<=256&&Number.isInteger(s.readinessTimeoutMs)&&s.readinessTimeoutMs>=100&&s.readinessTimeoutMs<=300000&&s.readinessTimeoutMs<=plan.timeoutMs&&policy.serviceNetwork&&/^[a-zA-Z0-9_-]{1,80}$/.test(policy.serviceNetwork),'Service policy');
+    requireThat(plan.mode==='RUN_MAIN'&&s.bindHost==='127.0.0.1'&&Number.isInteger(s.containerPort)&&s.containerPort>=1024&&s.containerPort<=65535&&/^\/[a-zA-Z0-9/_-]*$/.test(s.healthPath)&&s.healthPath.length<=256&&Number.isInteger(s.readinessTimeoutMs)&&s.readinessTimeoutMs>=100&&s.readinessTimeoutMs<=3600000&&s.readinessTimeoutMs<=plan.timeoutMs&&policy.serviceNetwork&&/^[a-zA-Z0-9_-]{1,80}$/.test(policy.serviceNetwork),'Service policy');
   }
 }
 export function dockerCreateArgs(policy:ExecutorPolicy,p:ExecutionPlan):string[] {

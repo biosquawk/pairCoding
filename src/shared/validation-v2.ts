@@ -52,7 +52,7 @@ const fieldsValid = (fields: TaskField[]) => unique(fields.map(f=>f.key)) && fie
     (f.key !== 'entry.kind' || f.choices.every(c=>['SCRIPT','MODULE','JAVA_MAIN','SPRING_BOOT','TESTS'].includes(c.value)));
   if (f.choices.length) return false;
   if (f.input === 'INTEGER') return ['entry.containerPort','timeoutMs'].includes(f.key) && f.min !== null && f.max !== null &&
-    f.min <= f.max && (f.key === 'timeoutMs' ? f.min >= 1000 && f.max <= 300000 : f.min >= 1 && f.max <= 65535);
+    f.min <= f.max && (f.key === 'timeoutMs' ? f.min >= 1000 && f.max <= 3600000 : f.min >= 1 && f.max <= 65535);
   if (f.min !== null || f.max !== null) return false;
   if (f.key === 'entry.kind' || f.key === 'entry.containerPort' || f.key === 'timeoutMs') return false;
   return f.input === (['workingDirectory','entry.path','tests.paths'].includes(f.key) ? 'PATH' : 'TEXT');

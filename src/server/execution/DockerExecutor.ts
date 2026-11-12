@@ -411,7 +411,7 @@ export class DockerExecutor implements ExecutionPort {
   async serviceReadiness(handle:ExecutionHandle):Promise<ExecutionServiceReadiness|null>{
     const r=await this.record(handle);
     if(!r.plan.service)return null;
-    const deadline=this.now()+r.plan.service.readinessTimeoutMs;
+    const deadline=Math.min(this.now()+r.plan.service.readinessTimeoutMs,r.createdAt+r.plan.timeoutMs);
     try{
       do{
         const v=await this.inspect(r);

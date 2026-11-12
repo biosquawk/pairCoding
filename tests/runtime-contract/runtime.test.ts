@@ -34,8 +34,8 @@ test('schema itself rejects duplicate kinds, unknown nested fields and invalid T
 test('bounded profiles, strings, paths and strict discriminated entry union',()=>{
   assert.equal(v.validateSettingsV2({...settings(),runProfiles:[testsOnly(),testsOnly()]}),false);
   assert.equal(v.validateSettingsV2({...settings(),runProfiles:Array(3).fill(testsOnly())}),false);
-  for(const timeoutMs of [999,300001,1000.1,'1000']) assert.equal(v.validateRunProfileV2({...testsOnly(),timeoutMs}),false);
-  for(const timeoutMs of [1000,300000]) assert.equal(v.validateRunProfileV2({...testsOnly(),timeoutMs}),true);
+  for(const timeoutMs of [999,3600001,1000.1,'1000']) assert.equal(v.validateRunProfileV2({...testsOnly(),timeoutMs}),false);
+  for(const timeoutMs of [1000,300000,900000,3600000]) assert.equal(v.validateRunProfileV2({...testsOnly(),timeoutMs}),true);
   for(const entry of [
     {kind:'SCRIPT',path:'main.py'}, {kind:'MODULE',name:'school.main'}, {kind:'JAVA_MAIN',className:'org.school.Main'},
     {kind:'SPRING_BOOT',containerPort:8080,healthPath:'/actuator/health'}, {kind:'TESTS'},

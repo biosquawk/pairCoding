@@ -9,6 +9,7 @@ const choices=values=>values.map(value=>({value,label:value}));
 // and non-Java names MUST be empty, and RUN_MAIN may have no test-source selectors.
 // RUN_TESTS non-Java source requirements remain enforced by the unchanged adapter.
 const taskFields=(family,release)=>[
+  field('timeoutMs','Run timeout (ms)','INTEGER','Total compile/test/program and service startup budget; Stop remains available.',{min:1000,max:3600000}),
   field('workingDirectory','Task directory','PATH','Relative to immutable project input.'),
   field('entry.kind','Entry','CHOICE','Select task mode.',{choices:choices(release
     ? ['JAVA_MAIN',...([21,27].includes(release)?['SPRING_BOOT']:[]),'TESTS']
@@ -32,4 +33,4 @@ for(const [dir,entry,paths,names] of [
  ['python-calculator',{kind:'SCRIPT',path:'calculator.py'},['test_calculator.py'],[]],
  ['java-pattern',{kind:'JAVA_MAIN',className:'demo.StrategyDemo'},[],['demo.StrategyDemoTest']],
  ['spring-counter',{kind:'SPRING_BOOT',containerPort:8080,healthPath:'/sum'},[],['demo.CounterApplicationTest']]
-]) writeFileSync(`examples/${dir}/task.v2.json`,JSON.stringify({runProfiles:['RUN_MAIN','RUN_TESTS'].map(kind=>({kind,timeoutMs:120000,task:{workingDirectory:'.',entry,tests:{paths,names}}}))},null,2)+'\n');
+]) writeFileSync(`examples/${dir}/task.v2.json`,JSON.stringify({runProfiles:['RUN_MAIN','RUN_TESTS'].map(kind=>({kind,timeoutMs:dir==='spring-counter'?900000:120000,task:{workingDirectory:'.',entry,tests:{paths,names}}}))},null,2)+'\n');
