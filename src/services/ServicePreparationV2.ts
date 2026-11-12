@@ -26,10 +26,10 @@ function request(v:unknown):v is ServicePrepareRequest {
     ['requestId','clientId','sessionId','configurationGeneration'].every(k=>id(v[k]))&&
     ['expectedWorkspaceVersion','controlEpoch'].every(k=>Number.isSafeInteger(v[k])&&Number(v[k])>=0);
 }
-function receipt(v:unknown,projectId:string):v is PreparedReceipt {
+function receipt(v:unknown,projectId:string,retainedOriginal=false):v is PreparedReceipt {
   return exact(v,['schemaVersion','status','installationId','projectId','engineId','name','networkId'])&&v.schemaVersion===1&&v.status==='PREPARED'&&
     id(v.installationId)&&v.projectId===projectId&&typeof v.engineId==='string'&&v.engineId.length>0&&v.engineId.length<=256&&!/[\s\x00-\x1f\x7f]/.test(v.engineId)&&
-    v.name===`paircoach-${v.installationId}-service`&&String(v.name).length<=80&&typeof v.networkId==='string'&&/^[a-f0-9]{64}$/.test(v.networkId);
+    (v.name===`paircoach-${v.installationId}-service-http-v1`||retainedOriginal&&v.name===`paircoach-${v.installationId}-service`)&&String(v.name).length<=80&&typeof v.networkId==='string'&&/^[a-f0-9]{64}$/.test(v.networkId);
 }
 function decode(raw:string|null):Store|null {
   if(raw===null)return null;
@@ -37,7 +37,7 @@ function decode(raw:string|null):Store|null {
   const s:unknown=JSON.parse(raw);
   if(!exact(s,['version','clientId','entries'])||s.version!==1||!id(s.clientId)||!Array.isArray(s.entries)||s.entries.length>64||s.entries.some((e:unknown)=>
     !exact(e,['projectId','request','receipt','phase'])||!id(e.projectId)||!request(e.request)||e.request.clientId!==s.clientId||
-    !['UNKNOWN','ABSENT'].includes(String(e.phase))||(e.receipt!==null&&!receipt(e.receipt,e.projectId))))throw Error('Niepoprawny zapis przygotowania; zachowaj magazyn, nie twórz nowego żądania.');
+    !['UNKNOWN','ABSENT'].includes(String(e.phase))||(e.receipt!==null&&!receipt(e.receipt,e.projectId,true))))throw Error('Niepoprawny zapis przygotowania; zachowaj magazyn, nie twórz nowego żądania.');
   if(new Set(s.entries.map(e=>e.projectId)).size!==s.entries.length)throw Error('Niejednoznaczny zapis przygotowania.');
   return s as unknown as Store;
 }
@@ -112,7 +112,9 @@ export class ServicePreparationV2 {
       }
       if(!original||!this.current(a))throw Error('Zakres zmienił się; zachowano oryginalne żądanie.');
       const value=await this.deps.post(structuredClone(original.request));
-      if(!receipt(value,a.projectId)||!this.current(a)||original.receipt&&!equal(original.receipt,value))
+      // Only an immutable retained original may reconcile a legacy internal receipt.
+      // Neither generation nor readiness is selected by a public request field.
+      if(!receipt(value,a.projectId,reconcile)||!this.current(a)||original.receipt&&!equal(original.receipt,value))
         throw Error('Niepoprawna lub nieaktualna odpowiedź przygotowania. Zachowano oryginalne żądanie.');
       this.replace({...original,receipt:structuredClone(value)},a.projectId);
       // PREPARED is not READY, not even when this receipt was already known.

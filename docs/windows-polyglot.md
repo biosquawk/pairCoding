@@ -353,6 +353,14 @@ aby ominąć konflikt. Konflikt własności wymaga odczytu/recovery, nie resetu.
 
 ## 5. GUI: Java21, potem Spring21
 
+**Polityka przed Przygotuj środowisko i Run Main:** HTTP Main: port publikowany
+   tylko na 127.0.0.1; program może łączyć się z siecią zewnętrzną oraz osiągalnymi
+   usługami hosta/LAN i współuczestnikami sieci. Testy i programy bez HTTP działają
+   bez sieci (`network:none`), bez publikacji portu. Maven offline nie blokuje
+   połączeń programu. Nie jest to pełna izolacja złośliwego kodu. Zachowane są
+   limity wykonania, ograniczenia uprawnień i brak sekretów, katalogu domowego,
+   socketu Docker oraz środowiska dostawcy/sesji w kontenerze zadania.
+
 1. W **LIVE — lokalny backend** otwórz ten sam przygotowany projekt.
    Sprawdź profil i osobno dostępność **Uruchom program** oraz **Uruchom testy**
    w panelu **Środowisko**. Sam config, receipt, exit0 lub runtime READY nie
@@ -364,9 +372,12 @@ aby ominąć konflikt. Konflikt własności wymaga odczytu/recovery, nie resetu.
    Brak raportu to UNKNOWN, zero testów to NO_TESTS, same skipped nie dają PASS.
 3. **Run Main** ma pokazać wynik zmienionego kodu. W Spring przed Main rozwiń
    **Środowisko → Środowisko wykonania → Przygotuj środowisko**. To jawne
-   przygotowanie internal bridge tej instalacji, nie build obrazu. Nie wykonuj
+   przygotowanie własnej, wersjonowanej sieci NAT dla HTTP Main tej instalacji
+   (`paircoach-<installationId>-service-http-v1`), nie build obrazu. Klient nie
+   wybiera nazwy ani polityki sieci. Nie wykonuj
    ręcznego `docker network create` ani POST. Po potwierdzeniu sprawdź świeżą
-   gotowość Main i Tests; PREPARED nie oznacza automatycznie gotowości obu.
+   gotowość Main i Tests z nowego uwierzytelnionego odczytu; PREPARED nie oznacza
+   READY ani automatycznej gotowości obu trybów.
 4. Spring: czekaj na rzeczywisty HTTP `/sum` pod pokazanym loopback portem.
    Odpowiedź nie kończy działającego Main. Kliknij **Stop**: oczekuj potwierdzenia
    zatrzymania właściwego kontenera i niedostępnego endpointu, nie tylko zmiany UI.
@@ -375,6 +386,16 @@ aby ominąć konflikt. Konflikt własności wymaga odczytu/recovery, nie resetu.
    clientId ani tożsamości instalacji i nie czyść magazynu. Nieznany Run/zapis
    odczytuj przez **Sprawdź wynik operacji**; to inna operacja niż przygotowanie
    sieci. Nie traktuj nieznanego Stop jako zakończonego.
+
+**Zachowane stare przygotowanie:** stara sieć `paircoach-<installationId>-service`
+   i jej oryginalne receipty pozostają historią, nie są przejmowane jako bieżąca
+   gotowość HTTP Main. Przy nieznanym wyniku najpierw **Dokończ przygotowanie**
+   dla dokładnie starego żądania. Nawet stare PREPARED może uczciwie zakończyć
+   ten oryginał; po świeżym odczycie Main nadal może wymagać przygotowania.
+   Wtedy wykonaj osobne, nowe kliknięcie **Przygotuj środowisko**, aby przygotować
+   aktualną własną sieć, i sprawdź nową gotowość Main. Bez automatycznej migracji,
+   resetu storage, ręcznych komend Docker lub edycji receiptów/requestId.
+   Nierozstrzygnięty oryginał nadal blokuje nową próbę.
 
 Każdy profil ma `language.provider: "builtin"`, `imageLockKey: null`,
 `serverJvm: null`. `builtin` nie oznacza automatycznie ON ani gotowości Docker:
