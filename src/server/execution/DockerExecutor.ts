@@ -556,7 +556,7 @@ export class DockerExecutor implements ExecutionPort {
    * No rm, logs, fabricated container, exit or test artifacts on this variant.
    */
   private requireAbsentIntent(r:JournalRecord) {
-    requireThat(['INTENT','REMOVED'].includes(r.phase) && r.containerId===null && r.startDispatch==='REVOKED' &&
+    requireThat(['INTENT','STOP_UNCONFIRMED','REMOVED'].includes(r.phase) && r.containerId===null && r.startDispatch==='REVOKED' &&
       !r.exit && !r.collection && !r.outcome,'Not an original absent revoked intent');
     requireThat(r.ownership.engineId===this.policy.engineId && r.ownership.installationId===this.policy.installationId,
       'Recovery engine/installation differs from original owner');
@@ -625,7 +625,7 @@ export class DockerExecutor implements ExecutionPort {
           // MAY/legacy was rejected under native exclusion BEFORE any evidence/mutation.
           let v=await this.inspect(r);await this.unchanged(r);
           if(!v && r.containerId===null && (!r.unstartedCancellation || r.unstartedCancellation.kind==='ABSENT_INTENT')) {
-            requireThat(r.phase==='INTENT' && !r.exit && !r.collection && !r.outcome,'Absent recovery requires original INTENT');
+            requireThat(['INTENT','STOP_UNCONFIRMED'].includes(r.phase) && !r.exit && !r.collection && !r.outcome,'Absent recovery requires original unstarted intent');
             if(r.startDispatch==='NOT_DISPATCHED'){r.startDispatch='REVOKED';await save();}
             this.requireAbsentIntent(r);
             if(!r.unstartedCancellation){r.unstartedCancellation=await this.collectAbsentIntent(r);await save();}

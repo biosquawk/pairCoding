@@ -109,7 +109,7 @@ export interface JournalRecord {
 }
 function cancellationIdentity(r:JournalRecord):boolean {
   const kind=r.unstartedCancellation?.kind;
-  return kind==='ABSENT_INTENT' ? r.containerId===null && ['INTENT','REMOVED'].includes(r.phase) :
+  return kind==='ABSENT_INTENT' ? r.containerId===null && ['INTENT','STOP_UNCONFIRMED','REMOVED'].includes(r.phase) :
     (kind===undefined || kind==='CREATED') && typeof r.containerId==='string' && /^[a-f0-9]{64}$/.test(r.containerId);
 }
 export class DurableRunJournal {

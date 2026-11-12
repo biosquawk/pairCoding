@@ -151,3 +151,13 @@ test('UNIT genuine absent receipt joins Runner original QUEUED -> explicit same-
     await assert.rejects(f.reopen().readUnstartedCancellation(f.handle),/mismatch/);
   }finally{await f.cleanup();}
 });
+
+// A real refused Stop only projects uncertainty; it cannot erase the positive native dispatch fence.
+test('UNIT original absent intent after refused Stop still requires native revocation, never a fabricated exit',async()=>{
+  const f=await intentFixture();try {
+    const stopped=await f.executor.stop(f.handle,'RECOVERY');assert.equal(stopped.confirmed,false);
+    const r=await f.journal.read('run1');assert.equal(r.phase,'STOP_UNCONFIRMED');assert.equal(r.startDispatch,'NOT_DISPATCHED');assert.equal(r.containerId,null);
+    assert.equal((await f.reopen().recoverUnstarted(f.handle)).confirmed,true);
+    assert.equal((await f.journal.read('run1')).exit,null);assert.equal(f.fake.calls.some(a=>['create','start','stop','rm','logs'].includes(a[0])),false);
+  }finally{await f.cleanup();}
+});
