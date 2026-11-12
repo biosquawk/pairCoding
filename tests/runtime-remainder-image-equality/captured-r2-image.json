@@ -1,0 +1,80 @@
+{
+  "values": [
+    {
+      "Id": "sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945",
+      "RepoTags": [
+        "paircoach/runtime-javascript-node:stage09"
+      ],
+      "RepoDigests": [
+        "paircoach/runtime-javascript-node@sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945"
+      ],
+      "Comment": "buildkit.dockerfile.v0",
+      "Created": "2026-11-11T22:17:32.479865656Z",
+      "Config": {
+        "User": "10001:10001",
+        "Env": [
+          "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+          "NODE_VERSION=22.22.0",
+          "YARN_VERSION=1.22.22",
+          "NODE_PATH=/opt/paircoach/tools/node_modules"
+        ],
+        "Cmd": [
+          "/opt/paircoach/node/bin/node",
+          "--version"
+        ],
+        "WorkingDir": "/workspace",
+        "ArgsEscaped": true
+      },
+      "Architecture": "amd64",
+      "Os": "linux",
+      "Size": 147169632,
+      "RootFS": {
+        "Type": "layers",
+        "Layers": [
+          "sha256:9eb9a78eeb101ab215acf43ffb2a709d5fca9ca2a22178564c7ee5cc30774c60",
+          "sha256:f6e71f9d22ec0d0bae2efa77e58e546696fdefb29ea86e480ff1692f30965d5b",
+          "sha256:4353f08b878699ccb1ddad75458dd7d17f97911b46d91a07779baca3b4755991",
+          "sha256:cc5e91a4e413ffbc14fc7624806852156d32444569b5d0ef61cb60ebce7e9b1a",
+          "sha256:a2a4e69ea5e16fe3f4301bf9e1e8e32e90918c26a72e59246a0220d8bb0b04ac",
+          "sha256:524cebd7318e061ea2e09bf93e8223f5008b92f40d7247280d666cd8f4ee8bd5",
+          "sha256:fe56db777e8b5251e73892b685dc13b1177493b32b7e5a3015ad4d82bc8e30a8",
+          "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+          "sha256:339a619465591c13d0173abe3e4e34e22bdd8adce33b69468ee90d493d6e3631",
+          "sha256:634862d374198d9b55896b226dbd36737d6de0c82b90bf8472bff91bfa497842",
+          "sha256:73075a9c9ecd1d190a0af835a84a2c645187a711608e2984a26a6e9410cd5283",
+          "sha256:5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef"
+        ]
+      },
+      "Metadata": {
+        "LastTagTime": "2026-11-11T22:17:39.439872813Z"
+      },
+      "Descriptor": {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": "sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945",
+        "size": 856
+      },
+      "Identity": {
+        "Build": [
+          {
+            "Ref": "ep2yc7seht9vgpczgzs8xit4x",
+            "CreatedAt": "2026-11-11T22:17:41.316973569Z"
+          }
+        ]
+      }
+    }
+  ],
+  "reused": {
+    "imageId": "sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945",
+    "observedImage": {
+      "Id": "sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945",
+      "RepoDigests": [
+        "paircoach/runtime-javascript-node@sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945"
+      ],
+      "Descriptor": {
+        "mediaType": "application/vnd.oci.image.index.v1+json",
+        "digest": "sha256:6078a53c9af4f470601d2ad46dfdcb297eb95ebeac7599688d8dac0282451945",
+        "size": 856
+      }
+    }
+  }
+}

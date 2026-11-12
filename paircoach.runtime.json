@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "activeProfile": "java-maven-21",
+  "workspaceRoot": "./examples/java-pattern",
+  "runtimeCatalog": "./runtimes/catalog.json",
+  "imageLock": "./runtimes/images.lock.json",
+  "languageFeatures": { "completion": true, "diagnostics": true },
+  "execution": { "backend": "docker", "pullPolicy": "never" }
+}

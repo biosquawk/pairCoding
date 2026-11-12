@@ -1,0 +1,3345 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:paircoach:websocket:3.0",
+  "title": "PairCoach WebSocket protocol 3.0",
+  "description": "Walidacja struktury. Wersje, epoki, swiezosc, autoryzacja, idempotencja i kolejnosc sa sprawdzane przez state machine.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ClientMessage"
+    },
+    {
+      "$ref": "#/$defs/ServerMessage"
+    }
+  ],
+  "$defs": {
+    "Id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "Nieinterpretowany identyfikator; w runtime unikalny."
+    },
+    "Path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\\\:\\u0000]+$",
+      "description": "Sciezka wzgledna POSIX w root. Walidacja filesystemu, junction, ADS i nazw urzadzen jest dodatkowo obowiazkowa."
+    },
+    "Position": {
+      "type": "object",
+      "properties": {
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "column": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "line",
+        "column"
+      ],
+      "additionalProperties": false
+    },
+    "Range": {
+      "type": "object",
+      "properties": {
+        "startLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "startColumn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "endLine": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "endColumn": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "startLine",
+        "startColumn",
+        "endLine",
+        "endColumn"
+      ],
+      "additionalProperties": false
+    },
+    "Error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "requestId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "currentVersion": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "requestId",
+        "currentVersion"
+      ],
+      "additionalProperties": false
+    },
+    "FileEntry": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/Path"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "FILE",
+            "DIRECTORY"
+          ]
+        },
+        "version": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "path",
+        "kind",
+        "version"
+      ],
+      "additionalProperties": false
+    },
+    "Document": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/Path"
+        },
+        "version": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "content": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 1048576
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "languageId": {
+          "type": "string",
+          "enum": [
+            "java",
+            "python",
+            "javascript",
+            "typescript",
+            "markdown",
+            "plaintext"
+          ]
+        },
+        "eol": {
+          "type": "string",
+          "enum": [
+            "LF",
+            "CRLF"
+          ]
+        },
+        "utf8Bom": {
+          "type": "boolean"
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "version",
+        "content",
+        "contentHash",
+        "languageId",
+        "eol",
+        "utf8Bom",
+        "readOnly"
+      ],
+      "additionalProperties": false
+    },
+    "RunProfile": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "RUN_MAIN",
+            "RUN_TESTS"
+          ]
+        },
+        "executable": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 4096
+          },
+          "minItems": 0,
+          "maxItems": 100
+        },
+        "cwd": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "timeoutMs": {
+          "type": "integer",
+          "minimum": 1000,
+          "maximum": 300000
+        },
+        "testReportFormat": {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "JUNIT_XML"
+          ]
+        },
+        "testReportGlob": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1024
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "executable",
+        "args",
+        "cwd",
+        "timeoutMs",
+        "testReportFormat",
+        "testReportGlob"
+      ],
+      "additionalProperties": false
+    },
+    "Settings": {
+      "type": "object",
+      "properties": {
+        "taskFilePath": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "taskMode": {
+          "type": "string",
+          "enum": [
+            "IMPLEMENTATION",
+            "CODE_REVIEW"
+          ]
+        },
+        "reviewNotesPath": {
+          "$ref": "#/$defs/Path"
+        },
+        "runProfiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RunProfile"
+          },
+          "minItems": 0,
+          "maxItems": 2
+        },
+        "aiConsent": {
+          "type": "boolean"
+        },
+        "contextPatterns": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "minItems": 0,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "taskFilePath",
+        "taskMode",
+        "reviewNotesPath",
+        "runProfiles",
+        "aiConsent",
+        "contextPatterns"
+      ],
+      "additionalProperties": false
+    },
+    "Capabilities": {
+      "type": "object",
+      "properties": {
+        "canRunMain": {
+          "type": "boolean"
+        },
+        "canRunTests": {
+          "type": "boolean"
+        },
+        "docs": {
+          "type": "string",
+          "enum": [
+            "NOT_INSTALLED",
+            "OFF",
+            "ON",
+            "FAILED"
+          ]
+        },
+        "autocomplete": {
+          "type": "string",
+          "enum": [
+            "NOT_INSTALLED",
+            "OFF",
+            "ON",
+            "FAILED"
+          ]
+        }
+      },
+      "required": [
+        "canRunMain",
+        "canRunTests",
+        "docs",
+        "autocomplete"
+      ],
+      "additionalProperties": false
+    },
+    "Project": {
+      "type": "object",
+      "properties": {
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "rootPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "workspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "settings": {
+          "$ref": "#/$defs/Settings"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/Capabilities"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FileEntry"
+          },
+          "minItems": 0,
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "projectId",
+        "sessionId",
+        "rootPath",
+        "workspaceVersion",
+        "settings",
+        "capabilities",
+        "files"
+      ],
+      "additionalProperties": false
+    },
+    "Timer": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "STOPPED",
+            "RUNNING",
+            "PAUSED",
+            "OVERTIME"
+          ]
+        },
+        "elapsedMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "limitMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 86400000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pauseOnHidden": {
+          "type": "boolean"
+        },
+        "manualPaused": {
+          "type": "boolean"
+        },
+        "serverTime": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "status",
+        "elapsedMs",
+        "limitMs",
+        "pauseOnHidden",
+        "manualPaused",
+        "serverTime"
+      ],
+      "additionalProperties": false
+    },
+    "Session": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": [
+            "READY",
+            "RUNNING",
+            "FINISHED"
+          ]
+        },
+        "workspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "controlEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "writeOwner": {
+          "type": "string",
+          "enum": [
+            "STUDENT",
+            "COACH"
+          ]
+        },
+        "coachMode": {
+          "type": "string",
+          "enum": [
+            "ACTIVE_WATCHING",
+            "INTERVENING",
+            "COOLDOWN_AFTER_VETO",
+            "MUTED_WINDOW_HIDDEN",
+            "MUTED_MANUAL",
+            "UNAVAILABLE"
+          ]
+        },
+        "cooldownAfterVeto": {
+          "type": "boolean"
+        },
+        "presence": {
+          "type": "string",
+          "enum": [
+            "FOCUSED",
+            "BLURRED",
+            "HIDDEN"
+          ]
+        },
+        "aiStatus": {
+          "type": "string",
+          "enum": [
+            "OFF",
+            "READY",
+            "THINKING",
+            "FAILED"
+          ]
+        },
+        "timer": {
+          "$ref": "#/$defs/Timer"
+        },
+        "activeFilePath": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interventionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastServerSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "sessionId",
+        "projectId",
+        "lifecycle",
+        "workspaceVersion",
+        "controlEpoch",
+        "writeOwner",
+        "coachMode",
+        "cooldownAfterVeto",
+        "presence",
+        "aiStatus",
+        "timer",
+        "activeFilePath",
+        "interventionId",
+        "lastServerSeq"
+      ],
+      "additionalProperties": false
+    },
+    "Snapshot": {
+      "type": "object",
+      "properties": {
+        "snapshotId": {
+          "$ref": "#/$defs/Id"
+        },
+        "projectId": {
+          "$ref": "#/$defs/Id"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "workspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Path"
+          },
+          "minItems": 1,
+          "maxItems": 1000
+        }
+      },
+      "required": [
+        "snapshotId",
+        "projectId",
+        "createdAt",
+        "label",
+        "workspaceVersion",
+        "paths"
+      ],
+      "additionalProperties": false
+    },
+    "Proposal": {
+      "type": "object",
+      "properties": {
+        "proposalId": {
+          "$ref": "#/$defs/Id"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "RETRY_FROM_SNAPSHOT",
+            "RESTORE_SNAPSHOT",
+            "GENERATE_TESTS",
+            "FINISH_EXERCISE"
+          ]
+        },
+        "questionText": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600
+        },
+        "yesLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "noLabel": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 100
+        },
+        "basedOnWorkspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Path"
+          },
+          "minItems": 0,
+          "maxItems": 1000
+        },
+        "snapshotId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resetTimer": {
+          "const": false
+        }
+      },
+      "required": [
+        "proposalId",
+        "kind",
+        "questionText",
+        "yesLabel",
+        "noLabel",
+        "basedOnWorkspaceVersion",
+        "expiresAt",
+        "paths",
+        "snapshotId",
+        "resetTimer"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "RETRY_FROM_SNAPSHOT",
+                  "RESTORE_SNAPSHOT"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "snapshotId": {
+                "$ref": "#/$defs/Id"
+              },
+              "paths": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/Path"
+                },
+                "minItems": 1,
+                "maxItems": 1000
+              }
+            }
+          }
+        }
+      ]
+    },
+    "Run": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "$ref": "#/$defs/Id"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "RUN_MAIN",
+            "RUN_TESTS"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "QUEUED",
+            "RUNNING",
+            "SUCCEEDED",
+            "FAILED",
+            "CANCELLED",
+            "TIMED_OUT"
+          ]
+        },
+        "exitCode": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workspaceVersionAtStart": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "workspaceChangedDuringRun": {
+          "type": "boolean"
+        },
+        "testOutcome": {
+          "type": "string",
+          "enum": [
+            "NOT_APPLICABLE",
+            "UNKNOWN",
+            "NO_TESTS",
+            "PASSED",
+            "FAILED"
+          ]
+        },
+        "testCount": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "outputTail": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 65536
+        },
+        "outputTruncated": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "finishedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "runId",
+        "mode",
+        "status",
+        "exitCode",
+        "workspaceVersionAtStart",
+        "workspaceChangedDuringRun",
+        "testOutcome",
+        "testCount",
+        "outputTail",
+        "outputTruncated",
+        "startedAt",
+        "finishedAt"
+      ],
+      "additionalProperties": false
+    },
+    "Report": {
+      "type": "object",
+      "properties": {
+        "reportId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "PENDING",
+            "READY",
+            "FAILED"
+          ]
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "COMPLETED",
+            "ABANDONED",
+            "TIME_LIMIT_REVIEW"
+          ]
+        },
+        "sourceWorkspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "snapshotId": {
+          "$ref": "#/$defs/Id"
+        },
+        "generatedAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "markdown": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 16000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidenceIds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Id"
+          },
+          "minItems": 0,
+          "maxItems": 1000
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Error"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "reportId",
+        "sessionId",
+        "status",
+        "reason",
+        "sourceWorkspaceVersion",
+        "snapshotId",
+        "generatedAt",
+        "markdown",
+        "evidenceIds",
+        "error"
+      ],
+      "additionalProperties": false
+    },
+    "ChatEntry": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "author": {
+          "type": "string",
+          "enum": [
+            "STUDENT",
+            "COACH",
+            "SYSTEM"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 0,
+          "maxLength": 12000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "messageId",
+        "author",
+        "text",
+        "createdAt"
+      ],
+      "additionalProperties": false
+    },
+    "SessionBundle": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/Session"
+        },
+        "project": {
+          "$ref": "#/$defs/Project"
+        },
+        "activeDocument": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Document"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "proposals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Proposal"
+          },
+          "minItems": 0,
+          "maxItems": 10
+        },
+        "lastRun": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Run"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Report"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "chat": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChatEntry"
+          },
+          "minItems": 0,
+          "maxItems": 100
+        }
+      },
+      "required": [
+        "session",
+        "project",
+        "activeDocument",
+        "proposals",
+        "lastRun",
+        "report",
+        "chat"
+      ],
+      "additionalProperties": false
+    },
+    "TextEdit": {
+      "type": "object",
+      "properties": {
+        "range": {
+          "$ref": "#/$defs/Range"
+        },
+        "textBlock": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        }
+      },
+      "required": [
+        "range",
+        "textBlock"
+      ],
+      "additionalProperties": false
+    },
+    "CoachDecision": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "SILENT"
+            },
+            "reason": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200
+            }
+          },
+          "required": [
+            "kind",
+            "reason"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "HINT"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "POSITIVE",
+                "NEUTRAL",
+                "WARNING"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Path"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "documentVersion": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "range": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Range"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "showPointer": {
+              "type": "boolean"
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Id"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "kind",
+            "severity",
+            "text",
+            "path",
+            "documentVersion",
+            "range",
+            "showPointer",
+            "evidenceIds"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "EDIT"
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "path": {
+              "$ref": "#/$defs/Path"
+            },
+            "documentVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "workspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TextEdit"
+              },
+              "minItems": 1,
+              "maxItems": 60
+            }
+          },
+          "required": [
+            "kind",
+            "purpose",
+            "path",
+            "documentVersion",
+            "workspaceVersion",
+            "steps"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "PROPOSE"
+            },
+            "proposalKind": {
+              "type": "string",
+              "enum": [
+                "RETRY_FROM_SNAPSHOT",
+                "RESTORE_SNAPSHOT",
+                "GENERATE_TESTS",
+                "FINISH_EXERCISE"
+              ]
+            },
+            "questionText": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 600
+            },
+            "snapshotId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Path"
+              },
+              "minItems": 0,
+              "maxItems": 1000
+            },
+            "resetTimer": {
+              "const": false
+            }
+          },
+          "required": [
+            "kind",
+            "proposalKind",
+            "questionText",
+            "snapshotId",
+            "paths",
+            "resetTimer"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "REPLY"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            }
+          },
+          "required": [
+            "kind",
+            "text"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "MUTE"
+            },
+            "durationSeconds": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 86400
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sourceUserMessageId": {
+              "$ref": "#/$defs/Id"
+            }
+          },
+          "required": [
+            "kind",
+            "durationSeconds",
+            "sourceUserMessageId"
+          ],
+          "additionalProperties": false
+        }
+      ],
+      "description": "Wynik modelu. Backend dodatkowo sprawdza swiezosc, dozwolone pliki, zgody i stan sesji."
+    },
+    "OpenProjectRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "rootPath": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4096
+        },
+        "settings": {
+          "$ref": "#/$defs/Settings"
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "rootPath",
+        "settings"
+      ],
+      "additionalProperties": false
+    },
+    "UpdateSettingsRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "expectedWorkspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "settings": {
+          "$ref": "#/$defs/Settings"
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId",
+        "expectedWorkspaceVersion",
+        "settings"
+      ],
+      "additionalProperties": false
+    },
+    "FileOperationRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "CREATE",
+            "RENAME",
+            "DELETE"
+          ]
+        },
+        "path": {
+          "$ref": "#/$defs/Path"
+        },
+        "newPath": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1048576
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "baseVersion": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "controlEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId",
+        "operation",
+        "path",
+        "newPath",
+        "content",
+        "baseVersion",
+        "controlEpoch"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "CREATE"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "content": {
+                "type": "string",
+                "minLength": 0,
+                "maxLength": 1048576
+              },
+              "newPath": {
+                "type": "null"
+              },
+              "baseVersion": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "RENAME"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "newPath": {
+                "$ref": "#/$defs/Path"
+              },
+              "baseVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "content": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operation": {
+                "const": "DELETE"
+              }
+            },
+            "required": [
+              "operation"
+            ]
+          },
+          "then": {
+            "properties": {
+              "newPath": {
+                "type": "null"
+              },
+              "baseVersion": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "content": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "StartSessionRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "limitMs": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 86400000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pauseOnHidden": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId",
+        "limitMs",
+        "pauseOnHidden"
+      ],
+      "additionalProperties": false
+    },
+    "RunRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "RUN_MAIN",
+            "RUN_TESTS"
+          ]
+        },
+        "expectedWorkspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId",
+        "mode",
+        "expectedWorkspaceVersion"
+      ],
+      "additionalProperties": false
+    },
+    "SessionCommand": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId"
+      ],
+      "additionalProperties": false
+    },
+    "FinishRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "reason": {
+          "type": "string",
+          "enum": [
+            "COMPLETED",
+            "ABANDONED",
+            "TIME_LIMIT_REVIEW"
+          ]
+        },
+        "expectedWorkspaceVersion": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId",
+        "reason",
+        "expectedWorkspaceVersion"
+      ],
+      "additionalProperties": false
+    },
+    "VetoRequest": {
+      "type": "object",
+      "properties": {
+        "requestId": {
+          "$ref": "#/$defs/Id"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "controlEpoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "activeInterventionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lastAppliedSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "requestId",
+        "clientId",
+        "sessionId",
+        "controlEpoch",
+        "activeInterventionId",
+        "lastAppliedSeq"
+      ],
+      "additionalProperties": false
+    },
+    "Client_HELLO": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "HELLO"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "minLength": 16,
+              "maxLength": 4096
+            },
+            "lastServerSeq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "token",
+            "lastServerSeq"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_PING": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "PING"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "lastAppliedSeq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "lastAppliedSeq"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_CODE_CHANGED": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "CODE_CHANGED"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "$ref": "#/$defs/Path"
+            },
+            "baseVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "content": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 1048576
+            },
+            "editKind": {
+              "type": "string",
+              "enum": [
+                "TYPING",
+                "PASTE",
+                "UNDO",
+                "REDO",
+                "RECOVERY"
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "baseVersion",
+            "controlEpoch",
+            "content",
+            "editKind"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_VIEW_CHANGED": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "VIEW_CHANGED"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Path"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "documentVersion": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "cursor": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Position"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "selection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Range"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "path",
+            "documentVersion",
+            "cursor",
+            "selection"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_CONTROL_READY": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "CONTROL_READY"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "$ref": "#/$defs/Id"
+            },
+            "workspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "ready": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "requestId",
+            "workspaceVersion",
+            "ready"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_VETO_ESCAPE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "VETO_ESCAPE"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "activeInterventionId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "lastAppliedSeq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "controlEpoch",
+            "activeInterventionId",
+            "lastAppliedSeq"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_STEP_RENDERED": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "STEP_RENDERED"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "stepId": {
+              "$ref": "#/$defs/Id"
+            },
+            "interventionId": {
+              "$ref": "#/$defs/Id"
+            },
+            "documentVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "stepId",
+            "interventionId",
+            "documentVersion"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_WINDOW_STATE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "WINDOW_STATE"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "presence": {
+              "type": "string",
+              "enum": [
+                "FOCUSED",
+                "BLURRED",
+                "HIDDEN"
+              ]
+            }
+          },
+          "required": [
+            "presence"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_CHAT_MESSAGE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "CHAT_MESSAGE"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 12000
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Path"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "documentVersion": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "selection": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Range"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "text",
+            "path",
+            "documentVersion",
+            "selection"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_TIMER_ACTION": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "TIMER_ACTION"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "PAUSE",
+                "RESUME",
+                "SET_HIDDEN_POLICY"
+              ]
+            },
+            "pauseOnHidden": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "action",
+            "pauseOnHidden"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_PROPOSAL_RESPONSE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "PROPOSAL_RESPONSE"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "proposalId": {
+              "$ref": "#/$defs/Id"
+            },
+            "accepted": {
+              "type": "boolean"
+            },
+            "basedOnWorkspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "proposalId",
+            "accepted",
+            "basedOnWorkspaceVersion"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Client_PROPOSAL_REQUEST": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "PROPOSAL_REQUEST"
+        },
+        "clientId": {
+          "$ref": "#/$defs/Id"
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "RESTORE_SNAPSHOT"
+            },
+            "snapshotId": {
+              "$ref": "#/$defs/Id"
+            }
+          },
+          "required": [
+            "kind",
+            "snapshotId"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "clientId",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_SESSION_SNAPSHOT": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "SESSION_SNAPSHOT"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/SessionBundle"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_ACK": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "ACK"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "replyTo": {
+              "$ref": "#/$defs/Id"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "OK",
+                "DUPLICATE",
+                "REJECTED"
+              ]
+            },
+            "documentVersion": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "workspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Error"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "replyTo",
+            "status",
+            "documentVersion",
+            "workspaceVersion",
+            "controlEpoch",
+            "error"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_CONTROL_PREPARE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "CONTROL_PREPARE"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "requestId": {
+              "$ref": "#/$defs/Id"
+            },
+            "purpose": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 240
+            },
+            "path": {
+              "$ref": "#/$defs/Path"
+            },
+            "basedOnWorkspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "requestId",
+            "purpose",
+            "path",
+            "basedOnWorkspaceVersion"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_CONTROL_STATE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "CONTROL_STATE"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "writeOwner": {
+              "type": "string",
+              "enum": [
+                "STUDENT",
+                "COACH"
+              ]
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "coachMode": {
+              "type": "string",
+              "enum": [
+                "ACTIVE_WATCHING",
+                "INTERVENING",
+                "COOLDOWN_AFTER_VETO",
+                "MUTED_WINDOW_HIDDEN",
+                "MUTED_MANUAL",
+                "UNAVAILABLE"
+              ]
+            },
+            "cooldownAfterVeto": {
+              "type": "boolean"
+            },
+            "interventionId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "purpose": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "writeOwner",
+            "controlEpoch",
+            "coachMode",
+            "cooldownAfterVeto",
+            "interventionId",
+            "purpose"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_COACH_STEP_EDIT": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "COACH_STEP_EDIT"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "stepId": {
+              "$ref": "#/$defs/Id"
+            },
+            "interventionId": {
+              "$ref": "#/$defs/Id"
+            },
+            "controlEpoch": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "path": {
+              "$ref": "#/$defs/Path"
+            },
+            "baseVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "workspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "range": {
+              "$ref": "#/$defs/Range"
+            },
+            "textBlock": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[a-f0-9]{64}$"
+            }
+          },
+          "required": [
+            "stepId",
+            "interventionId",
+            "controlEpoch",
+            "path",
+            "baseVersion",
+            "version",
+            "workspaceVersion",
+            "range",
+            "textBlock",
+            "contentHash"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_EXTERNAL_FILE_SYNC": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "EXTERNAL_FILE_SYNC"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "operation": {
+              "type": "string",
+              "enum": [
+                "CREATED",
+                "UPDATED",
+                "DELETED"
+              ]
+            },
+            "path": {
+              "$ref": "#/$defs/Path"
+            },
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "workspaceVersion": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "document": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Document"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "operation",
+            "path",
+            "version",
+            "workspaceVersion",
+            "document"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_COACH_POINTER": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "COACH_POINTER"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "path": {
+              "$ref": "#/$defs/Path"
+            },
+            "documentVersion": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "range": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Range"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "clear": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "id",
+            "path",
+            "documentVersion",
+            "range",
+            "clear"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_COACH_HINT_BUBBLE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "COACH_HINT_BUBBLE"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Id"
+            },
+            "severity": {
+              "type": "string",
+              "enum": [
+                "POSITIVE",
+                "NEUTRAL",
+                "WARNING"
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 400
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Path"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "documentVersion": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 9007199254740991
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "range": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Range"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Id"
+              },
+              "minItems": 0,
+              "maxItems": 20
+            }
+          },
+          "required": [
+            "id",
+            "severity",
+            "text",
+            "path",
+            "documentVersion",
+            "range",
+            "evidenceIds"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_ACTION_PROPOSAL": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "ACTION_PROPOSAL"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/Proposal"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_CHAT_REPLY": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "CHAT_REPLY"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "replyTo": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Id"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1200
+            }
+          },
+          "required": [
+            "replyTo",
+            "text"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_RUN_OUTPUT": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "RUN_OUTPUT"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "runId": {
+              "$ref": "#/$defs/Id"
+            },
+            "outputSeq": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "stream": {
+              "type": "string",
+              "enum": [
+                "STDOUT",
+                "STDERR"
+              ]
+            },
+            "chunk": {
+              "type": "string",
+              "minLength": 0,
+              "maxLength": 16384
+            }
+          },
+          "required": [
+            "runId",
+            "outputSeq",
+            "stream",
+            "chunk"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_RUN_STATE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "RUN_STATE"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/Run"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_SESSION_STATE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "SESSION_STATE"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/Session"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_SESSION_REPORT": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "SESSION_REPORT"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/Report"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "Server_ERROR": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "ERROR"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "$ref": "#/$defs/Error"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "ClientMessage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Client_HELLO"
+        },
+        {
+          "$ref": "#/$defs/Client_PING"
+        },
+        {
+          "$ref": "#/$defs/Client_CODE_CHANGED"
+        },
+        {
+          "$ref": "#/$defs/Client_VIEW_CHANGED"
+        },
+        {
+          "$ref": "#/$defs/Client_CONTROL_READY"
+        },
+        {
+          "$ref": "#/$defs/Client_VETO_ESCAPE"
+        },
+        {
+          "$ref": "#/$defs/Client_STEP_RENDERED"
+        },
+        {
+          "$ref": "#/$defs/Client_WINDOW_STATE"
+        },
+        {
+          "$ref": "#/$defs/Client_CHAT_MESSAGE"
+        },
+        {
+          "$ref": "#/$defs/Client_TIMER_ACTION"
+        },
+        {
+          "$ref": "#/$defs/Client_PROPOSAL_RESPONSE"
+        },
+        {
+          "$ref": "#/$defs/Client_PROPOSAL_REQUEST"
+        }
+      ]
+    },
+    "ServerMessage": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Server_SESSION_SNAPSHOT"
+        },
+        {
+          "$ref": "#/$defs/Server_ACK"
+        },
+        {
+          "$ref": "#/$defs/Server_CONTROL_PREPARE"
+        },
+        {
+          "$ref": "#/$defs/Server_CONTROL_STATE"
+        },
+        {
+          "$ref": "#/$defs/Server_COACH_STEP_EDIT"
+        },
+        {
+          "$ref": "#/$defs/Server_EXTERNAL_FILE_SYNC"
+        },
+        {
+          "$ref": "#/$defs/Server_COACH_POINTER"
+        },
+        {
+          "$ref": "#/$defs/Server_COACH_HINT_BUBBLE"
+        },
+        {
+          "$ref": "#/$defs/Server_ACTION_PROPOSAL"
+        },
+        {
+          "$ref": "#/$defs/Server_CHAT_REPLY"
+        },
+        {
+          "$ref": "#/$defs/Server_RUN_OUTPUT"
+        },
+        {
+          "$ref": "#/$defs/Server_RUN_STATE"
+        },
+        {
+          "$ref": "#/$defs/Server_SESSION_STATE"
+        },
+        {
+          "$ref": "#/$defs/Server_SESSION_REPORT"
+        },
+        {
+          "$ref": "#/$defs/Server_ERROR"
+        }
+      ]
+    }
+  }
+}
