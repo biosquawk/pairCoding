@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import { constants, closeSync, chmodSync, fchmodSync, fstatSync, lstatSync, mkdirSync, openSync, opendirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { open, writeFile, fchmod, fsync, close } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 import type { DocumentStamp } from '../../shared/language-v2';
@@ -58,6 +59,23 @@ export interface LanguageShadow {
   wholeProjectManifestPath: string; inputManifestSha256: string; manifest: Readonly<ShadowManifest>;
 }
 type Tree = { files: ShadowFile[]; directories: string[]; contents: Map<string, Buffer> };
+/** Backend-only unforgeable capability; no paths/readiness/phase are exposed before consumption. */
+export interface UnlaunchedLanguageStage { readonly kind: 'UNLAUNCHED_LANGUAGE_STAGE' }
+/** Trusted developer IO seam; production uses real asynchronous native write AND file fsync. */
+export interface LanguageShadowAsyncIO {
+  open(path: string, flags: number, mode: number): Promise<number>;
+  writeFile(fd: number, bytes: Buffer): Promise<void>; chmod(fd: number, mode: number): Promise<void>;
+  sync(fd: number): Promise<void>; close(fd: number): Promise<void>;
+}
+const nativeAsyncIO: LanguageShadowAsyncIO = {
+  open: (path, flags, mode) => new Promise((resolve, reject) => open(path, flags, mode, (error, fd) => error ? reject(error) : resolve(fd))),
+  writeFile: (fd, bytes) => new Promise((resolve, reject) => writeFile(fd, bytes, error => error ? reject(error) : resolve())),
+  chmod: (fd, mode) => new Promise((resolve, reject) => fchmod(fd, mode, error => error ? reject(error) : resolve())),
+  sync: fd => new Promise((resolve, reject) => fsync(fd, error => error ? reject(error) : resolve())),
+  close: fd => new Promise((resolve, reject) => close(fd, error => error ? reject(error) : resolve())),
+};
+type StagedTree = { authority: LanguageSnapshotAuthority; captured: ReturnType<LanguageShadowStore['capture']>;
+  root: string; launchId: string; manifest: ShadowManifest; workspaceDirectory: string; bootDirectory: string; stateDirectory: string };
 type RecordState = { shadow: LanguageShadow; poisoned: boolean };
 export const LANGUAGE_DEPENDENCY_DIRECTORY = '.paircoach-dependencies';
 const DEPENDENCIES = LANGUAGE_DEPENDENCY_DIRECTORY;
@@ -79,9 +97,11 @@ const byPath = (a: ShadowFile, b: ShadowFile): number => a.path < b.path ? -1 : 
  * Caller serializes Workspace/overlay transactions and retires on failure. No original writes, no autosave.
  */
 export class LanguageShadowStore {
+  private stages = new WeakMap<UnlaunchedLanguageStage, StagedTree>();
   private records = new Map<string, RecordState>();
   constructor(readonly ownedRoot: string, private readonly codec: LanguageShadowCodec,
-    private readonly durability: LanguageJournalDurability = new NodeLanguageJournalDurability(assertRealDirectory)) { assertRealDirectory(ownedRoot); }
+    private readonly durability: LanguageJournalDurability = new NodeLanguageJournalDurability(assertRealDirectory),
+    private readonly asyncIO: LanguageShadowAsyncIO = nativeAsyncIO) { assertRealDirectory(ownedRoot); }
   private path(path: string): void {
     this.codec.assertRelativePath(path);
     // Target Windows filesystem policy, NOT an alternate URI mapper. Preserve case/Unicode spelling.
@@ -236,6 +256,133 @@ export class LanguageShadowStore {
         assertIdentity(path, before); this.durability.directory(path); assertIdentity(path, before);
       }
     }
+  }
+  /** No source writes, no manifest/boot/process/record publication. Each wave is bounded by the
+   * SAME complete authority; inner awaited native IO additionally rechecks every parent and FD/path.
+   * A wave is drained even when its first file fails. Never cleanup while another callback can write.
+   */
+  private async atomicFileAsync(path: string, bytes: Buffer): Promise<void> {
+    const parent = dirname(path); assertRealDirectory(parent);
+    const directory = lstatSync(parent, { bigint: true }), temporary = join(parent, `.${randomUUID()}.tmp`);
+    let fd: number | undefined, written: import('node:fs').BigIntStats | undefined;
+    const guard = (): void => {
+      assertRealDirectory(parent); const now = lstatSync(parent, { bigint: true });
+      if (now.dev !== directory.dev || now.ino !== directory.ino) throw new Error('Async copy parent replaced');
+      if (fd !== undefined) {
+        const opened = fstatSync(fd, { bigint: true }), entry = lstatSync(temporary, { bigint: true });
+        if (!opened.isFile() || opened.nlink !== 1n || !entry.isFile() || entry.isSymbolicLink() || entry.nlink !== 1n ||
+          opened.dev !== entry.dev || opened.ino !== entry.ino) throw new Error('Async copy FD/path identity changed');
+      }
+    };
+    try {
+      fd = await this.asyncIO.open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | (constants.O_NOFOLLOW ?? 0), 0o600);
+      let operationFailed = false, operationError: unknown;
+      try {
+        guard(); await this.asyncIO.writeFile(fd, bytes); guard();
+        await this.asyncIO.chmod(fd, 0o444); guard();
+        await this.asyncIO.sync(fd); guard();
+        written = fstatSync(fd, { bigint: true });
+        if (written.size !== BigInt(bytes.length)) throw new Error('Invalid async copy output');
+      } catch (error) { operationFailed = true; operationError = error; } finally {
+        // All native operations on this descriptor have settled before close; pool awaits this too.
+        const closing = fd;
+        try { await this.asyncIO.close(closing); }
+        catch (error) {
+          // Reconcile an uncertain close by READ first; retry only a descriptor proven still open.
+          // All IO on it has settled, so a direct final close cannot race a write/fsync callback.
+          let closed = false;
+          try { fstatSync(closing); } catch (readback) {
+            if ((readback as NodeJS.ErrnoException).code !== 'EBADF') throw new AggregateError([error, readback], 'Cannot reconcile async close');
+            closed = true;
+          }
+          if (!closed) closeSync(closing);
+          if (operationFailed) throw new AggregateError([operationError, error], 'Async copy operation and close failed');
+          throw error;
+        } finally { fd = undefined; }
+      }
+      if (operationFailed) throw operationError;
+      guard(); renameSync(temporary, path);
+      const final = lstatSync(path, { bigint: true });
+      if (!final.isFile() || final.isSymbolicLink() || final.nlink !== 1n || final.dev !== written!.dev || final.ino !== written!.ino ||
+        !readRegular(path, bytes.length).equals(bytes)) throw new Error('Async copy identity/readback mismatch');
+    } catch (error) {
+      // Removal belongs to stage(), AFTER every other file's pending write/fsync/close is drained.
+      throw error;
+    }
+  }
+  async stage(authority: LanguageSnapshotAuthority): Promise<UnlaunchedLanguageStage> {
+    const captured = this.capture(authority), launchId = randomUUID(), root = join(this.ownedRoot, launchId);
+    // The generic in-memory plan has no authority as a phase/manifest; consumeStage selects the phase.
+    const { manifest, contents } = this.plan(captured.snapshot, captured.source, captured.deps, launchId, 'completion');
+    mkdirSync(root, { mode: 0o700 }); assertPrivateLanguageDirectory(root);
+    const workspaceDirectory = join(root, 'workspace'), bootDirectory = join(root, 'boot'), stateDirectory = join(root, 'state');
+    try {
+      mkdirSync(workspaceDirectory, { mode: 0o755 });
+      for (const path of [bootDirectory, stateDirectory]) { mkdirSync(path, { mode: 0o777 }); chmodSync(path, 0o777); }
+      const directories = new Map<string, import('node:fs').BigIntStats>();
+      const remember = (path: string): void => { assertRealDirectory(path); directories.set(path, lstatSync(path, { bigint: true })); };
+      remember(workspaceDirectory);
+      for (const dir of [...manifest.directories].sort((a,b) => a.split('/').length - b.split('/').length)) {
+        const path = join(workspaceDirectory, ...dir.split('/')); mkdirSync(path, { mode: 0o755 }); remember(path);
+      }
+      for (let i = 0; i < manifest.files.length; i += 4) {
+        this.current(authority, captured.lease);
+        // Each job starts immediately, but never more than four real write/fsync operations can
+        // be inflight. Do not schedule another wave after ANY failure; allSettled includes closes.
+        const outcomes = await Promise.allSettled(manifest.files.slice(i, i + 4).map(file =>
+          this.atomicFileAsync(join(workspaceDirectory, ...file.path.split('/')), contents.get(file.path)!)));
+        const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
+        if (failures.length === 1) throw failures[0].reason;
+        if (failures.length > 1) throw new AggregateError(failures.map(f => f.reason), `Multiple unlaunched async copy failures: ${String(failures[0].reason)}`);
+        this.current(authority, captured.lease);
+      }
+      for (const [path, before] of [...directories].sort(([a],[b]) => b.split(sep).length - a.split(sep).length)) {
+        const check = (): void => { assertRealDirectory(path); const now = lstatSync(path, { bigint: true });
+          if (now.dev !== before.dev || now.ino !== before.ino) throw new Error('Unlaunched async directory replaced'); };
+        check(); this.durability.directory(path); check();
+      }
+      for (const path of [bootDirectory, stateDirectory, root, this.ownedRoot]) this.durability.directory(path);
+      this.current(authority, captured.lease);
+      const token: UnlaunchedLanguageStage = Object.freeze({ kind: 'UNLAUNCHED_LANGUAGE_STAGE' });
+      this.stages.set(token, { authority, captured, root, launchId, manifest, workspaceDirectory, bootDirectory, stateDirectory });
+      return token;
+    } catch (error) {
+      try { this.removeUnlaunched(root); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Async unlaunched stage failed and cleanup failed'); }
+      throw error;
+    }
+  }
+  /** One-use, store-local capability; held lease/currentness is checked again after the async return.
+   * The final complete source/dependency revalidation and actual output readback precede publication.
+   */
+  consumeStage(token: UnlaunchedLanguageStage, phase: LanguageShadow['phase']): LanguageShadow {
+    const staged = this.stages.get(token);
+    if (!staged) throw new Error('Unknown/used unlaunched stage');
+    this.stages.delete(token);
+    const { root, launchId, authority, captured, workspaceDirectory, bootDirectory, stateDirectory } = staged;
+    try {
+      if (phase !== 'completion' && phase !== 'diagnostics') throw new Error('Invalid shadow phase');
+      if (!isDeepStrictEqual(authority.capture(), captured.snapshot)) throw new Error('Changed staged capture/lease');
+      this.revalidate(authority, captured);
+      const manifest = freeze({ ...staged.manifest, phase });
+      const actual = this.scan(workspaceDirectory, false, true);
+      if (json(actual.files) !== json(manifest.files.map(({ path, bytes, sha256 }) => ({ path, bytes, sha256 }))) ||
+        json(actual.directories) !== json(manifest.directories)) throw new Error('Unlaunched staged contents mismatch');
+      this.current(authority, captured.lease);
+      const wholeProjectManifestPath = join(root, 'manifest.json'), bytes = Buffer.from(json(manifest));
+      this.atomicFile(wholeProjectManifestPath, bytes);
+      const shadow = freeze({ launchId, phase, workspaceDirectory, bootDirectory, stateDirectory, wholeProjectManifestPath,
+        inputManifestSha256: sha256(bytes), manifest });
+      this.records.set(launchId, { shadow, poisoned: false });
+      this.assertIntegrity(shadow); this.current(authority, captured.lease); return shadow;
+    } catch (error) {
+      this.records.delete(launchId);
+      try { this.removeUnlaunched(root); } catch (cleanup) { throw new AggregateError([error, cleanup], 'Stage consumption failed and cleanup failed'); }
+      throw error;
+    }
+  }
+  discardStage(token: UnlaunchedLanguageStage): void {
+    const staged = this.stages.get(token); if (!staged) return;
+    this.stages.delete(token); this.removeUnlaunched(staged.root);
   }
   private revalidate(authority: LanguageSnapshotAuthority, captured: ReturnType<LanguageShadowStore['capture']>): void {
     const { lease, snapshot, source, deps } = captured;

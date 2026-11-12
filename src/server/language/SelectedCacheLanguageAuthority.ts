@@ -94,7 +94,7 @@ export interface SelectedCacheLanguageFactoryOptions extends Omit<ProductionLang
     action: (lease: SelectedLanguageLease) => Promise<void>): Promise<void>;
   preparedOutputRoots: readonly string[];
   /** Explicit actual language tool-probe receipt, NOT a Run image receipt or client upload. */
-  languageReceiptPath: string;
+  languageReceiptPath?: string;
   transport: Pick<DockerTransport, 'run'>;
 }
 /** Concrete selected-consumer/OCI-reader -> production shadow/boot/process/session join. Registry
@@ -106,16 +106,25 @@ export function createSelectedCacheLanguageFactory(options: SelectedCacheLanguag
   captureSource(projectRoot: string): LanguageSourceCapture;
 } {
   const sources = new LanguageShadowStore(options.ownedRoot, codec);
+  // Snapshot trusted selection once. Nonremote registry startup never verifies an image. Missing
+  // selection is a hard refusal AT the real remote verification boundary, never a default path.
+  const receiptPath=options.languageReceiptPath,transport=options.transport;
+  let images:PreparedLanguageImageVerifier|undefined;
+  const selectedImages:Pick<PreparedLanguageImageVerifier,'verify'>={async verify(runtime,engine,lease){
+    if(receiptPath===undefined)throw new Error('Explicit trusted language receipt is required');
+    images ??= new PreparedLanguageImageVerifier(receiptPath,transport);
+    return images.verify(runtime,engine,lease);
+  }};
   const authority = new SelectedCacheLanguageAuthority(createPreparedRuntimeResolver({ outputRoots: options.preparedOutputRoots }, options.transport),
-    new PreparedLanguageImageVerifier(options.languageReceiptPath, options.transport), sources);
+    selectedImages, sources);
   const factory = new ProductionLanguageRegistryFactory({ ownedRoot: options.ownedRoot, driver: options.driver, journal: options.journal,
-    admission: options.admission, authority, withCaptureLease: async (scope, snapshot, action) => {
+    admission: options.admission, authority, withCaptureLease: async (scope, snapshot, action, operation) => {
       if (!options.withSourceLease) throw new Error('Actual backend language source FIFO acquisition required');
       await options.withSourceLease(scope, snapshot, async lease => {
         assertLease(lease);
         await authority.prepare(scope, snapshot, lease);
         assertLease(lease);
-        action(); // Copy/refresh AND registry owner transfer occur before releasing this SAME lease.
+        await factory.stageCapture(scope, snapshot, action, operation); // Stage + sync transfer remain inside this SAME held lease.
         assertLease(lease);
       });
     } });
