@@ -76,12 +76,45 @@ function start(t:TestContext,f:ReturnType<typeof fixture>,port:string,args:strin
 test('public port parser preserves default 8080 and rejects invalid/reserved values without binding it',async()=>{
   const {parsePublicHttpPort}=await import('../../src/server/index');
   assert.equal(parsePublicHttpPort(undefined),8080);
-  for(const [raw,expected] of [['1',1],['18080',18080],['65535',65535],['03000',3000]] as const) {
+  for(const [raw,expected] of [['2',2],['18080',18080],['65535',65535],['03000',3000]] as const) {
     if(expected===3000)assert.throws(()=>parsePublicHttpPort(raw),/zastrzeżone/);
     else assert.equal(parsePublicHttpPort(raw),expected);
   }
   for(const value of ['', ' ', '18080 ', '-1', '0', '65536', '1.5', '1e4', '+18080','0x4650','NaN','Infinity','80','3000','8765','8766','8767','8768','secret\n'])
     assert.throws(()=>parsePublicHttpPort(value),/PAIRCOACH_HTTP_PORT/);
+});
+
+// Independent expectations from https://fetch.spec.whatwg.org/#port-blocking.
+// No browser-policy override and no network traffic to any of these ports.
+test('public port parser rejects browser-blocked ports including numeric aliases',async()=>{
+  const {parsePublicHttpPort}=await import('../../src/server/index');
+  const browserBlocked=[
+    0,1,7,9,11,13,15,17,19,20,21,22,23,25,37,42,43,53,69,77,79,87,95,
+    101,102,103,104,109,110,111,113,115,117,119,123,135,137,139,143,161,
+    179,389,427,465,512,513,514,515,526,530,531,532,540,548,554,556,563,
+    587,601,636,989,990,993,995,1719,1720,1723,2049,3659,4045,4190,
+    5060,5061,6000,6566,6665,6666,6667,6668,6669,6679,6697,10080,
+  ];
+  for(const port of browserBlocked) {
+    assert.throws(()=>parsePublicHttpPort(String(port)),/PAIRCOACH_HTTP_PORT/,`Unsafe port ${port}`);
+    assert.throws(()=>parsePublicHttpPort(String(port).padStart(5,'0')),/PAIRCOACH_HTTP_PORT/,`Unsafe alias ${port}`);
+  }
+  for(const raw of ['6000','6667','06000'])
+    assert.throws(()=>parsePublicHttpPort(raw),/blokowane przez przeglądarkę/);
+  assert.equal(parsePublicHttpPort(undefined),8080);
+  for(const port of [2,18080,8080,65535])assert.equal(parsePublicHttpPort(String(port)),port);
+  for(const raw of ['80','00080','3000','03000','8765','8766','8767','8768','08768'])
+    assert.throws(()=>parsePublicHttpPort(raw),/zastrzeżone/);
+});
+
+test('browser-blocked ports fail via actual public npm start before workspace recovery',async t=>{
+  for(const value of ['6000','6667','06000'])await t.test(value,async t=>{
+    const f=fixture(t),app=start(t,f,value);const terminal=await bounded(app.done,'Unsafe port start did not fail');
+    assert.equal(terminal.code,1);assert.match(app.output(),/PAIRCOACH_HTTP_PORT.*blokowane przez przeglądarkę/);
+    assert.doesNotMatch(app.output(),/PairCoach: http/);
+    assert.equal(fs.existsSync(path.join(f.project,'.paircoach')),false,'Unsafe port validation must precede workspace recovery');
+    assert.equal(fs.readFileSync(path.join(f.project,'source.js'),'utf8'),'// ORIGINAL\n');
+  });
 });
 
 test('public npm start uses chosen port after primary EOF: real UI, auth/API, browser-origin client/WS and owned stop/portClosed',async t=>{

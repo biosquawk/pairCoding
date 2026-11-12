@@ -334,7 +334,9 @@ komendą publicznego startu ustaw w tym PowerShell `$env:PAIRCOACH_HTTP_PORT = '
 (WSL: poprzedź powyższe `npm start` przez `PAIRCOACH_HTTP_PORT=18080`). Wybierz rzeczywiście wolny port;
 otwórz **dokładny URL wypisany przez serwer**, np. `http://127.0.0.1:18080/`.
 To zmienna tylko procesu/terminala, bez globalnej konfiguracji; brak zmiennej
-zachowuje 8080. Dozwolona jest liczba całkowita 1–65535 poza 80 (normalizacja Host), 3000 (Vite) oraz
+zachowuje 8080. Dozwolona jest liczba całkowita 1–65535 poza portami blokowanymi przez przeglądarkę
+([WHATWG Fetch](https://fetch.spec.whatwg.org/#port-blocking), np. 1, 6000, 6667; także alias `06000`),
+80 (normalizacja Host), 3000 (Vite) oraz
 8765–8768; błędna wartość lub zajęty port kończy start błędem, bez zatrzymywania
 innej instancji. Nie ma flagi `--port`; port UI nie zmienia portów Run/kontenera.
 Po zakończeniu własnej instancji przez Ctrl+C usuń lokalne nadpisanie PowerShell:

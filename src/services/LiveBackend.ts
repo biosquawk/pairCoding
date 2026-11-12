@@ -981,7 +981,13 @@ export class LiveBackend {
       const save = this.saves.get(path), deletedDraft = !!save?.conflict && !this.documents.has(path);
       this.selectedView = projectId && sessionId ? { path, projectId, sessionId } : null;
       this.state.activePath = path;
-      if (save?.conflict) this.state.fileConflict = { path, localDraftContent: save.draft.content, diskContent: this.documents.get(path)?.content ?? '', diskDeleted: deletedDraft };
+      if (save?.conflict) {
+        const doc = this.documents.get(path), entry = this.project?.files.find(file => file.path === path);
+        // A protected draft is not proof that this cached document is current.
+        // Reselecting a tab must not turn a pending/failed read into authority.
+        this.state.fileConflict = (deletedDraft && !entry) || (doc && doc.version === entry?.version)
+          ? { path, localDraftContent: save.draft.content, diskContent: doc?.content ?? '', diskDeleted: deletedDraft } : null;
+      }
       if (this.synced && !deletedDraft) this.observePathOnly(true); this.publish();
     } catch (error) { if (current()) this.fail(error); }
   }
@@ -1403,6 +1409,11 @@ export class LiveBackend {
     const conflict = this.state.fileConflict; if (!conflict) return;
     const save = this.saves.get(conflict.path), doc = this.documents.get(conflict.path); if (!save || (!doc && !conflict.diskDeleted)) return;
     if (save.flight) { this.fail(new Error('Najpierw poczekaj na ACK lub połącz ponownie.')); return; }
+    const entry = this.project?.files.find(file => file.path === conflict.path);
+    if (conflict.diskDeleted ? !!doc || !!entry : !doc || doc.version !== entry?.version || doc.content !== conflict.diskContent) {
+      this.state.fileConflict = null;
+      this.fail(new Error('Brak potwierdzonej bieżącej treści pliku. Draft zachowany; połącz ponownie, aby odczytać stan.')); return;
+    }
     // Keep a separate recovery copy for either explicit resolution; local and disk versions remain inspectable.
     try { this.storage?.setItem(`${this.key()}:conflict:${conflict.path}:${Date.now()}`, JSON.stringify(conflict)); }
     catch { this.state.storageError = 'Nie można zachować kopii konfliktu. Skopiuj obie wersje przed rozstrzygnięciem.'; this.publish(); return; }

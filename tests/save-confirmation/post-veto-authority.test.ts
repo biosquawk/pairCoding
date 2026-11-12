@@ -16,9 +16,21 @@ async function fixture(t: any) {
   let projectRead: (() => unknown | Promise<unknown>) | undefined;
   let fileRead: (() => unknown | Promise<unknown>) | undefined;
   let seq = 0, disk = doc(), saveReply: ((body: any) => Promise<unknown>) | undefined;
-  const socket: any = { readyState: 1, onopen: null, onmessage: null, onclose: null, onerror: null,
-    send(raw: string) { sent.push(JSON.parse(raw)); }, close() { this.readyState = 3; } };
-  const live = new LiveBackend({ token: 'unit-auth-only', clientId: 'c1', socket: () => socket,
+  let reconnectSnapshot: unknown;
+  const socketFactory = () => {
+    const socket: any = { readyState: 1, onopen: null, onmessage: null, onclose: null, onerror: null,
+      send(raw: string) {
+        const message = JSON.parse(raw); sent.push(message);
+        if (message.type === 'HELLO' && reconnectSnapshot) queueMicrotask(() => socket.onmessage?.({ data: JSON.stringify({
+          protocolVersion: '3.0', sessionId: 's1', messageId: `server-${++seq}`, seq,
+          type: 'SESSION_SNAPSHOT', payload: structuredClone(reconnectSnapshot) }) }));
+      },
+      close() { if (this.readyState === 3) return; this.readyState = 3; this.onclose?.(); } };
+    // On reconnect model normal WebSocket open/HELLO/snapshot events, not private client calls.
+    if (reconnectSnapshot) queueMicrotask(() => socket.onopen?.());
+    return socket;
+  };
+  const live = new LiveBackend({ token: 'unit-auth-only', clientId: 'c1', socket: socketFactory,
     fetch: (async (input, options) => {
       const path = new URL(String(input)).pathname, method = options?.method ?? 'GET';
       const body = options?.body ? JSON.parse(String(options.body)) : null;
@@ -73,6 +85,7 @@ async function fixture(t: any) {
   };
   const save = () => live.saveRuntimeSettings({ ...structuredClone(remote.project.settings), aiConsent: false }, remote.project.workspaceVersion);
   return { live, remote, http, sent, rendered, fileEvents, receive, control, step, veto, confirmVeto, save,
+    setReconnectSnapshot(snapshot: unknown) { reconnectSnapshot = snapshot; },
     setProjectRead(read: () => unknown | Promise<unknown>) { projectRead = read; },
     setFileRead(read: () => unknown | Promise<unknown>) { fileRead = read; },
     setSaveReply(reply: (body: any) => Promise<unknown>) { saveReply = reply; } };
@@ -304,5 +317,124 @@ for (const drift of ['epoch', 'snapshot'] as const) {
     assert.equal(f.live.getState().files[0].content, 'protected typing');
     assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
     assert.equal(f.rendered.length, 2);
+  });
+}
+
+// F1 independent frozen counter: identical body/assertions, sharing the same fixture.
+for (const choice of ['KEEP_LOCAL', 'LOAD_DISK'] as const) {
+ test(`same-file selection must not manufacture conflict authority before authenticated read: ${choice}`, async t => {
+  const f = await fixture(t); f.control('COACH', 1); await f.step(1); await f.step(2);
+  const veto = f.veto(); await f.step(3); f.confirmVeto(veto);
+  assert.equal((await f.save()).ok, true);
+  let settle!: (value: unknown) => void;
+  f.setFileRead(() => new Promise(resolve => { settle = resolve; }));
+  f.live.saveFileContent('main.txt', 'protected typing'); await setImmediate();
+  assert.equal(typeof settle, 'function');
+  assert.equal(f.live.getState().fileConflict, null, 'no authenticated document yet');
+  await f.live.selectFile('main.txt');
+  console.log('OBSERVED before resolution', choice, JSON.stringify(f.live.getState().fileConflict));
+  await f.live.resolveConflict(choice); await pause(180);
+  const changes = f.sent.filter(m => m.type === 'CODE_CHANGED');
+  console.log('OBSERVED after resolution', choice, JSON.stringify({ changes: changes.map(m => m.payload), files:f.live.getState().files, pending:f.live.getState().pendingPaths }));
+  settle(doc('main.txt', 'coach-3', 4)); await setImmediate(); await pause(20);
+  assert.equal(changes.length, 0, 'without current-file read no CODE_CHANGED is authorized');
+  assert.equal(f.live.getState().files[0].content, 'protected typing', 'LOAD_DISK must not substitute old cached bytes for current disk4');
+  assert.deepEqual(f.live.getState().pendingPaths, ['main.txt'], 'unread current document cannot clear protected draft');
+ });
+}
+
+for (const read of ['delayed-reselected', 'failed-reselected'] as const) {
+  for (const choice of ['KEEP_LOCAL', 'LOAD_DISK'] as const) {
+    test(`F1 ${read} stays unresolved; public reconnect/fresh read permits ${choice} and current-base ACK/restore`, async t => {
+      const f = await fixture(t); f.control('COACH', 1); await f.step(1); await f.step(2);
+      const veto = f.veto(); await f.step(3); f.confirmVeto(veto); assert.equal((await f.save()).ok, true);
+      let settle!: (value: unknown) => void, reject!: (error: Error) => void;
+      f.setFileRead(() => new Promise((resolve, fail) => { settle = resolve; reject = fail; }));
+      f.live.saveFileContent('main.txt', 'protected typing'); await setImmediate();
+      await f.live.selectFile('main.txt'); await f.live.selectFile('main.txt');
+      f.live.saveFileContent('main.txt', 'newer protected typing');
+      assert.equal(f.live.getState().fileConflict, null);
+      await f.live.resolveConflict(choice);
+      if (read === 'delayed-reselected') settle(doc('main.txt', 'coach-3', 4));
+      else reject(Error('current file read failed'));
+      await setImmediate(); await pause(180);
+      await f.live.selectFile('main.txt'); await f.live.resolveConflict(choice); await pause(180);
+      assert.equal(f.live.getState().fileConflict, null, 'neither reselect nor rejected/discarded read supplies authority');
+      assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
+      assert.equal(f.live.getState().files[0].content, 'newer protected typing');
+      assert.equal(f.sent.some(m => m.type === 'CODE_CHANGED'), false);
+      assert.equal(f.http.filter(r => r.path === '/api/file').length, 1, 'reselect must not replay the read automatically');
+
+      // GUI App -> PairCoachClient.reconnect -> LiveBackend.reconnect -> close/timer/connect
+      // -> authenticated HTTP + HELLO/snapshot -> current-file GET; never private loadFile.
+      f.setFileRead(() => doc('main.txt', 'coach-3', 4));
+      f.remote.session.workspaceVersion = f.remote.project.workspaceVersion;
+      // Normal snapshot carries the current document; supported null-document fallback uses GET.
+      const activeDocument = read === 'delayed-reselected' ? doc('main.txt', 'coach-3', 4) : null;
+      f.setReconnectSnapshot({ ...f.remote, activeDocument });
+      const projectReads = f.http.filter(r => r.path === '/api/project').length;
+      let reconnected!: () => void;
+      const ready = new Promise<void>(resolve => { reconnected = resolve; });
+      let sawOffline = false;
+      const off = f.live.subscribe('state', state => {
+        if (state.isOffline) sawOffline = true; else if (sawOffline) reconnected();
+      });
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      try {
+        f.live.reconnect();
+        assert.equal(f.live.getState().isOffline, true);
+        assert.equal(f.live.getState().files[0].content, 'newer protected typing');
+        await Promise.race([ready, new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(Error('public reconnect did not recover draft')), 2000);
+        })]);
+      } finally { clearTimeout(timeout); off(); }
+      assert.equal(f.http.filter(r => r.path === '/api/project').length, projectReads + 1);
+      assert.equal(f.sent.filter(m => m.type === 'HELLO').length, 1);
+      assert.equal(f.sent.find(m => m.type === 'HELLO').payload.token, 'unit-auth-only');
+      assert.equal(f.live.getState().isOffline, false);
+      assert.equal(f.http.filter(r => r.path === '/api/file').length, activeDocument ? 1 : 2,
+        'current snapshot document or one authenticated GET after explicit reconnect, never auto-reselect retry');
+      assert.equal(f.live.getState().fileConflict?.diskContent, 'coach-3');
+      assert.equal(f.live.getState().files[0].content, 'newer protected typing');
+      await f.live.selectFile('main.txt');
+      assert.equal(f.live.getState().fileConflict?.diskContent, 'coach-3', 'reselection may display a truly current conflict');
+      await f.live.resolveConflict(choice);
+      if (choice === 'LOAD_DISK') {
+        assert.equal(f.live.getState().files[0].content, 'coach-3');
+        assert.deepEqual(f.live.getState().pendingPaths, []);
+        f.live.saveFileContent('main.txt', 'newer protected typing');
+      }
+      await pause(180);
+      const changes = () => f.sent.filter(m => m.type === 'CODE_CHANGED');
+      assert.equal(changes().length, 1); assert.equal(changes()[0].payload.baseVersion, 4);
+      assert.equal(changes()[0].payload.content, 'newer protected typing');
+      f.receive('ACK', { replyTo: 'foreign-ACK', status: 'OK', documentVersion: 5, workspaceVersion: 6, controlEpoch: 2, error: null });
+      assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
+      f.receive('ACK', { replyTo: changes()[0].messageId, status: 'OK', documentVersion: 5, workspaceVersion: 6, controlEpoch: 2, error: null });
+      assert.deepEqual(f.live.getState().pendingPaths, []);
+      f.live.saveFileContent('main.txt', 'draft'); await pause(180);
+      assert.equal(changes().length, 2); assert.equal(changes()[1].payload.baseVersion, 5);
+      f.receive('ACK', { replyTo: changes()[1].messageId, status: 'OK', documentVersion: 6, workspaceVersion: 7, controlEpoch: 2, error: null });
+      assert.deepEqual(f.live.getState().pendingPaths, []); assert.equal(f.live.getState().files[0].content, 'draft');
+      assert.equal(f.rendered.length, 2); assert.equal(f.http.filter(r => r.method === 'PUT').length, 1);
+    });
+  }
+}
+for (const choice of ['KEEP_LOCAL', 'LOAD_DISK'] as const) {
+  test(`F1 missing cached document is not a confirmed disk deletion for ${choice}`, async t => {
+    const f = await fixture(t); f.control('COACH', 1); await f.step(1); await f.step(2);
+    const veto = f.veto(); await f.step(3); f.confirmVeto(veto); assert.equal((await f.save()).ok, true);
+    f.live.saveFileContent('main.txt', 'protected typing'); await pause(180);
+    assert.equal(f.live.getState().fileConflict?.diskContent, 'coach-3');
+    // Existing external metadata publication invalidates the document without supplying new bytes.
+    f.receive('EXTERNAL_FILE_SYNC', { operation: 'UPDATED', path: 'main.txt', version: 5, workspaceVersion: 6, document: null });
+    await f.live.resolveConflict(choice); await pause(180);
+    assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
+    assert.equal(f.live.getState().files[0].content, 'protected typing');
+    assert.equal(f.sent.some(m => m.type === 'CODE_CHANGED'), false);
+    assert.equal(f.http.filter(r => r.method === 'POST' && r.path === '/api/file').length, 0, 'missing cache cannot authorize CREATE');
+    await f.live.selectFile('main.txt'); await f.live.resolveConflict(choice);
+    assert.equal(f.live.getState().fileConflict, null);
+    assert.deepEqual(f.live.getState().pendingPaths, ['main.txt']);
   });
 }
