@@ -183,8 +183,8 @@ export default function App() {
         pauseOnHidden={state.pauseOnHidden}
         taskMode={state.scenario.taskMode}
         capabilities={state.transportMode==='LIVE_BACKEND' ? {...state.capabilities,
-          canRunMain:state.capabilities.canRunMain && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired,
-          canRunTests:state.capabilities.canRunTests && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired} : state.capabilities}
+          canRunMain:state.capabilities.canRunMain && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked,
+          canRunTests:state.capabilities.canRunTests && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked} : state.capabilities}
         runtimeLabel={state.runtime?.execution?.runtime.label}
         languageStatus={state.transportMode==='LIVE_BACKEND' ? state.language?.autocomplete ?? 'OFF' : undefined}
         onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>setIsRuntimeSettingsOpen(true) : undefined}
@@ -227,6 +227,7 @@ export default function App() {
         <summary className="cursor-pointer py-1">Środowisko: {state.runtime?.execution?.runtime.label || 'profil nieustalony'} · Autouzupełnianie {state.language?.autocomplete ?? 'OFF'} · Docs N/A</summary>
         <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ?? null}
           run={state.runtime?.run ?? null} connected={!state.isOffline} canExecute={!state.isOffline}
+          preparation={state.runtime?.maintenance} onPrepare={state.transportMode==='LIVE_BACKEND'?reconcile=>{void client.prepareRuntimeEnvironment(reconcile);}:undefined}
           pending={!!state.runtime?.pending}
           error={state.runtime?.reconciliationRequired ? 'Wynik Run lub zapisu nieznany. Wymagany autoryzowany odczyt dokładnego requestId; ponowne połączenie nie usuwa blokady. Ręczna edycja dostępna.' : state.runtime?.error}
           onRun={mode=>mode==='RUN_TESTS'?client.runTests():client.runMain()} onStop={()=>client.stopExecution()} onSettings={()=>setIsRuntimeSettingsOpen(true)} />
@@ -360,7 +361,7 @@ export default function App() {
 
       <RuntimeSettingsV2 open={isRuntimeSettingsOpen} settings={state.projectSettings.rawSettings}
         expectedWorkspaceVersion={state.workspaceVersion} execution={state.runtime?.execution ?? null}
-        connected={!state.isOffline} canSave={state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired}
+        connected={!state.isOffline} canSave={state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked}
         onSave={(settings,version)=>client.saveRuntimeSettings(settings,version)} onClose={()=>setIsRuntimeSettingsOpen(false)} />
       {/* Project Settings Modal */}
       <ProjectSettingsModal
@@ -368,7 +369,7 @@ export default function App() {
         settings={projectSettings}
         settingsVersion={state.workspaceVersion}
         connected={!state.isOffline}
-        canSave={state.transportMode!=='LIVE_BACKEND' || (state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired)}
+        canSave={state.transportMode!=='LIVE_BACKEND' || (state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked)}
         onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>{setIsSettingsModalOpen(false);setIsRuntimeSettingsOpen(true);} : undefined}
         rootPath={state.transportMode === 'LIVE_BACKEND' ? state.scenario.title : undefined}
         onOpenProject={state.transportMode === 'LIVE_BACKEND' ? (root) => client.openProject(root) : undefined}

@@ -1,3 +1,4 @@
+import { ServicePreparationV2 } from './ServicePreparationV2';
 import type { RunV2, SettingsV2, RunRequestV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import type { MutationIdentity } from '../shared/runtime-mutation-v2';
 import type { LanguageAuthorityV2, AutosaveAckEnvelope } from './runtimeWiringV2';
@@ -20,6 +21,8 @@ export interface LiveOptions {
   socket?: (url: string) => Socket;
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
   clientId?: string;
+  /** Private caller seam: a browser tab must retain its OWN client identity, not adopt another tab from localStorage. */
+  maintenanceIdentityError?: string;
 }
 type Draft = { content: string; baseVersion: number };
 type Flight = { messageId: string; content: string; stamp?: import('../shared/language-v2').DocumentStamp; projectId?: string; sessionId?: string; generation?: number; baseVersion?: number; controlEpoch?: number; timer?: ReturnType<typeof setTimeout> };
@@ -141,6 +144,37 @@ export class LiveBackend {
   }
   private latestRuntimeRun: {run:RunV2;seq:number;projectId:string;sessionId:string}|null=null;
   private connectionGeneration = id();
+  private maintenanceSourceRevision = 0;
+  private sourceRequests = 0;
+  private readonly servicePreparation = new ServicePreparationV2({
+    current: () => {
+      const p=this.project,s=this.session,e=p&&'execution' in p.capabilities?p.capabilities.execution:null,r=this.wiring.runtime.snapshot();
+      if(!p||!s||!e)return null;
+      const active=r.run&&['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.run.status);
+      return {projectId:p.projectId,clientId:this.clientId,sessionId:s.sessionId,workspaceVersion:this.state.workspaceVersion,
+        configurationGeneration:e.runtime.configurationGeneration,controlEpoch:s.controlEpoch,
+        stamp:JSON.stringify([this.connectionGeneration,this.generation,this.lastSeq,this.maintenanceSourceRevision,p.files]),
+        allowed:this.synced&&!this.stopped&&this.ws?.readyState===1&&p.projectId===s.projectId&&p.sessionId===s.sessionId&&
+          s.lifecycle!=='FINISHED'&&s.writeOwner==='STUDENT'&&!this.preparing&&!this.vetoPending&&!this.finishAttempt&&!this.finishStarting&&
+          !this.proposalDecision&&!this.pendingSteps.size&&!this.saves.size&&!this.state.fileConflict&&!this.sourceRequests&&!r.pending&&!r.reconciliationRequired&&!active};
+    },requestId:id,publish:()=>this.publish(),
+    post:body=>this.http('/api/runtime/service-network/prepare','POST',body),
+    isAbsence:error=>error instanceof HttpRejectedError&&error.status===409&&!error.bodyUnreadable&&
+      (error.code==='SERVICE_NETWORK_NOT_DISPATCHED'||error.code==='SERVICE_NETWORK_ABSENCE_CONFIRMED'),
+    refresh:async authority=>{
+      const project=this.project,session=this.session,seq=this.lastSeq,generation=this.generation,source=this.maintenanceSourceRevision,connection=this.connectionGeneration;
+      const value=await this.http<import('../shared/runtime-v2').ProjectV2>('/api/project');
+      if(!this.synced||this.stopped||this.project!==project||this.session!==session||!session||seq!==this.lastSeq||generation!==this.generation||source!==this.maintenanceSourceRevision||
+        connection!==this.connectionGeneration||this.preparing||this.vetoPending||this.saves.size||this.sourceRequests||
+        session.writeOwner!=='STUDENT'||session.controlEpoch!==authority.controlEpoch||!validateV2WireShape('Project',value)||
+        value.projectId!==authority.projectId||value.sessionId!==authority.sessionId||value.workspaceVersion!==authority.workspaceVersion||
+        value.capabilities.execution.runtime.configurationGeneration!==authority.configurationGeneration)return false;
+      // Shared RuntimeClient validates Settings/language/execution consistency BEFORE installation.
+      if(!this.wiring.runtime.applyProject(value,this.wiring.runtime.snapshot().run))return false;
+      this.projectState(value);this.publish();return true;
+    },
+  });
+
   private readonly wiring = new RuntimeWiringV2({
     current: () => this.wiringController(), messageId: id,
     send: message => { this.send(message.type, message.payload, message.messageId); },
@@ -159,7 +193,7 @@ export class LiveBackend {
           configurationGeneration:execution.runtime.configurationGeneration,connected:this.synced && !this.stopped,
           canExecute:this.synced && !this.stopped,
           canSaveSettings:this.synced && !this.stopped && !this.preparing && !this.vetoPending && this.session.writeOwner==='STUDENT' && !this.savesHasConflict() } : null;
-      }, requestId:id, confirmedMutation:metadata=>this.releaseConfirmedRuntimeMutation(metadata), http: {
+      }, requestId:id, maintenanceBlocked:()=>this.servicePreparation.snapshot().blocked, confirmedMutation:metadata=>this.releaseConfirmedRuntimeMutation(metadata), http: {
         run:(body,signal)=>{this.retainRuntimeMutation('RUN',body);return this.http('/api/run','POST',body,true,signal);},
         stop:(runId,body,signal)=>this.http(`/api/run/${encodeURIComponent(runId)}/stop`,'POST',body,true,signal),
         saveSettings:(body,signal)=>{this.retainRuntimeMutation('SAVE',body);return this.http('/api/project/settings','PUT',body,true,signal);},
@@ -218,7 +252,9 @@ export class LiveBackend {
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.socketFactory = options.socket ?? (url => new WebSocket(url));
     this.storage = options.storage;
+    const maintenanceKey=`paircoach:service-prepare:v1:${this.baseUrl}`;
     this.clientId = options.clientId ?? id();
+    this.servicePreparation.initialize(this.storage,maintenanceKey,this.clientId,options.maintenanceIdentityError);
     this.wiring.runtime.subscribe(()=>{
       this.state.runtime=this.wiring.runtime.snapshot();
       if(this.state.runtime.run) this.state.activeRun=mapRun(this.state.runtime.run,this.state.activeRun);
@@ -234,6 +270,7 @@ export class LiveBackend {
   }
   private emit(event: string, value: any) { this.listeners.get(event)?.forEach(fn => fn(value)); }
   private publish() {
+    this.state.runtime={...this.wiring.runtime.snapshot(),maintenance:this.servicePreparation.snapshot()};
     this.state = { ...this.state, pendingPaths: [...this.saves.keys()], isOffline: !this.synced,
       writeOwner: !this.synced ? 'SYNCING' : this.vetoPending ? 'STUDENT' : this.preparing ? 'SYNCING' : this.session?.writeOwner ?? 'SYNCING' };
     this.emit('state', this.state);
@@ -265,6 +302,8 @@ export class LiveBackend {
     } catch { this.state.storageError = 'Nie można odczytać zapisanego draftu. Magazyn przeglądarki wymaga sprawdzenia.'; }
   }
   private async http<T>(path: string, method = 'GET', body?: unknown, authenticate = true, signal?: AbortSignal): Promise<T> {
+    const sourceMutation=method!=='GET'&&['/api/file','/api/project/open','/api/project/settings'].includes(path);
+    if(sourceMutation){this.sourceRequests++;this.maintenanceSourceRevision++;}
     const controller = new AbortController();
     const abort=()=>controller.abort(); signal?.addEventListener('abort',abort,{once:true}); if(signal?.aborted)controller.abort();
     const timer = setTimeout(() => controller.abort(), 5000);
@@ -286,7 +325,7 @@ export class LiveBackend {
       if (error instanceof HttpRejectedError) throw error;
       if (controller.signal.aborted) throw new HttpDeadlineError('Brak odpowiedzi serwera (5 s). Wynik operacji jest nieznany; nie ponawiaj mutacji bez sprawdzenia stanu.');
       throw error;
-    } finally { clearTimeout(timer); signal?.removeEventListener('abort',abort); }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort',abort);if(sourceMutation){this.sourceRequests--;this.maintenanceSourceRevision++;} }
   }
   private commandBody(extra: object = {}, requestId = id()) {
     if (!this.session) throw new Error('Sesja nie jest jeszcze zsynchronizowana. Połącz ponownie.');
@@ -742,6 +781,7 @@ export class LiveBackend {
     }
   }
   saveFileContent(path: string, content: string) {
+    this.maintenanceSourceRevision++;
     const doc = this.documents.get(path), current = this.saves.get(path);
     // A deleted-on-disk file may still have an editable protected draft. Preserve new typing
     // without manufacturing a disk version or clearing the explicit conflict barrier.
@@ -1024,7 +1064,7 @@ export class LiveBackend {
   updateBubblePos(x: number, y: number) { if (this.state.activeHintBubble) this.state.activeHintBubble = { ...this.state.activeHintBubble, posX: x, posY: y }; this.publish(); }
   clearCoachPointer() { this.state.activePointer = null; this.publish(); }
   async run(isTest: boolean) {
-    if(this.wiring.runtime.snapshot().pending) return;
+    if(this.wiring.runtime.snapshot().pending||this.servicePreparation.snapshot().blocked) return;
     const scope=this.getReportHistoryScope();
     try { await this.flushAll(()=>scope===this.getReportHistoryScope());
       if(!scope || scope!==this.getReportHistoryScope()) throw new Error('Sesja zmieniła się przed uruchomieniem.');
@@ -1059,9 +1099,10 @@ export class LiveBackend {
     if(ok&&settledKey)this.runtimeMutations.delete(settledKey);
     this.publish();return ok;
   }
+  async prepareRuntimeEnvironment(reconcile=false):Promise<boolean> { return this.servicePreparation.perform(reconcile); }
   async stopExecution() { await this.wiring.runtime.stop(); }
   async saveRuntimeSettings(settings:SettingsV2,expectedWorkspaceVersion:number):Promise<SettingsSaveResultV2> {
-    if(this.wiring.runtime.snapshot().pending)return {ok:false,message:'Operacja trwa. Zachowano formularz.'};
+    if(this.wiring.runtime.snapshot().pending||this.servicePreparation.snapshot().blocked)return {ok:false,message:'Operacja trwa lub przygotowanie wymaga uzgodnienia. Zachowano formularz.'};
     const scope=this.getReportHistoryScope();
     try {
       await this.flushAll(()=>scope===this.getReportHistoryScope());

@@ -1,3 +1,4 @@
+import type { ServicePreparationState } from './ServicePreparationV2';
 import type { ExecutionView, ProjectV2, RunKind, RunProfileV2, RunRequestV2, RunV2, SettingsV2, TaskEntry, TaskField, TaskFieldKey, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import { TASK_FIELD_KEYS } from '../shared/runtime-v2';
 import { validateExecutionView, validateLanguageView, validateRunRequestV2, validateRunV2, validateSettingsV2, validateUpdateSettingsRequestV2, validateV2WireShape } from '../shared/validation-v2';
@@ -9,6 +10,7 @@ export interface RuntimeAuthorityV2 {
 export interface RuntimeClientV2Dependencies {
   current(): Readonly<RuntimeAuthorityV2> | null;
   requestId(): string;
+  maintenanceBlocked?(): boolean;
   /** Cleanup notification only, after validated acceptance and exact unresolved-entry removal.
    * Detached immutable metadata; never a new authority or HTTP-success shortcut. */
   confirmedMutation?(metadata: Readonly<RuntimeUnconfirmedMutationV2>): void;
@@ -26,6 +28,7 @@ export interface RuntimeUnconfirmedMutationV2 {
   kind: 'RUN' | 'SAVE'; requestId: string; projectId: string; sessionId: string; clientId: string; expectedWorkspaceVersion: number;
 }
 export interface RuntimeClientV2State {
+  maintenance?: ServicePreparationState;
   project: ProjectV2 | null; execution: ExecutionView | null; run: RunV2 | null; pending: 'RUN' | 'STOP' | 'SAVE' | null; error: string | null; reconciliationRequired: boolean;
 }
 export type SettingsSaveResultV2 = { ok: true; project: ProjectV2 } | { ok: false; message: string };
@@ -146,6 +149,10 @@ export class RuntimeClientV2 {
   private async perform<T>(kind: RuntimeClientV2State['pending'], action: (a: RuntimeAuthorityV2, signal: AbortSignal, dispatched: (requestId: string) => void) => Promise<T>,
     accept: (value: T, a: RuntimeAuthorityV2) => void): Promise<boolean> {
     if (this.operation || this.disposed) return false;
+    if (kind !== 'STOP' && this.dependencies.maintenanceBlocked?.()) {
+      this.state.error = 'Przygotowanie trwa lub jego wynik wymaga sprawdzenia. Ręczna edycja i Stop pozostają dostępne.';
+      this.publish(); return false;
+    }
     if (kind !== 'STOP' && this.requiresReconciliation()) {
       this.state.error = 'Wynik poprzedniej operacji jest nieznany. Wymagany autoryzowany odczyt jej rozstrzygnięcia przed nowym Run lub zapisem. Zachowano formularz; edycja ręczna pozostaje dostępna.';
       this.publish(); return false;
