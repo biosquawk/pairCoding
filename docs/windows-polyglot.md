@@ -329,7 +329,16 @@ npm start -- --runtime-config "$executeOut/runtime-config.json" --prepared-runti
 ```
 
 Pozostaw serwer uruchomiony i otwórz wypisany adres loopback (standardowo8080).
-Nie zatrzymuj innej usługi zajmującej port; nie ma publicznej flagi `--port`.
+Nie zatrzymuj innej usługi zajmującej port. Jeśli 8080 jest zajęty, przed tą samą
+komendą publicznego startu ustaw w tym PowerShell `$env:PAIRCOACH_HTTP_PORT = '18080'`
+(WSL: poprzedź powyższe `npm start` przez `PAIRCOACH_HTTP_PORT=18080`). Wybierz rzeczywiście wolny port;
+otwórz **dokładny URL wypisany przez serwer**, np. `http://127.0.0.1:18080/`.
+To zmienna tylko procesu/terminala, bez globalnej konfiguracji; brak zmiennej
+zachowuje 8080. Dozwolona jest liczba całkowita 1–65535 poza 80 (normalizacja Host), 3000 (Vite) oraz
+8765–8768; błędna wartość lub zajęty port kończy start błędem, bez zatrzymywania
+innej instancji. Nie ma flagi `--port`; port UI nie zmienia portów Run/kontenera.
+Po zakończeniu własnej instancji przez Ctrl+C usuń lokalne nadpisanie PowerShell:
+`Remove-Item Env:PAIRCOACH_HTTP_PORT -ErrorAction SilentlyContinue`.
 Nie używaj mock/preview zamiast LIVE. Publiczny start używa danych
 `<projekt>/.paircoach`; nie ustawiaj alternatywnego dataDir. Token obsługuje
 istniejący klient aplikacji — nie kopiuj go do logów lub poleceń.
@@ -451,7 +460,7 @@ Następnie wykonaj bez zmian blok PowerShell §3 (publiczny `runtime:prepare`,
 log i kontrola wyniku), a po potwierdzonym prepare blok PowerShell §4
 (publiczny `npm.cmd start` z wygenerowanym config i `jobs/<profile>`).
 To zwykły start z paczki, nie zewnętrzny helper operatora.
-Użyj wolnego8080; nie zatrzymuj obcej usługi i nie wymyślaj flagi portu.
+Użyj wolnego8080 lub jawnego `PAIRCOACH_HTTP_PORT` z §4; nie zatrzymuj obcej usługi.
 
 W GUI wykonaj §5: Tests **FAILED** na celowym błędzie → popraw tylko kod
 `2 - 3` na `2 + 3` → ACK → świeże Tests **PASSED** z testCount>0 → jawne

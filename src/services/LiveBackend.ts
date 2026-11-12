@@ -568,7 +568,7 @@ export class LiveBackend {
     if (file) this.emit('file', { ...file, isExternalOrSnapshot: !this.saves.has(doc.path) });
     this.persist();
   }
-  private async loadFile(path: string, external = false) {
+  private async loadFile(path: string, external = false, expected?: { version: number; current: () => boolean }) {
     const generation = this.generation;
     let doc: Wire.Document;
     try { doc = await this.http<Wire.Document>(`/api/file?path=${encodeURIComponent(path)}`); }
@@ -578,6 +578,13 @@ export class LiveBackend {
       if (this.project) this.projectState(this.project); this.publish(); throw error;
     }
     if (generation !== this.generation || this.stopped) return;
+    if (expected) {
+      if (!expected.current() || !doc || doc.path !== path || doc.version !== expected.version ||
+        typeof doc.content !== 'string' || typeof doc.readOnly !== 'boolean') throw new Error('Dokument zmienił się podczas odczytu. Zachowano lokalną pracę.');
+      const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(doc.content)))].map(n => n.toString(16).padStart(2, '0')).join('');
+      if (!expected.current() || generation !== this.generation || this.stopped || digest !== doc.contentHash)
+        throw new Error('Nie potwierdzono bieżącej treści dokumentu. Zachowano lokalną pracę.');
+    }
     this.loadErrors.delete(path);
     const existing = this.documents.get(path);
     if (existing && existing.version > doc.version) return;
@@ -886,6 +893,23 @@ export class LiveBackend {
     else this.saves.set(path, { draft: { content, baseVersion: doc!.version }, conflict: false });
     this.state.activePointer = null; this.state.activeHintBubble = null;
     if (this.state.fileConflict?.path === path) this.state.fileConflict = { ...this.state.fileConflict, localDraftContent: content };
+    // A post-Veto metadata read may expose a committed disk version whose step
+    // was never rendered. Keep typing as a protected draft, not a silent rebase
+    // of the old cached bytes. Only the existing explicit conflict choice may
+    // authorize replacement after an authenticated document read.
+    const diskVersion = this.project?.files.find(file => file.path === path)?.version;
+    if (!current && doc && typeof diskVersion === 'number' && diskVersion !== doc.version) {
+      this.saves.get(path)!.conflict = true;
+      this.invalidateEditorView();
+      const scope = this.getEditorViewScope(), epoch = this.session?.controlEpoch;
+      const project = JSON.stringify(this.project), save = this.saves.get(path);
+      // Further typing may update this same protected draft. A different source,
+      // connection, ownership or save object cannot borrow its document read.
+      const accepts = () => !!scope && scope === this.getEditorViewScope() && epoch === this.session?.controlEpoch &&
+        project === JSON.stringify(this.project) && this.documents.get(path) === doc && this.saves.get(path) === save &&
+        this.session?.writeOwner === 'STUDENT' && !this.preparing && !this.vetoPending && !!save?.conflict && !save.flight;
+      void this.loadFile(path, true, { version: diskVersion, current: accepts }).catch(error => this.fail(error));
+    }
     this.projectState(this.project!); this.persist(); this.schedule(path); this.publish();
   }
   private async coachStep(p: ServerPayloads['COACH_STEP_EDIT']) {
@@ -1199,6 +1223,32 @@ export class LiveBackend {
     try {
       await this.flushAll(()=>scope===this.getReportHistoryScope());
       if(!scope || scope!==this.getReportHistoryScope()) throw new Error('Sesja zmieniła się. Zachowano formularz.');
+      if(this.project && this.project.workspaceVersion!==this.state.workspaceVersion) {
+        // Veto may cut off rendering of a step which the server already committed.
+        // ACK/session version alone cannot supply its Project/files or rebind runtime.
+        // Read current metadata once; never render that late step or replay a SAVE.
+        const before=this.project, runtime=this.wiring.runtime.snapshot();
+        const allowed=()=>this.synced&&!this.stopped&&this.ws?.readyState===1&&
+          this.session?.writeOwner==='STUDENT'&&this.session.cooldownAfterVeto&&this.session.projectId===before.projectId&&this.session.sessionId===before.sessionId&&
+          this.session.workspaceVersion===expectedWorkspaceVersion&&!this.preparing&&!this.vetoPending&&
+          !this.saves.size&&!this.pendingSteps.size&&!this.savesHasConflict()&&!this.state.fileConflict;
+        if(!allowed()||runtime.pending||runtime.reconciliationRequired||before.workspaceVersion>=expectedWorkspaceVersion||
+          expectedWorkspaceVersion!==this.state.workspaceVersion)throw new Error('Stan projektu wymaga synchronizacji. Zachowano formularz.');
+        const stamp=this.maintenanceStamp(), generation=this.generation;
+        const current=()=>allowed()&&generation===this.generation&&stamp===this.maintenanceStamp();
+        const value=await this.http<import('../shared/runtime-v2').ProjectV2>('/api/project');
+        if(!current()||!validateV2WireShape('Project',value)||
+          value.projectId!==before.projectId||value.sessionId!==before.sessionId||value.rootPath!==before.rootPath||
+          value.workspaceVersion!==expectedWorkspaceVersion||!sameJSON(value.settings,before.settings)||
+          !('execution' in before.capabilities)||!('language' in before.capabilities)||
+          value.capabilities.execution.runtime.configurationGeneration!==before.capabilities.execution.runtime.configurationGeneration||
+          value.capabilities.execution.runtime.profileId!==before.capabilities.execution.runtime.profileId||
+          value.capabilities.language.providerGeneration!==before.capabilities.language.providerGeneration||
+          !this.wiring.runtime.applyProject(value,runtime.run)||!current())throw new Error('Odczyt projektu nie potwierdził bieżącej sesji i wersji. Zachowano formularz.');
+        this.invalidateEditorView();
+        if(sameJSON(value.files,before.files))this.wiring.sourceChanged();
+        this.projectState(value);
+      }
       this.applyRuntimeProject();
       const result=await this.wiring.runtime.saveSettings(settings,expectedWorkspaceVersion);
       if(result.ok) {this.wiring.sourceChanged();this.projectState(result.project);if(this.session)this.session.workspaceVersion=result.project.workspaceVersion;this.applyRuntimeProject();this.publish();}
