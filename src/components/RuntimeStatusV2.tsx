@@ -33,6 +33,7 @@ export function RuntimeStatusV2({ execution, language, diagnostics, run, connect
       {run?.status === 'PROCESS_STOP_UNCONFIRMED' && <p>Brak potwierdzenia zatrzymania. Ponów Stop dla tego samego wykonania; nowe uruchomienie zablokowane. Edycja pozostaje dostępna.</p>}
     </div>
     {error && <p role="alert">{error}</p>}
+    <p id={`${id}-network-policy`} className="text-sm mt-2">HTTP Main: port publikowany tylko na 127.0.0.1; program może łączyć się z siecią zewnętrzną oraz osiągalnymi usługami hosta/LAN i współuczestnikami sieci. Testy i programy bez HTTP działają bez sieci. Maven offline nie blokuje połączeń programu.</p>
     {onPrepare && <div className="mt-2">
       <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={!connected || !canExecute || pending || Boolean(active) || !(preparation?.uncertain?preparation.canReconcile:preparation?.canPrepare)}
         aria-describedby={`${id}-prepare`} onClick={()=>onPrepare(!!preparation?.uncertain)}>
@@ -42,7 +43,7 @@ export function RuntimeStatusV2({ execution, language, diagnostics, run, connect
     </div>}
     <div className="flex flex-wrap gap-3 mt-2">
       {(['RUN_MAIN','RUN_TESTS'] as const).map(mode => <div key={mode} className="min-w-0 flex-1 basis-40">
-        <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || Boolean(active) || preparation?.blocked || !execution?.modes[mode].canRun} aria-describedby={`${id}-${mode}-reason`} onClick={() => onRun(mode)}>{mode === 'RUN_MAIN' ? 'Uruchom program' : 'Uruchom testy'}</button>
+        <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || Boolean(active) || preparation?.blocked || !execution?.modes[mode].canRun} aria-describedby={mode === 'RUN_MAIN' ? `${id}-network-policy ${id}-${mode}-reason` : `${id}-${mode}-reason`} onClick={() => onRun(mode)}>{mode === 'RUN_MAIN' ? 'Uruchom program' : 'Uruchom testy'}</button>
         <p id={`${id}-${mode}-reason`} className="text-sm break-words">{execution?.modes[mode].problem ? `${execution.modes[mode].problem.message} ${execution.modes[mode].problem.recovery}` : !canExecute ? 'Brak uprawnienia do uruchamiania.' : ''}</p>
       </div>)}
       <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || !active || run?.status === 'STOPPING'} onClick={() => run && onStop(run.runId)}>{run?.status === 'PROCESS_STOP_UNCONFIRMED' ? 'Ponów Stop' : 'Stop'}</button>
