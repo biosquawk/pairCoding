@@ -48,7 +48,7 @@ test('REGRESSION public boundary catches prior pin loss with unchanged old cache
  configAbsent(q);assert.deepEqual(fs.readFileSync(path.join(first.cacheEvidence.root,'tools.json')),bytes);assert.equal(m.builds.length,2);
  assert.equal(json(path.join(q.output,'receipt.json')).status,'FAILED_RETAIN_AND_RECONCILE');
 });
-test('UNIT finite two-job operator -> actual producer Pure21/Spring21 protects first index and both LANGUAGE pins',async t=>{
+test('UNIT finite two-job operator -> actual producer Pure21/Spring21 protects first index and both LANGUAGE pins', { skip: 'SUPERSEDED_BY_OWNER_LIGHTWEIGHT_POLICY: LANGUAGE operator stage/pins removed; Run retention guards remain ACTIVE' },async t=>{
  const {root,plan,model:m,deps,f}=await operatorFixture(t);
  const result=f.operator.executeOperatorPlan(plan,deps);assert.equal(result.status,'PREPARE_ONLY_COMPLETE_OFFLINE_DEFERRED_NOT_PRODUCT_ACCEPTANCE');
  assert.equal(result.jobs.length,2);assert.equal(m.builds.length,4,'two Run + two stub language builds; zero offline/probes');assert.deepEqual(m.removed,[]);assert.equal(m.containers.size,0);
@@ -56,7 +56,7 @@ test('UNIT finite two-job operator -> actual producer Pure21/Spring21 protects f
  assert.equal(result.imageRetention.pins.length,4);for(const entry of result.imageRetention.pins)assert.ok(m.images.has(entry.pin.observedImage.Id));
  assert.equal(json(path.join(root,'session/receipt.json')).imageRetention.status,'ALL_REQUIRED_IDS_AND_REFERENCES_EXACT_CHECKED');
 });
-test('UNIT finite operator final check detects old pin loss after LANGUAGE with unchanged cache',async t=>{
+test('UNIT finite operator final check detects old pin loss after LANGUAGE with unchanged cache', { skip: 'SUPERSEDED_BY_OWNER_LIGHTWEIGHT_POLICY: LANGUAGE operator stage/pins removed; Run retention guards remain ACTIVE' },async t=>{
  const {plan,model:m,deps,f,root}=await operatorFixture(t);let savedBytes,firstId;
  deps.prepareLanguageImages=(...args)=>{
   const first=json(path.join(plan.jobs[0].request.outputRoot,'receipt.json'));firstId=first.imageId;savedBytes=fs.readFileSync(path.join(first.cacheEvidence.root,'tools.json'));
