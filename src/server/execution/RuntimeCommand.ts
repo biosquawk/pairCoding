@@ -56,7 +56,7 @@ export function validateRuntimeCommand(plan:ExecutionPlan):RuntimeTaskSpec {
     const entry=spec.task.entry;
     if('path' in entry)requireThat(literalPath(entry.path),'Literal entry path required');
     // Neutral structural service comparison: no Java/Spring dispatch in the executor.
-    if('containerPort' in entry)requireThat(plan.mode==='RUN_MAIN'&&plan.service&&entry.containerPort===plan.service.containerPort&&entry.healthPath===plan.service.healthPath,'Service task/plan mismatch');
+    if(plan.mode==='RUN_MAIN'&&'containerPort' in entry)requireThat(plan.service&&entry.containerPort===plan.service.containerPort&&entry.healthPath===plan.service.healthPath,'Service task/plan mismatch');
     else requireThat(plan.service===null,'Unexpected service plan');
     return spec;
   } catch(error) {
