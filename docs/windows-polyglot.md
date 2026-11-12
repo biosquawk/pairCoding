@@ -299,10 +299,13 @@ kontrakt snapshot recovery. Wykluczone są m.in. `.env*`, sekrety/klucze, node_m
 obrazy/tar, download binaries, cache/target/__pycache__, raw receipts/logi i artifacts.
 Symlink, submodule w wybranym zakresie i alias nazwy Windows są odrzucane.
 `manifest.commands` obejmuje także literalny `runtime:prepare`; pakieter niczego nie wykonuje.
-Obie polityki źródłowe (pakieter i weryfikator) wymagają dokładnie14skryptów runtime,
-w tym publicznego CLI. Operator-only `runtime-operator-remainder.mjs` nie jest jego
+Obie polityki źródłowe (pakieter i weryfikator) wymagają dokładnie15skryptów runtime,
+w tym publicznego CLI i jego przyjętego helpera `runtime-image-retention.mjs`.
+Helper jest obowiązkowym źródłem transytywnym, nie nową komendą npm ani dowodem
+dostępności obrazów lub zakończenia naprawy. Operator-only `runtime-operator-remainder.mjs` nie jest jego
 importem i pozostaje poza obiema allowlistami; nie ma publicznego polecenia npm
-do tego helpera. Nie rozszerzaj listy do15 ani do wildcarda `scripts/**`.
+do tego helpera. Kontroler historycznej naprawy obrazów jest wyłącznie artefaktem operatora,
+nie publicznym API ani wymaganym wejściem paczki. Nie rozszerzaj listy do16 ani do wildcarda `scripts/**`.
 Zaufanie pochodzi z niezależnie przekazanego SHA256 manifestu od K/operatora,
 nie z leżącego obok SHA256SUMS. Nie osłabia to istniejącego weryfikatora/recovery.
 

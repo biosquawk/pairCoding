@@ -80,12 +80,13 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run dev` | Vite3000, nie samodzielna integracja backendu. |
 | `npm.cmd run dev:full` | concurrently + server/dev; development. |
 | `npm.cmd run preview` | Najpierw build; frontend preview bez API, nie odbiór produktu. |
+| `npm.cmd run runtime:prepare -- …` | `node scripts/runtime-prepare-cli.mjs`; jawny projekt/profil i NOWY prywatny output według [przewodnika](windows-polyglot.md#2-jawne-prepare-bez-domyślnego-wykonania). Domyślnie `PLAN_ONLY`, nie gotowość; osobne `--execute` wymaga przyjętej spójnej rewizji i pinów/Docker. Nie uruchamia go pakieter. |
 | `npm.cmd test` | Źródła obu rodzin są w ZIP; `tsx --test "tests/**/*.test.ts" "tests/**/*.test.mjs"`. Teraz tylko izolowany dowód selekcji; pełne wykonanie na spójnej rewizji po implementacji9, nie podczas smoke. |
 
 Manifest.sourceVerification opisuje dodatkowe skończone komendy operatora (PowerShell/portable Node),
 wymagane docs/config/helper i zaufanie do zewnętrznego manifestu; te wejścia są obowiązkowe
 w list/dry-run/output. Helper nie poszerza selekcji do wszystkich scripts ani raw QA.
-Manifest.commands zawiera wszystkie 10 npm scripts, requiredFiles/dependencies,
+Manifest.commands zawiera wszystkie 11 npm scripts, requiredFiles/dependencies,
 prerequisite i NOT_RUN_BY_PACKAGER. Źródła lokalnych importów/helperów trzeba
 sprawdzić względem finalnego drzewa, a operacyjne ci/build/start/API/GUI —
 z rzeczywiście rozpakowanej paczki. Koffi 3.3.7 pochodzi z istniejącego lockfile;
