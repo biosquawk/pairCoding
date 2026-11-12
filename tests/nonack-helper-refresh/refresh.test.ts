@@ -213,3 +213,19 @@ test('completion already resolved by registry is still fenced at binding continu
   assert.equal(checked,2,'Inbound and post-result authentic peer checks both occurred');
   f.peerHook(null);assert.equal(f.binding.beginSave(f.input),null);
 });
+
+
+test('actual source capture exception is reported FAILED by same registry, never leaves prior ON behind',async t=>{
+  const f=await fixture(t);await f.start();assert.ok(await f.binding.handle('authenticated-peer',wire('LANGUAGE_COMPLETE',complete(f.document,'ready'),'ready')));
+  assert.equal(f.binding.view().state,'ON');f.failCapture(true);
+  await assert.rejects(f.binding.refreshSource(),/source capture failed/);
+  assert.equal(f.binding.view().state,'FAILED');assert.equal(f.binding.beginSave(f.input),null);
+  f.failCapture(false);await f.binding.refreshSource();
+});
+
+test('complete-vector drift at async refresh continuation rejects even without a caller revoke notification',async t=>{
+  const f=await fixture(t);await f.start();
+  const refresh=f.binding.refreshSource(),rejected=assert.rejects(refresh,/refresh superseded/);
+  f.setSnapshot({...f.snapshot,revision:'drift-before-continuation'});await rejected;
+  await f.binding.refreshSource();assert.equal(f.binding.beginSave(f.input),null);
+});

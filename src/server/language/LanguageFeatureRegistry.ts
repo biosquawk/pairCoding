@@ -215,10 +215,15 @@ export class LanguageFeatureRegistry implements LanguageFeaturesPort {
       [this.completion, this.diagnostics].some(l => l.active?.retiring && l.state === 'FAILED'))
       throw new Error('Retained language process ownership unresolved');
     this.invalidateSource(scope);
+    const epoch = this.epoch; let snapshot: RegistrySnapshot;
     try {
-      const snapshot = this.captured();
+      snapshot = this.captured();
       this.problem = null; this.schedule(snapshot); this.status();
     } catch (error) { this.failed(String(error)); throw error; }
+    // Fence the async API's own continuation without waiting for a source FIFO or a provider.
+    // A synchronous caller can supersede the vector immediately after accepted scheduling.
+    await Promise.resolve(); this.assertScope(scope);
+    if (epoch !== this.epoch || !this.current(snapshot)) throw new Error('Language source refresh superseded');
   }
   private valid(l: Lane, s: Slot): boolean { return l.active === s && !s.invalid && s.epoch === this.epoch && (this.current(s.snapshot) || l.phase === 'diagnostics' && this.aliasSnapshot === s.snapshot && !!this.alias && this.options.ackLedger.isVerified(this.alias)); }
   private sourceCurrent(e: Evidence): boolean {

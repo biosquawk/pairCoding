@@ -211,10 +211,12 @@ export function createRuntimeLanguageBinding(options: RuntimeLanguageBindingOpti
     invalidateSource: revokeSource,
     async refreshSource() {
       requireStarted(); revokeSource();
-      const revocation = sourceRevocation, before = snapshot();
+      const revocation = sourceRevocation;
+      // Registry owns capture/failure reporting and the async complete-vector fence. Do not
+      // pre-capture here: a source exception must not leave the old ON status behind.
       await registry.refreshSource(scope);
       guard();
-      if (revocation !== sourceRevocation || !current(before)) throw new Error('Language source refresh superseded');
+      if (revocation !== sourceRevocation) throw new Error('Language source refresh superseded');
     },
     async fileOperation(operation) {
       const captured = copy(operation); requireStarted();

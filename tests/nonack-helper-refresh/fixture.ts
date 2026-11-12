@@ -142,6 +142,7 @@ export async function fixture(t: TestContext, family: 'python' | 'java-maven' = 
     config:{schemaVersion:1,activeProfile:profile.id,workspaceRoot:workspace,runtimeCatalog:'catalog.json',imageLock:'lock.json',languageFeatures:{completion:true,diagnostics:true},execution:{backend:'docker',pullPolicy:'never'}}};
   const scope: LanguageProjectScope = {projectId:'project',sessionId:'session',profile,configurationGeneration:'configuration',connectionGeneration:'connection',providerGeneration:'provider',shadowGeneration:'shadow',shadowDirectory:owned};
   const document: OpenOrChange = {stamp:{projectId:'project',sessionId:'session',profileId:profile.id,path,configurationGeneration:'configuration',connectionGeneration:'connection',providerGeneration:'provider',shadowGeneration:'shadow',modelLifetime:'model',localModelVersion:3,baseDocumentVersion:1,documentVersion:null,contentSha256:codec.contentSha256(content),controlEpoch:4,requestGeneration:2},content,reason:'OPEN'};
+  let captureError=false;
   let snapshot: RegistrySnapshot={revision:'vector-before',documents:[structuredClone(document)]}, held=false, alive=true, peerAlive=true, acquisitions=0;
   let activeLease:SelectedLanguageLease|null=null;const launchLeases=new Map<string,SelectedLanguageLease>();
   const calls:string[][]=[],events:LanguageEvent[]=[],commits=new Map<string,LanguageSaveCommit>(),leases:SelectedLanguageLease[]=[];
@@ -164,7 +165,7 @@ export async function fixture(t: TestContext, family: 'python' | 'java-maven' = 
   });
   const options:RuntimeLanguageBindingOptions={scope,selected:{ownedRoot:owned,driver,journal:new DiskLanguageProcessJournal(journalRoot),admission,transport,preparedOutputRoots:[prepared],languageReceiptPath,
     withSourceLease:async(_scope,_snapshot,action)=>underLease(action)},
-    sourceAuthority:{capture:()=>snapshot,isCurrent:(_scope,s)=>alive&&same(s,snapshot)},
+    sourceAuthority:{capture:()=>{if(captureError)throw Error('UNIT source capture failed');return snapshot;},isCurrent:(_scope,s)=>alive&&same(s,snapshot)},
     saveAuthority:{readCurrent:(peer,path)=>{const d=snapshot.documents.find(d=>d.stamp.path===path);return peer==='authenticated-peer'&&d?{documentMessageId:'document',stamp:d.stamp,content:d.content,projectRevision:snapshot.revision,dependencyManifestSha256:dep}:null;},readCommittedSave:(_request,id)=>commits.get(id)??null},
     assertCurrent(){if(!alive)throw Error('UNIT binding authority revoked');},assertPeer(peer,message){if(peer!=='authenticated-peer'||!peerAlive)throw Error('UNIT authenticated peer refused');peerObserver?.(message);},
     emit(event){events.push(structuredClone(event));observer?.(event);}};
@@ -189,7 +190,7 @@ export async function fixture(t: TestContext, family: 'python' | 'java-maven' = 
     replace(){const b=createRuntimeLanguageBinding(options);bindings.push(b);return b;},
     get snapshot(){return snapshot;},setSnapshot(value:RegistrySnapshot){snapshot=value;},
     get held(){return held;},get acquisitions(){return acquisitions;},
-    setAlive(value:boolean){alive=value;},setPeer(value:boolean){peerAlive=value;},releaseNow(){held=false;},failFinalRelease(){releaseEarly=true;},
+    failCapture(value:boolean){captureError=value;},setAlive(value:boolean){alive=value;},setPeer(value:boolean){peerAlive=value;},releaseNow(){held=false;},failFinalRelease(){releaseEarly=true;},
     peerHook(value:typeof peerObserver){peerObserver=value;},hook(value:typeof hook){hook=value;},observer(value:typeof observer){observer=value;},
     async start(){await binding.start();await binding.handle('authenticated-peer',wire('LANGUAGE_OPEN',document));await until(()=>driver.frames.filter(f=>f.method==='textDocument/didOpen').length===2,'Both real registry lanes opened');},
     async prepare(){await underLease(token=>binding.prepareSaveAcknowledgement(token));},
