@@ -81,7 +81,8 @@ export function readRegular(path: string, limit: number, io: LanguageReadIO = na
   try {
     const opened = io.stat(fd);
     if (!opened.isFile() || stamp(opened) !== stamp(before)) throw new Error('File changed while opening');
-    const buffer = Buffer.alloc(limit + 1); let size = 0, n: number;
+    // before.size is bounded by the checked safe-integer limit. Keep one EOF/growth sentinel.
+    const buffer = Buffer.alloc(Number(before.size) + 1); let size = 0, n: number;
     do { n = io.read(fd, buffer, size, buffer.length - size, null); size += n; } while (n && size < buffer.length);
     const after = io.stat(fd), final = io.lstat(path);
     if (size > limit || BigInt(size) !== before.size || !after.isFile() || !final.isFile() || final.isSymbolicLink() ||
@@ -164,29 +165,90 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
   }
   hasStart(id: string, hash: string): boolean { return this.startContainerId(id, hash) !== null; }
   collect(intent: LanguageProcessIntent, logs: LanguageProcessCollection['logs']): LanguageProcessCollection {
-    const files: CollectedFile[] = [], missing: string[] = []; let total = 0, entries = 0;
-    const add = (source: string, destination: string): void => {
-      const bytes = readRegular(source, Math.min(1024 * 1024, 4 * 1024 * 1024 - total)); total += bytes.length;
-      this.put(intent.launchId, `artifact-${sha256(destination)}`, bytes);
+    const files: CollectedFile[] = [], missing: string[] = [];
+    const accounting: BootCollectionEntry[] = [];
+    const directories: { path: string; stamp: string; names: string[] }[] = [];
+    const sources: { path: string; stamp: string }[] = [];
+    let total = 0, entries = 0, policyUsed = false;
+    const store = (destination: string, bytes: Buffer): void => {
+      if (bytes.length > BOOT_FILE_LIMIT || total + bytes.length > BOOT_TOTAL_LIMIT || files.length >= 258)
+        throw new Error('Boot artifact selected budget limit');
+      total += bytes.length;
+      this.put(intent.launchId, artifactName(destination), bytes);
       files.push({ path: destination, bytes: bytes.length, sha256: sha256(bytes) });
     };
+    const read = (path: string): Buffer => {
+      const before = lstatSync(path, { bigint: true }), bytes = readRegular(path, BOOT_FILE_LIMIT);
+      if (stamp(lstatSync(path, { bigint: true })) !== stamp(before)) throw new Error('Boot artifact changed during collection');
+      sources.push({ path, stamp: stamp(before) }); return bytes;
+    };
     const walk = (dir: string, prefix: string, depth: number): void => {
-      if (depth > 4) throw new Error('Boot artifact depth limit'); assertRealDirectory(dir);
-      for (const name of boundedNames(dir, 256 - entries)) {
+      const jdt = intent.provider === 'jdt' && (prefix === 'boot/jdt-config' || prefix.startsWith('boot/jdt-config/'));
+      if (jdt) {
+        if (!jdtDirectory(prefix.slice(5))) throw new Error('Unknown JDT boot directory');
+        policyUsed = true;
+      } else if (depth > 4) throw new Error('Boot artifact depth limit');
+      assertRealDirectory(dir);
+      const before = lstatSync(dir, { bigint: true }), names = boundedNames(dir, 256 - entries);
+      directories.push({ path: dir, stamp: stamp(before), names });
+      for (const name of names) {
         if (++entries > 256) throw new Error('Boot artifact entry limit');
-        const path = join(dir, name), stat = lstatSync(path), dest = `${prefix}/${name}`;
+        const path = join(dir, name), stat = lstatSync(path, { bigint: true }), dest = `${prefix}/${name}`;
         if (stat.isSymbolicLink() || (!stat.isFile() && !stat.isDirectory())) throw new Error('Unsafe boot artifact');
-        if (stat.isDirectory()) walk(path, dest, depth + 1);
-        else if (/\.(log|txt|ini|info|properties)$/.test(name)) add(path, dest);
+        if (stat.isDirectory()) { accounting.push({ path: dest, type: 'directory' }); walk(path, dest, depth + 1); }
+        else {
+          const bytes = read(path);
+          if (stamp(lstatSync(path, { bigint: true })) !== stamp(stat)) throw new Error('Boot artifact changed after enumeration');
+          const binary = intent.provider === 'jdt' ? jdtBinary(dest.slice(5)) : null;
+          if (binary) {
+            if (!bytes.subarray(0, 4).equals(binary === 'ZIP' ? Buffer.from([0x50, 0x4b, 3, 4]) : Buffer.from([0x7f, 0x45, 0x4c, 0x46])))
+              throw new Error('Malformed JDT binary cache');
+            policyUsed = true;
+          } else {
+            if (!/\.(log|txt|ini|info|properties)$/.test(name)) policyUsed = true;
+            store(dest, bytes);
+          }
+          accounting.push({ path: dest, type: 'file', bytes: bytes.length, sha256: sha256(bytes),
+            selection: binary ? 'excluded' : 'selected', reason: binary ? 'JDT_EXTRACTED_BINARY_CACHE' : 'BOOT_EVIDENCE' });
+        }
       }
     };
     walk(intent.bootDirectory, 'boot', 0);
+    assertRealDirectory(intent.stateDirectory);
     const workspaceLog = join(intent.stateDirectory, '.metadata', '.log');
-    try { add(workspaceLog, 'state/.metadata/.log'); } catch (e) { if (!absent(e)) throw e; missing.push('state/.metadata/.log'); }
-    this.put(intent.launchId, 'stdout.log', Buffer.from(logs.stdout));
-    this.put(intent.launchId, 'stderr.log', Buffer.from(logs.stderr));
-    files.push({ path: 'stdout.log', bytes: Buffer.byteLength(logs.stdout), sha256: sha256(logs.stdout) },
-      { path: 'stderr.log', bytes: Buffer.byteLength(logs.stderr), sha256: sha256(logs.stderr) });
+    if (stateLogAbsent(intent.stateDirectory)) missing.push('state/.metadata/.log');
+    else store('state/.metadata/.log', read(workspaceLog));
+    store('stdout.log', Buffer.from(logs.stdout)); store('stderr.log', Buffer.from(logs.stderr));
+    // Legacy log-only/shallow collections keep their original artifact set. Actual new semantic
+    // selection (including an empty special subtree) always carries transparent durable accounting.
+    if (policyUsed) {
+      const required = Buffer.from(JSON.stringify({ version: BOOT_POLICY_VERSION, intentSha256: intentHash(intent) }));
+      // Internal durable discriminator, not a caller/schema flag. Loss of policy plus a removed
+      // receipt reference must not turn a new collection into an apparently historical legacy one.
+      if (total + required.length > BOOT_TOTAL_LIMIT) throw new Error('Boot artifact selected budget limit');
+      total += required.length;
+      this.put(intent.launchId, BOOT_POLICY_REQUIRED, required);
+      const policy = { requiredRecord: { name: BOOT_POLICY_REQUIRED, bytes: required.length, sha256: sha256(required) }, version: BOOT_POLICY_VERSION, intentSha256: intentHash(intent), launchId: intent.launchId,
+        provider: intent.provider, imageId: intent.imageId,
+        source: { bootDirectory: intent.bootDirectory, stateLog: workspaceLog },
+        completeness: 'COMPLETE_POLICY_SELECTION_NOT_BINARY_CONTENT_ARCHIVE',
+        limits: { entries: 256, regularFileBytes: BOOT_FILE_LIMIT, selectedBytes: BOOT_TOTAL_LIMIT, receiptFiles: 258 },
+        entries: accounting.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0),
+        selected: [...files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0), missing: [...missing] };
+      // No recursive self-hash. store counts actual serialized policy bytes within the SAME budget.
+      store(BOOT_POLICY_PATH, Buffer.from(JSON.stringify(policy)));
+    }
+    // Recheck after ALL immutable output writes/flushes, including excluded files and root names.
+    for (const source of sources) {
+      assertRealDirectory(dirname(source.path));
+      if (stamp(lstatSync(source.path, { bigint: true })) !== source.stamp) throw new Error('Boot source changed after collection');
+    }
+    for (const dir of directories) {
+      assertRealDirectory(dir.path);
+      if (stamp(lstatSync(dir.path, { bigint: true })) !== dir.stamp ||
+        JSON.stringify(boundedNames(dir.path, 256)) !== JSON.stringify(dir.names)) throw new Error('Boot directory changed after collection');
+    }
+    if (missing.length && !stateLogAbsent(intent.stateDirectory)) throw new Error('Missing state log appeared during collection');
     return { files, missing, logs };
   }
   putReceipt(id: string, receipt: LanguageProcessReceipt): void { this.put(id, 'receipt.json', Buffer.from(JSON.stringify(receipt))); }
@@ -198,10 +260,30 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
     for (const file of receipt.collection.files) {
       if (!file || typeof file.path !== 'string' || !Number.isSafeInteger(file.bytes) || file.bytes < 0 || file.bytes > 1024 * 1024 || !/^[a-f0-9]{64}$/.test(file.sha256))
         throw new Error('Invalid receipt artifact');
-      const name = file.path === 'stdout.log' || file.path === 'stderr.log' ? file.path : `artifact-${sha256(file.path)}`;
+      const name = artifactName(file.path);
       const bytes = readRegular(join(this.root, id, name), file.bytes);
       if (bytes.length !== file.bytes || sha256(bytes) !== file.sha256) throw new Error('Receipt artifact readback mismatch');
     }
+    const policyRefs = receipt.collection.files.filter(file => file.path === BOOT_POLICY_PATH);
+    let policyBytes: Buffer | null = null;
+    try { policyBytes = readRegular(join(this.root, id, artifactName(BOOT_POLICY_PATH)), BOOT_FILE_LIMIT); }
+    catch (e) { if (!absent(e)) throw e; }
+    let required: Buffer | null = null;
+    try { required = readRegular(join(this.root, id, BOOT_POLICY_REQUIRED), 1024); } catch (e) { if (!absent(e)) throw e; }
+    if (required && (!policyBytes || policyRefs.length !== 1)) throw new Error('Required durable collection policy missing');
+    if (policyBytes) {
+      if (!required || !required.equals(Buffer.from(JSON.stringify({ version: BOOT_POLICY_VERSION, intentSha256: receipt.intentSha256 }))))
+        throw new Error('Collection policy required record mismatch');
+      if (policyRefs.length !== 1) throw new Error('Collection policy missing from receipt');
+      if (policyBytes.length !== policyRefs[0].bytes || sha256(policyBytes) !== policyRefs[0].sha256) throw new Error('Collection policy changed during readback');
+      const policy = JSON.parse(policyBytes.toString('utf8'));
+      if (policy.requiredRecord?.name !== BOOT_POLICY_REQUIRED || policy.requiredRecord.bytes !== required.length ||
+        policy.requiredRecord.sha256 !== sha256(required) || policy.version !== BOOT_POLICY_VERSION || policy.intentSha256 !== receipt.intentSha256 || policy.launchId !== id ||
+        policy.completeness !== 'COMPLETE_POLICY_SELECTION_NOT_BINARY_CONTENT_ARCHIVE' ||
+        JSON.stringify(policy.selected) !== JSON.stringify(receipt.collection.files.filter(f => f.path !== BOOT_POLICY_PATH)
+          .sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)) ||
+        JSON.stringify(policy.missing) !== JSON.stringify(receipt.collection.missing)) throw new Error('Collection policy receipt mismatch');
+    } else if (policyRefs.length) throw new Error('Missing durable collection policy');
     return receipt;
   }
   markRemoved(id: string, hash: string): void { this.put(id, 'removed.json', Buffer.from(JSON.stringify({ receiptSha256: hash }))); }
@@ -210,7 +292,37 @@ export class DiskLanguageProcessJournal implements LanguageProcessJournal {
     return boundedNames(this.root, 1024).filter(name => /^[a-f0-9-]{36}$/.test(name)).map(name => this.readIntent(name));
   }
 }
-// Never recurse into the JDT binary index/cache. Only boot subtree and one exact workspace log above.
+const BOOT_FILE_LIMIT = 1024 * 1024, BOOT_TOTAL_LIMIT = 4 * 1024 * 1024;
+const BOOT_POLICY_PATH = 'collection-policy.json', BOOT_POLICY_VERSION = 'JDT_BOOT_EVIDENCE_V1';
+const BOOT_POLICY_REQUIRED = 'collection-policy-required.json';
+interface BootCollectionEntry {
+  path: string; type: 'directory' | 'file'; bytes?: number; sha256?: string;
+  selection?: 'selected' | 'excluded'; reason?: 'BOOT_EVIDENCE' | 'JDT_EXTRACTED_BINARY_CACHE';
+}
+const artifactName = (path: string): string => path === 'stdout.log' || path === 'stderr.log' ? path : `artifact-${sha256(path)}`;
+const jdtLauncher = 'jdt-config/org.eclipse.equinox.launcher/org.eclipse.equinox.launcher.gtk.linux.x86_64_1.2.1700.v20260913-1737';
+const jdtNumber = '(?:0|[1-9][0-9]{0,8})';
+const jdtBundle = `jdt-config/org\\.eclipse\\.osgi/${jdtNumber}/${jdtNumber}`;
+function jdtDirectory(path: string): boolean {
+  return path === 'jdt-config' || path === jdtLauncher ||
+    /^jdt-config\/(org\.eclipse\.osgi|org\.eclipse\.core\.runtime|org\.eclipse\.equinox\.app|org\.eclipse\.equinox\.launcher)$/.test(path) ||
+    /^jdt-config\/(org\.eclipse\.osgi|org\.eclipse\.core\.runtime|org\.eclipse\.equinox\.app)\/\.manager$/.test(path) ||
+    new RegExp(`^jdt-config/org\\.eclipse\\.osgi/${jdtNumber}$`).test(path) ||
+    new RegExp(`^${jdtBundle}(?:/\\.cp(?:/jars)?)?$`).test(path);
+}
+function jdtBinary(path: string): 'ZIP' | 'ELF' | null {
+  if (path === `${jdtLauncher}/eclipse_11925.so`) return 'ELF';
+  return new RegExp(`^${jdtBundle}/\\.cp/(?:jars/)?[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\\.jar$`).test(path) ? 'ZIP' : null;
+}
+// Only the exact optional state log (or absent .metadata) may be missing. A read/flush/race
+// ENOENT after this observation is fatal, not reclassified as an optional absence.
+function stateLogAbsent(state: string): boolean {
+  assertRealDirectory(state); const metadata = join(state, '.metadata');
+  try { lstatSync(metadata); } catch (e) { if (absent(e)) return true; throw e; }
+  assertRealDirectory(metadata);
+  try { lstatSync(join(metadata, '.log')); return false; } catch (e) { if (absent(e)) return true; throw e; }
+}
+// Never traverse the JDT workspace binary index/dependencies. Boot cache uses the finite schema above.
 function boundedNames(path: string, maximum: number): string[] {
   const dir = opendirSync(path), names: string[] = [];
   try { let entry; while ((entry = dir.readSync())) { if (names.length >= maximum) throw new Error('Directory entry limit'); names.push(entry.name); } }
