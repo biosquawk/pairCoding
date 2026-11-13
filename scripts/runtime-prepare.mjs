@@ -45,7 +45,7 @@ export function validateProductionRequest(r) {
 
 function ownedParents(root,relative) {
   let current=canonicalDirectory(root);
-  for(const part of relative.split(path.sep).filter(p=>p&&p!=='.')) {
+  for(const part of relative.split(/[\\/]/).filter(p=>p&&p!=='.')) {
     if(part==='..') throw new Error('Unsafe owned directory');
     const child=path.join(current,part);
     try {mkdirSync(child,{mode:0o700});}catch(e){if(e.code!=='EEXIST')throw e;}
