@@ -2,6 +2,7 @@ import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { LiveBackend, applyWireEdit } from '../../src/services/LiveBackend';
 import { createPairCoachServer, type ServiceContext } from '../../src/server/http';
@@ -19,12 +20,12 @@ async function until(condition: () => boolean, label: string) {
  * The deterministic coordinator is NOT Gemini; the renderer callback is NOT Monaco/browser proof.
  */
 async function fixture(t: TestContext) {
-  const dir = fs.mkdtempSync(path.resolve('tests/client/.ac011-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'paircoach-ac011-'));
   const root = path.join(dir, 'project'); fs.mkdirSync(root);
   const seed = 'value = 0\n';
   fs.writeFileSync(path.join(root, 'main.py'), seed);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# AC011\n');
-  fs.mkdirSync(path.join(root, '.paircoach'));
+  fs.mkdirSync(path.join(root, '.paircoach'), {mode:0o700});
   fs.writeFileSync(path.join(root, '.paircoach', 'settings.json'), JSON.stringify({
     schemaVersion: 2, taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md',
     runProfiles: [], aiConsent: true, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'],

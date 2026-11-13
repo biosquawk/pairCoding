@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {loadCharacter,copyCharacter,CHARACTERS_PATH} from '../../src/server/coach/character';
-import {DEFAULT_CONFIG_PATH} from '../../src/server/coach/codexConfig';
 
 test('character selection is application-wide; staged native AGENTS/skills are independent copies, not student files',async t=>{
   const base=fs.mkdtempSync(path.join(os.tmpdir(),'paircoach-character-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
@@ -19,7 +18,8 @@ test('character selection is application-wide; staged native AGENTS/skills are i
   fs.writeFileSync(path.join(cwd,'AGENTS.md'),'private copy changed');
   assert.equal(fs.readFileSync(path.join(CHARACTERS_PATH,'halloween-theme/AGENTS.md'),'utf8'),original);
   await assert.rejects(copyCharacter(selected,cwd),{code:'EEXIST'});
-  assert.equal(loadCharacter(DEFAULT_CONFIG_PATH).name,'default');
+  fs.writeFileSync(config,JSON.stringify({codex:{model:'gpt-6.1-sol',reasoning_effort:'medium'}}));
+  assert.equal(loadCharacter(config).name,'default','omitted character selects default independently of the owner selection');
 });
 
 test('character config refuses traversal, missing profiles, symlinks and oversized AGENTS',t=>{

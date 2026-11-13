@@ -637,3 +637,14 @@ test('answered chat is history; each new Run has its own trigger and is analyzed
   await until(() => contexts.length === 3);
   assert.equal(contexts[2].trigger?.messageId, 'new-request', 'a genuinely new explicit request is allowed');
 });
+
+for (const showPointer of [false, true]) test(`WARNING with a code range always highlights it; model showPointer=${showPointer}`, async t => {
+  const f=fixture(t,{name:'warning-location',decide:async ctx=>({kind:'HINT',severity:'WARNING',text:'Sprawdź działanie.',
+    path:'main.py',documentVersion:ctx.documents.find(d=>d.path==='main.py')!.version,range:insertion.range,showPointer,evidenceIds:[]})});
+  f.adapter.trigger('START');await until(()=>f.events.some(e=>e.type==='COACH_HINT_BUBBLE'));
+  const pointer=f.events.find(e=>e.type==='COACH_POINTER'&&!e.payload.clear)!;
+  const hint=f.events.find(e=>e.type==='COACH_HINT_BUBBLE')!;
+  assert.ok(pointer);assert.equal(pointer.payload.id,hint.payload.id);assert.deepEqual(pointer.payload.range,hint.payload.range);
+  assert.equal(f.session.getSession().writeOwner,'STUDENT');
+  f.studentWrite('changed\n');assert.equal(f.events.filter(e=>e.type==='COACH_POINTER').at(-1)!.payload.clear,true);
+});

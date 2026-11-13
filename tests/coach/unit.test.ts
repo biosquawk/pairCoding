@@ -82,11 +82,14 @@ test('missing key local fallback is honestly named, silent and has no model exec
   assert.equal(parseCoachDecision(await provider.decide()).kind, 'SILENT');
 });
 
-test('runtime prompt is current file1, never old file3 prompt', () => {
-  assert.ok(COACH_SYSTEM_PROMPT.startsWith('„Jesteś trenerem programowania pracującym z jednym użytkownikiem.'));
-  assert.ok(COACH_SYSTEM_PROMPT.includes('MUTE'));
-  assert.ok(COACH_SYSTEM_PROMPT.includes('Nie pokazuj rozumowania wewnętrznego'));
-  assert.ok(!COACH_SYSTEM_PROMPT.includes('na żywo z jednym użytkownikiem w jednym edytorze'));
+test('teacher character lives in AGENTS while the runtime prompt retains only the protocol boundary', () => {
+  const character = readFileSync(new URL('../../characters/default/AGENTS.md', import.meta.url), 'utf8');
+  assert.ok(COACH_SYSTEM_PROMPT.includes('AGENTS.md'));
+  assert.ok(COACH_SYSTEM_PROMPT.includes('weto'));
+  assert.ok(!COACH_SYSTEM_PROMPT.startsWith('„Jesteś trenerem'));
+  assert.match(character, /wecie|weto/i);
+  assert.match(character, /Nie zmieniaj testów/i);
+  assert.ok(!character.includes('na żywo z jednym użytkownikiem w jednym edytorze'));
 });
 
 
