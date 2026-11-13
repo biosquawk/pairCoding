@@ -15,3 +15,7 @@ Commit `9e02881`: kompaktowy pasek, Solarized Light/Dark, stabilne drzewo plikó
 - Realny Codex i natywne AGENTS/skille mają wcześniejsze oddzielne dowody LIVE w `paircoach-live-20261113/ai-tree-live/character-*-proof.json`.
 
 Nie uruchamiano ponownie 27-minutowego pełnego suite. Historyczny FAIL pełnego suite pozostaje FAIL; powyższe wyniki nie są pełnym odbiorem całego Zadania 9 ani natywnego Windowsa. Produkcja odpowiada bazie 9e02881; kolejne zmiany tego kroku dotyczą testów i tego zapisu.
+
+## 3. Powrót do default
+
+Ustawiono globalne `character: default` w `paircoach.config.json`. Pakiet Halloween pozostaje do późniejszego wyboru; model gpt-6.1-sol i reasoning medium pozostają bez zmian. Charakter obowiązuje po restarcie backendu.
