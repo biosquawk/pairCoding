@@ -1,9 +1,6 @@
 # PairCoach
 
-> **ETAP8: IMPLEMENTED / PENDING_FINAL_QA** (kolejka 4→9). To opis bieżącego
-> kandydata, nie odbiór kampanii ani wydanie. Native Windows/PowerShell, świeża
-> paczka wydania, realny model i pełne QA pozostają do wykonania po implementacji9.
-> ETAP9 Docker/polyglot nie jest jeszcze zaimplementowany.
+> Bieżąca linia rozwojowa zawiera kompaktowy GUI, motywy Solarized, otwieranie folderów, natywnego trenera Codex z kartami/skilami oraz wykonanie zadań w Dockerze. [Aktualny zakres i wyniki kontroli](docs/development-20261113.md) rozdzielają sprawdzone funkcje od niezaliczonej pełnej bramki i odbioru całego Zadania 9.
 
 Lokalny trener programowania: edytor Monaco, czat z AI, uruchamianie programu i testów, snapshoty oraz raport końcowy. Interfejs i backend znajdują się w tym repozytorium.
 
@@ -84,3 +81,7 @@ Oficjalna dokumentacja OpenAI: [tryb exec/--ephemeral](https://learn.chatgpt.com
 [logowanie ChatGPT](https://learn.chatgpt.com/docs/auth), [modele](https://learn.chatgpt.com/docs/models).
 Dostępność `gpt-6.1-sol` zależy od konta; konfiguracja i `login status` nie dowodzą odpowiedzi modelu.
 `--ephemeral` nie zapisuje plików sesji CLI, nie zastępuje logowania ani danych raportu aplikacji.
+
+## Równoległa praca w IntelliJ
+
+Możesz otworzyć ten sam folder zadania w PairCoding i IntelliJ. Źródła zapisane z IDE są normalnymi zmianami zewnętrznymi i trafiają do edytora przez istniejące uzgadnianie wersji; konflikt nie daje AI prawa do nadpisania nowszego kodu. `.idea`, `.git`, `target`, `.gitignore` oraz pliki `.iml`, `.ipr`, `.iws` są pomijane przy obserwowaniu zadania, budowie kontekstu AI, snapshotach i wejściu Run. Nie są usuwane ani przywracane do starszej wersji. Podpowiedzi semantyczne możesz wykorzystywać w IntelliJ; PairCoding pozostaje lekkim edytorem z lokalnymi podpowiedziami.

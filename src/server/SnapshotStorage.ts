@@ -83,6 +83,7 @@ export function privateWrite(absolute: string, bytes: Buffer, mode = 0o600): Ide
 
 export function snapshotAllowed(relative: string): boolean {
   return !relative.toLowerCase().split('/').some(part =>
+    /^(\.git|\.idea|\.vscode|\.gitignore|target)$/.test(part) || /\.(iml|ipr|iws)$/.test(part) ||
     /^(\.env.*|\.aws|\.ssh|\.azure|\.kube|\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials?(?:[._-].*)?|secrets?(?:[._-].*)?|id_rsa|id_ed25519|.*\.(pem|key|pfx|p12|keystore))$/.test(part) ||
     /(?:^|[._-])credentials?(?:[._-]|$)/.test(part));
 }

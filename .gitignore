@@ -21,3 +21,8 @@ target/
 !.env.example
 
 docs/qa/teacher-unslop/**/.lock
+
+.idea/
+*.iml
+*.ipr
+*.iws
