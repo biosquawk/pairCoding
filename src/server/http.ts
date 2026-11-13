@@ -1004,7 +1004,18 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }));
       if(closing) fail(503,'SESSION_CLOSED','Server closed while listening.');
       return currentPort();
-    })().catch(async error=>{await close();throw error;});
+    })().catch(async error=>{
+      try { await close(); }
+      catch(cleanupError) {
+        const failure=new AggregateError([error,cleanupError],
+          `Server startup failed: ${error instanceof Error?error.message:String(error)}; cleanup also failed`,{cause:error});
+        // Preserve the original transport classification, alongside both failures.
+        if(error && typeof error==='object') for(const key of ['code','status'] as const)
+          if(key in error) Object.assign(failure,{[key]:error[key]});
+        throw failure;
+      }
+      throw error;
+    });
   };
   const close=():Promise<void> => {
     if(closePromise)return closePromise;

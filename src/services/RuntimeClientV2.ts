@@ -125,10 +125,10 @@ export class RuntimeClientV2 {
   }
   private matchesPendingRunProject(value: ProjectV2 | null, pending: NonNullable<RuntimeClientV2['pendingRun']>): boolean {
     if (!value) return false;
-    // Only TESTS canRun/problem are neutral presentation metadata for pending MAIN.
-    // Pending TESTS retains its original strict equality. Every other field (even
-    // future readiness fields) stays exact; this never settles or correlates a Run.
-    if (pending.request.mode !== 'RUN_MAIN') return equal(value, pending.project);
+    // TESTS readiness is a derived probe result: it can change while either own
+    // MAIN or TESTS is being admitted. Both callers still require the exact own
+    // Run and unchanged authority; this comparison never settles a dispatch.
+    // MAIN readiness and every other field (including future fields) stay exact.
     const tests = pending.project.capabilities.execution.modes.RUN_TESTS;
     const observed: ProjectV2 = { ...value, capabilities: { ...value.capabilities,
       execution: { ...value.capabilities.execution, modes: { ...value.capabilities.execution.modes,
