@@ -839,6 +839,28 @@ export class WorkspaceService extends EventEmitter {
     });
   }
 
+  /** Internal source materialization on the SAME FIFO, with public read guards intact.
+   * The callback MUST be synchronous: runtime probes never retain this admission.
+   * A synchronous root guard prevents listener/reentrant writes, not guarded reads. */
+  _withQueuedRead<T>(read: () => T): Promise<T> {
+    queuedRoots.set(this.rootPath, (queuedRoots.get(this.rootPath) ?? 0) + 1);
+    return this.mutationQueue.run(() => {
+      try {
+        this.assertReadable();
+        if (this.mutationBusy || activeRoots.has(this.rootPath)) throw new AppError(409, 'WORKSPACE_BUSY', 'Another workspace operation is in progress.');
+        this.mutationBusy = true; activeRoots.add(this.rootPath);
+        try {
+          const value = read();
+          if (value != null && typeof (value as { then?: unknown }).then === 'function') throw Error('Queued workspace read must be synchronous');
+          return value;
+        } finally { this.mutationBusy = false; activeRoots.delete(this.rootPath); }
+      } finally {
+        const remaining = queuedRoots.get(this.rootPath)! - 1;
+        if (remaining) queuedRoots.set(this.rootPath, remaining); else queuedRoots.delete(this.rootPath);
+      }
+    });
+  }
+
   /** Internal: caller retains this workspace's mutation lease through immutable copy + both fences.
    * Inventory is the executor-owned bounded raw inventory, injected rather than duplicated here.
    * Document versions come from actual tracked workspace records, never the client or filesystem mtime.

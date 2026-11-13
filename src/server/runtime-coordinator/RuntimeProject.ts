@@ -60,9 +60,21 @@ export async function readRuntimeProject(options: {
   measureReadiness?: boolean;
   readLanguage(): LanguageView;
   assertCurrent(): void;
+  /** Trusted admission for short synchronous source materialization and final
+   * validation. No runtime probe runs under it. Direct callers remain fail-closed. */
+  admitRead?: <T>(read: () => T) => Promise<T>;
 }): Promise<ProjectV2> {
   options.assertCurrent();
-  const { core, configuration } = options, before = readRuntimeProjectSettings(core), version = core.workspace.workspaceVersion;
+  const { core, configuration } = options;
+  const capture = () => {
+    options.assertCurrent();
+    const before = readRuntimeProjectSettings(core), files = core.workspace.listFiles(), version = core.workspace.workspaceVersion;
+    return { before, files, version };
+  };
+  // Guarded source reads are materialized together BEFORE any readiness await,
+  // including the configuration/migration-error aggregator's zero-port await.
+  const { before, files, version } = options.admitRead ? await options.admitRead(capture) : capture();
+  options.assertCurrent();
   let execution: ExecutionView;
   if (options.measureReadiness !== false || configuration.problem !== null || before.source.settings === null) {
     // Configuration/settings errors are synchronous in the existing aggregator (zero ports).
@@ -76,23 +88,29 @@ export async function readRuntimeProject(options: {
       state: 'PREPARE_REQUIRED', problem },
       modes: { RUN_MAIN: { canRun: false, problem }, RUN_TESTS: { canRun: false, problem } } };
   }
-  options.assertCurrent();
-  const after = core.settingsStore.read();
-  if (core.workspace.workspaceVersion !== version || after.sourceSha256 !== before.source.sourceSha256 || after.kind !== before.source.kind) return changed();
-  const language = structuredClone(options.readLanguage());
-  if (!validateLanguageView(language) || language.projectId !== core.workspace.projectId ||
-      language.configurationGeneration !== configuration.configurationGeneration ||
-      configuration.resolved && language.profileId !== configuration.resolved.profile.id) return changed();
-  if (before.source.settings === null) {
-    // A shape-valid form cannot hide migration even when another runtime problem also exists.
-    const problem = before.source.problem!;
-    execution.runtime.state = 'CONFIG_ERROR'; execution.runtime.problem = structuredClone(problem);
-    execution.modes = { RUN_MAIN: { canRun: false, problem: structuredClone(problem) }, RUN_TESTS: { canRun: false, problem: structuredClone(problem) } };
-    language.state = 'OFF'; language.autocomplete = 'OFF'; language.problem = structuredClone(problem);
-  }
-  const project: ProjectV2 = { projectId: core.workspace.projectId, sessionId: options.sessionId,
-    rootPath: core.workspace.rootPath, workspaceVersion: version, files: core.workspace.listFiles(),
-    settings: before.form, capabilities: { execution, language } };
-  if (!validateV2WireShape('Project', project)) throw Error('Actual V2 project does not match the frozen transport contract');
-  return project;
+  const finish = () => {
+    // Retain the genuine readable/binding/version guards at final publication,
+    // without rereading a source document or holding a lease across runtime I/O.
+    options.assertCurrent();
+    core.workspace.listFiles();
+    const after = core.settingsStore.read();
+    if (core.workspace.workspaceVersion !== version || after.sourceSha256 !== before.source.sourceSha256 || after.kind !== before.source.kind || after.exists !== before.source.exists) return changed();
+    const language = structuredClone(options.readLanguage());
+    if (!validateLanguageView(language) || language.projectId !== core.workspace.projectId ||
+        language.configurationGeneration !== configuration.configurationGeneration ||
+        configuration.resolved && language.profileId !== configuration.resolved.profile.id) return changed();
+    if (before.source.settings === null) {
+      // A shape-valid form cannot hide migration even when another runtime problem also exists.
+      const problem = before.source.problem!;
+      execution.runtime.state = 'CONFIG_ERROR'; execution.runtime.problem = structuredClone(problem);
+      execution.modes = { RUN_MAIN: { canRun: false, problem: structuredClone(problem) }, RUN_TESTS: { canRun: false, problem: structuredClone(problem) } };
+      language.state = 'OFF'; language.autocomplete = 'OFF'; language.problem = structuredClone(problem);
+    }
+    const project: ProjectV2 = { projectId: core.workspace.projectId, sessionId: options.sessionId,
+      rootPath: core.workspace.rootPath, workspaceVersion: version, files,
+      settings: before.form, capabilities: { execution, language } };
+    if (!validateV2WireShape('Project', project)) throw Error('Actual V2 project does not match the frozen transport contract');
+    return project;
+  };
+  return options.admitRead ? options.admitRead(finish) : finish();
 }

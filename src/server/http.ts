@@ -161,17 +161,17 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(!transitioning && !coach?.updateRun) {session.noteNewFact('RUN');coach?.trigger('RUN');}
     }
   }
-  async function getProject(measureReadiness=true):Promise<ProjectV2> {
-    return readProject(measureReadiness);
+  async function getProject(measureReadiness=true,admitRead?:<T>(read:()=>T)=>Promise<T>):Promise<ProjectV2> {
+    return readProject(measureReadiness,admitRead);
   }
-  async function readProject(measureReadiness:boolean): Promise<ProjectV2> {
+  async function readProject(measureReadiness:boolean,admitRead?:<T>(read:()=>T)=>Promise<T>): Promise<ProjectV2> {
     const bound = startup, core = currentCore();
     const assertCurrent = () => {
       if (startup !== bound || closing || transitioning) fail(409, 'PROJECT_STATE_CHANGED', 'Project binding changed during the read. Preserve drafts and synchronize.');
     };
     const project = await readRuntimeProject({ core, sessionId:core.session.state.sessionId, configuration:bound.configuration,
       readiness:options.runtimeReadiness ?? runtimeExecution?.readiness ?? { execution:{ readiness:async()=> { throw binding?.runtimeError ?? Error('Execution composition unavailable'); } }, probe:bound.prepared },
-      measureReadiness, assertCurrent, readLanguage:()=>languageProjection(bound) });
+      measureReadiness, admitRead, assertCurrent, readLanguage:()=>languageProjection(bound) });
     if(binding?.runtimeError && core.readSettings().settings !== null) {
       const problem = {code:'RUNTIME_STATE_UNAVAILABLE',message:'Execution state or owned Docker client configuration cannot be safely initialized.',
         recovery:'Place the runtime configuration outside original/prepared sources, retain prior ownership and repair the private canonical runtime state. Manual editing remains available.',retryable:true};
@@ -303,18 +303,37 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(!validateMutationOutcomeV2(response)) throw Error('Actual reconcile result violates the frozen contract');
     return response;
   }
-  async function getBundle(measureReadiness=false):Promise<SessionBundleV2> {
-    return readBundle(measureReadiness);
+  async function getBundle(measureReadiness=false,onMaterialized?:()=>void):Promise<SessionBundleV2> {
+    return readBundle(measureReadiness,onMaterialized);
   }
-  async function readBundle(measureReadiness:boolean):Promise<SessionBundleV2> {
-    const bound=startup, settingsHash=currentCore().readSettings().sourceSha256, project=await getProject(measureReadiness);
+  async function readBundle(measureReadiness:boolean,onMaterialized?:()=>void):Promise<SessionBundleV2> {
+    const bound=startup, core=currentCore();
+    let settingsHash!:string|null, activePath!:string|null;
+    let activeDocument:SessionBundleV2['activeDocument']=null,materialized=false;
+    const project=await getProject(measureReadiness,read=>core.workspace._withQueuedRead(()=>{
+      if(startup!==bound)fail(409,'PROJECT_STATE_CHANGED','Project binding changed before source materialization.');
+      if(!materialized) {
+        settingsHash=core.readSettings().sourceSha256;
+        activePath=core.session.state.activeFilePath || core.workspace.settings.taskFilePath;
+        if(activePath) {
+          try {activeDocument=core.workspace.getDocument(activePath);}
+          catch(error) {
+            // Selected-file errors remain explicit file-GET problems. Never hide
+            // a root/version authority failure or an unrelated WORKSPACE_BUSY.
+            if(!['FILE_NOT_FOUND','FILE_TOO_LARGE','NOT_A_FILE','UNSUPPORTED_ENCODING','UNSAFE_PATH','PATH_CASE_CONFLICT','DISK_CONFLICT'].includes((error as {code?:string}).code??''))throw error;
+          }
+        }
+        const source=read(); // settings + guarded file projection in THIS synchronous admission
+        onMaterialized?.();materialized=true;
+        return source;
+      }
+      return read(); // final readable/source validation, after any intervening capture terminal
+    }));
     if(startup!==bound) fail(409,'PROJECT_STATE_CHANGED','Project binding changed.');
-    const state = session.getSession();
-    const activePath = state.activeFilePath || workspace.settings.taskFilePath;
-    let activeDocument = null;
-    if (activePath) { try { activeDocument=workspace.getDocument(activePath); } catch { /* explicit file GET reports read error */ } }
-    if(workspace.workspaceVersion!==project.workspaceVersion || state.workspaceVersion!==project.workspaceVersion ||
-      currentCore().readSettings().sourceSha256!==settingsHash) fail(409,'PROJECT_STATE_CHANGED','Snapshot changed while preparing the actual binding.');
+    const state=core.session.getSession();
+    if((state.activeFilePath || core.workspace.settings.taskFilePath)!==activePath)fail(409,'PROJECT_STATE_CHANGED','Selected document changed during readiness.');
+    if(core.workspace.workspaceVersion!==project.workspaceVersion || state.workspaceVersion!==project.workspaceVersion ||
+      core.readSettings().sourceSha256!==settingsHash) fail(409,'PROJECT_STATE_CHANGED','Snapshot changed while preparing the actual binding.');
     if(languageProjection(bound).providerGeneration!==project.capabilities.language.providerGeneration)fail(409,'PROJECT_STATE_CHANGED','Local provider configuration changed during snapshot.');
     return {session:state,project,activeDocument,proposals:clone(proposals),lastRun:clone(currentRuntimeRun()),report:clone(report),chat:clone(chat),languageBootstrap:binding?.bootstrap()??null};
   }
@@ -338,14 +357,14 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     peer.refreshing=true;peer.readinessDeferred=false;
     void (async()=>{
       while(current()) {
-        // Retain SAME FIFO admission, then release before expensive runtime I/O.
-        await bound.core!.workspace._withQueuedMutation(async()=>{});
-        if(!current())return;
-        const core=currentCore(), version=core.workspace.workspaceVersion,
-          hash=core.readSettings().sourceSha256, epoch=core.session.state.controlEpoch;
-        const changed=()=>core.workspace.workspaceVersion!==version || core.readSettings().sourceSha256!==hash || core.session.state.controlEpoch!==epoch;
+        const core=currentCore();
+        let version:number|undefined,hash:string|null|undefined,epoch:number|undefined,viewPath:string|null|undefined;
+        const changed=()=>version!==undefined && (core.workspace.workspaceVersion!==version || core.readSettings().sourceSha256!==hash || core.session.state.controlEpoch!==epoch || core.session.state.activeFilePath!==viewPath);
         try {
-          const bundle=await getBundle(true);
+          const bundle=await getBundle(true,()=>{
+            if(!current())fail(409,'PROJECT_STATE_CHANGED','Readiness peer changed before source materialization.');
+            version=core.workspace.workspaceVersion;hash=core.readSettings().sourceSha256;epoch=core.session.state.controlEpoch;viewPath=core.session.state.activeFilePath;
+          });
           if(!current())return;
           if(controlPreparing || core.session.state.writeOwner!=='STUDENT'){peer.readinessDeferred=true;return;}
           // An intervening edit/settings/Veto may invalidate a measured projection, never
