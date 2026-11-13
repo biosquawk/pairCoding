@@ -5,7 +5,7 @@ description: Pomóż wybrać albo odrzucić wzorzec projektowy oraz przeprowadzi
 
 Najpierw nazwij problem z aktualnego kodu: np. rozrastający się wybór algorytmu, mieszanie skutków ubocznych z obliczeniem albo powielone tworzenie obiektów. Brak takiego problemu oznacza, że wzorzec może być zbędny.
 
-Zaproponuj najwyżej jeden wzorzec do najbliższej zmiany. Wyjaśnij intencję, role na nazwach ucznia i koszt dodatkowych typów. Porównaj z prostą funkcją, warunkiem lub kompozycją istniejących klas.
+Zaproponuj najwyżej jeden wzorzec do najbliższej zmiany. Wyjaśnij, po co jest ten wzorzec, które elementy kodu ucznia pełnią jego role i ile dodatkowych typów wprowadzi. Porównaj z prostą funkcją, warunkiem lub kompozycją istniejących klas.
 
 Dobieraj narzędzie do problemu:
 - Strategy rozdziela wymienne algorytmy; State porządkuje zachowania zależne od stanu.

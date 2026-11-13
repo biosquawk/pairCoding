@@ -1,0 +1,25 @@
+{
+  "action": "finish_repair_chapter",
+  "chapter_id": 0,
+  "ratings": [
+    {
+      "id": 25,
+      "score": 1,
+      "reason": "Prosty opis małych kroków; zachowuje dotychczasowe działanie zamiast powtarzać słowo zachowanie."
+    },
+    {
+      "id": 26,
+      "score": 1,
+      "reason": "Rozróżnia zwykły i graniczny przypadek oraz jasno nakazuje ponowić testy."
+    }
+  ],
+  "retained_baseline_ids": [],
+  "addressed_baseline_ids": [
+    25,
+    26
+  ],
+  "caller_semantic_review": "Ponownie przeczytano instrukcje i porównano z bazą. Zmieniono wyłącznie wskazane niezręczności; zachowano kontrakt decyzji, progi HINT, ochronę testów, uprawnienia, reguły IntelliJ i weta. Konwencja Halloween pozostaje celowa. To ocena redakcyjna operatora, nie model językowy serwera.",
+  "revision": 4,
+  "at": "2026-11-13T18:27:58.119132+00:00",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/default-agents/readme_bitmap_261113_192758.png"
+}

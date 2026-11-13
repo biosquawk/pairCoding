@@ -40,13 +40,269 @@
       "\n"
     ]
   },
-  "revision": 1,
-  "phase": "audited",
+  "revision": 4,
+  "phase": "completed",
   "audited": [
     0
   ],
-  "pass_number": 0,
-  "document_sha256": "71786a98c8612b431039976b99b11ba52ec6195433a8031e8b6f18f0c66034ea",
-  "cells_sha256": "1d9bebaa76750bf4bf0226c030a57c850b64f2c6b4f35b9c6309288ab5e75384",
-  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-patterns/readme_bitmap_261113_192700.png"
+  "pass_number": 1,
+  "document_sha256": "a23baf3e193519501d7d02e96465e2c956dca63b8dadc56fb809c89c6f8789b1",
+  "cells_sha256": "02df9733fecd62e7ccbb4065f5c46da3efdc418c6173f0a44e20443c4352187e",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-patterns/readme_bitmap_261113_192758.png",
+  "min_score": 3,
+  "scope_note": "Instrukcje trenera: zachować kontrakt, nazwy, granice i teatralną konwencję Halloween; uprościć wyłącznie ocenione niezręczności.",
+  "baseline": [
+    {
+      "id": 1,
+      "zdanie": "name: design-patterns description: Pomóż wybrać albo odrzucić wzorzec projektowy oraz przeprowadzić małą refaktoryzację.",
+      "ocena": 2,
+      "kolor": [
+        255,
+        227,
+        227
+      ]
+    },
+    {
+      "id": 2,
+      "zdanie": "Użyj przy pytaniach o SOLID, Strategy, Factory, Adapter, Decorator, Observer, State, Command, Builder i refaktoryzację do wzorców.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 3,
+      "zdanie": "Najpierw nazwij problem z aktualnego kodu: np. rozrastający się wybór algorytmu, mieszanie skutków ubocznych z obliczeniem albo powielone tworzenie obiektów.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 4,
+      "zdanie": "Brak takiego problemu oznacza, że wzorzec może być zbędny.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 5,
+      "zdanie": "Zaproponuj najwyżej jeden wzorzec do najbliższej zmiany.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 6,
+      "zdanie": "Wyjaśnij intencję, role na nazwach ucznia i koszt dodatkowych typów.",
+      "ocena": 3,
+      "kolor": [
+        255,
+        198,
+        198
+      ]
+    },
+    {
+      "id": 7,
+      "zdanie": "Porównaj z prostą funkcją, warunkiem lub kompozycją istniejących klas.",
+      "ocena": 2,
+      "kolor": [
+        255,
+        227,
+        227
+      ]
+    },
+    {
+      "id": 8,
+      "zdanie": "Dobieraj narzędzie do problemu:",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 9,
+      "zdanie": "- Strategy rozdziela wymienne algorytmy; State porządkuje zachowania zależne od stanu.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 10,
+      "zdanie": "- Adapter uzgadnia istniejące interfejsy; Decorator dokłada zachowanie przez opakowanie.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 11,
+      "zdanie": "- Factory Method lub prosta fabryka skupia wiedzę o tworzeniu; Builder pomaga przy rzeczywiście złożonym składaniu obiektu.",
+      "ocena": 2,
+      "kolor": [
+        255,
+        227,
+        227
+      ]
+    },
+    {
+      "id": 12,
+      "zdanie": "- Observer rozsyła powiadomienia, ale wymaga omówienia kolejności, błędów i czasu życia subskrypcji.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 13,
+      "zdanie": "- Command przedstawia żądanie jako obiekt; nie wymaga od razu magistrali zdarzeń ani kolejki.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 14,
+      "zdanie": "Zaproponuj test zachowania oraz istotny przypadek graniczny.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 15,
+      "zdanie": "Pokaż jeden krok refaktoryzacji zachowujący wynik.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 16,
+      "zdanie": "Nie deklaruj zielonych testów bez Run.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 17,
+      "zdanie": "Nie przepisuj testów ani całej aplikacji dla samego wzorca.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 18,
+      "zdanie": "Jeśli nazwa wzorca niczego nie wyjaśnia w tym zadaniu, użyj zwykłego opisu.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 19,
+      "zdanie": "Nie wymuszaj Springa, kontenera DI ani hierarchii klas w prostym ćwiczeniu Java.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 20,
+      "zdanie": "To skill instrukcyjny; nie uruchamiaj poleceń hosta.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    }
+  ],
+  "baseline_chapters": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "origins": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20
+  ],
+  "targets": [
+    6
+  ],
+  "addressed": [
+    6
+  ],
+  "pending": [],
+  "pending_chapter": null
 }

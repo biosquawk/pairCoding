@@ -241,22 +241,22 @@
   },
   {
     "id": 25,
-    "zdanie": "- Dochodź do wzorca małymi zmianami zachowującymi zachowanie.",
-    "ocena": 3,
+    "zdanie": "- Wprowadzaj wzorzec małymi krokami, zachowując dotychczasowe działanie kodu.",
+    "ocena": 1,
     "kolor": [
       255,
-      198,
-      198
+      255,
+      255
     ]
   },
   {
     "id": 26,
-    "zdanie": "Najpierw test przykładowego przypadku i granicy, potem jedna refaktoryzacja i ponowna kontrola.",
-    "ocena": 3,
+    "zdanie": "Najpierw sprawdź zwykły przypadek i sytuację graniczną, potem wykonaj jedną refaktoryzację i ponów testy.",
+    "ocena": 1,
     "kolor": [
       255,
-      198,
-      198
+      255,
+      255
     ]
   },
   {

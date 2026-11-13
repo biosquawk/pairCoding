@@ -1,0 +1,19 @@
+{
+  "action": "finish_repair_chapter",
+  "chapter_id": 0,
+  "ratings": [
+    {
+      "id": 6,
+      "score": 2,
+      "reason": "Polecenie nadal jest długie, ale jednoznacznie przypisuje role do kodu ucznia i zachowuje ocenę kosztu typów."
+    }
+  ],
+  "retained_baseline_ids": [],
+  "addressed_baseline_ids": [
+    6
+  ],
+  "caller_semantic_review": "Ponownie przeczytano instrukcje i porównano z bazą. Zmieniono wyłącznie wskazane niezręczności; zachowano kontrakt decyzji, progi HINT, ochronę testów, uprawnienia, reguły IntelliJ i weta. Konwencja Halloween pozostaje celowa. To ocena redakcyjna operatora, nie model językowy serwera.",
+  "revision": 4,
+  "at": "2026-11-13T18:27:58.259366+00:00",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-patterns/readme_bitmap_261113_192758.png"
+}

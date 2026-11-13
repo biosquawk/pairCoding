@@ -32,13 +32,157 @@
       "\n"
     ]
   },
-  "revision": 1,
-  "phase": "audited",
+  "revision": 2,
+  "phase": "completed",
   "audited": [
     0
   ],
-  "pass_number": 0,
+  "pass_number": 1,
   "document_sha256": "0461a454a32d46af67d2bb09e651d81842c4deb2d8fdd9edc25f8d39d70f1b87",
   "cells_sha256": "5bfc65c25a567ff0206eee78b218e0b555f610f503803b6d8a0ec493a1121fd1",
-  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/default-feedback/readme_bitmap_261113_192700.png"
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/default-feedback/readme_bitmap_261113_192700.png",
+  "min_score": 3,
+  "scope_note": "Instrukcje trenera: zachować kontrakt, nazwy, granice i teatralną konwencję Halloween; uprościć wyłącznie ocenione niezręczności.",
+  "baseline": [
+    {
+      "id": 1,
+      "zdanie": "name: lesson-feedback description: Pomóż uczniowi zinterpretować wynik programu lub testu i wybrać następną próbę.",
+      "ocena": 2,
+      "kolor": [
+        255,
+        227,
+        227
+      ]
+    },
+    {
+      "id": 2,
+      "zdanie": "Użyj, gdy uczeń prosi o informację zwrotną albo wywołuje $lesson-feedback.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 3,
+      "zdanie": "Dostosuj ton do AGENTS.md wybranego charakteru.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 4,
+      "zdanie": "Opieraj się na potwierdzonym kodzie i ostatnim wyniku Run w kontekście, nie wymyślaj wykonania.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 5,
+      "zdanie": "W informacji zwrotnej użyj trzech krótkich części:",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 6,
+      "zdanie": "- Obserwacja: jeden konkretny fakt z kodu lub wyniku testu.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 7,
+      "zdanie": "- Pytanie: jedna wskazówka w formie pytania, która pozwala uczniowi znaleźć przyczynę.",
+      "ocena": 2,
+      "kolor": [
+        255,
+        227,
+        227
+      ]
+    },
+    {
+      "id": 8,
+      "zdanie": "- Następny krok: mała próba, którą uczeń może sam wykonać.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 9,
+      "zdanie": "Nie podawaj od razu pełnego rozwiązania, chyba że uczeń o nie poprosi.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 10,
+      "zdanie": "Jeśli nie ma wyniku uruchomienia, odróżnij przypuszczenie od sprawdzonego faktu.",
+      "ocena": 1,
+      "kolor": [
+        255,
+        255,
+        255
+      ]
+    },
+    {
+      "id": 11,
+      "zdanie": "To skill instrukcyjny; nie uruchamiaj narzędzi zadania ani poleceń hosta.",
+      "ocena": 2,
+      "kolor": [
+        255,
+        227,
+        227
+      ]
+    }
+  ],
+  "baseline_chapters": [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "origins": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ],
+  "targets": [],
+  "addressed": [],
+  "pending": [],
+  "pending_chapter": null
 }

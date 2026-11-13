@@ -29,3 +29,7 @@ Wykonano lokalne regresje adaptera i kart po audycie; 35/35 PASS, 21,9 s. Histor
 ## 5. Profesjonalny trener
 
 Rozwinięto default o uczenie na małym przykładzie, wyjaśnienie przyczyny i skutku, odróżnienie analizy od wyniku Run, czytelne odpowiedzialności i refaktoryzację do wzorca dopiero przy rzeczywistym problemie. Dodano instrukcyjny skill design-patterns w obu charakterach. Inspiracje i źródła opisuje [characters/README.md](../characters/README.md); trener nie podszywa się pod wskazane osoby. Wspólne zasady przewidują równoległą pracę w IntelliJ; osłony kodowe to osobny krok 8. Halloween zachowuje własną konwencję. Testy kart, kontraktu i providera sprawdzono celowanie po tej zmianie.
+
+## 6. AI_unslop — instrukcje
+
+Przeczytano instrukcję MCP i oceniono wszystkie jednostki sześciu plików: dwie karty AGENTS, dwa skille lesson-feedback i dwa design-patterns. Próg naprawy 3, maksymalna dopuszczalna ocena 2. Poprawiono po dwie niezręczności w kartach i po jednej w skillach wzorców; pozostałe zdania zachowano. `verify_workspace`: completed=true dla 6/6, brak unresolved_cells, zgodne Markdown/JSON/PNG. Oceny języka pochodzą od operatora; MCP nie ma własnego modelu oceniającego. Historie, oryginały i obrazy: [teacher-unslop](qa/teacher-unslop/). Zapisano osobny commit audytu przed poprawkami.
