@@ -1,41 +1,61 @@
-# PairCoach — stabilizacja ROOT / STOP ról Thalamusa, 13.11.2026
+# PairCoach — etap stabilizacji zakończony / role Thalamusa PAUSED, 13.11.2026
 
 <!-- CURRENT_LIGHTWEIGHT_STATUS_BEGIN -->
 
-**13.11.2026 — GOAL-PC-STABILIZE-01, SINGLE-OPERATOR: W TRAKCIE.**
-Właściciel wznowił wyłącznie lokalną stabilizację wykonywaną przez ROOT.
-Thalamus nadal zatrzymany: odczyt `mode=ro` o 10:41:10 UTC potwierdził
-14 pauz, 0 tur RUNNING i 0 nowych calls po STOP. Bez nowych agentów,
-rzeczywistych wywołań Coacha, restartu Thalamusa, wdrożenia i alarmu.
-Samoweryfikacja ROOT; nie niezależny audyt ani odbiór całego Zadania 9.
+**13.11.2026 — GOAL-PC-STABILIZE-01-FINISH: PASS, etap stabilizacji zakończony.**
+Samoweryfikacja ROOT, bez uruchamiania ról Thalamusa i rzeczywistego modelu Coacha.
+Kryterium końcowe wynika z jawnej decyzji właściciela FINISH: kontrole celowane
+poniżej wraz z wcześniejszymi dowodami; bez ponawiania pełnego `npm test`.
+Nie jest to odbiór całego PairCoach Lightweight ani Zadania 9.
 
-| Zakres stabilizacji | Bieżący, ograniczony dowodem stan |
+| Element | Rewizja / wynik |
 | --- | --- |
-| Linia integracji | Jeden checkout, `stabilize/single-operator-20261113`; baza publiczna `2a9af09af15f4b2fb13236f0a6f4bb23271a2255` |
-| Pierwsze poprawki produktu | Commit `2961d84649a7e883006b06632b953d490fdc4951`: własny MAIN/TESTS zachowuje korelację przy pochodnej zmianie gotowości; startup zachowuje pierwotną przyczynę i dodatkowy cleanup failure. Test przed: 5 FAIL; po: 111 PASS, exit 0 |
-| Wczesny Java21 LIVE | PASS na kodzie `2961d846`: zwykłe `npm start`, GUI Main → świeży JUnit FAILED → jednorazowa edycja Monaco → oryginalny ACK → świeży PASSED → następny PASSED; jedna sesja, bez reload/reset/POST zamiast kliknięcia. 4 własne kontenery REMOVED, odczytano ich nieobecność. WSL/Docker Desktop/Chromium, nie native Windows |
-| Wykryte podczas aktywnych testów | `http.ts`: kontrole PING/Veto/okna/timera nie czekają za transakcją; komendy źródłowe w fazie przejścia są odrzucane przed późniejszym zastosowaniem. HELLO korzysta z istniejącej kolejki odczytu, bez udzielania prawa zapisu przez pending recovery. `LiveBackend.ts`: niezależny błąd aktywnego pliku nie znika pod błędem zadania. `WorkspaceService.ts`: stary, zamknięty owner odmawia odczytu jako WORKSPACE_CLOSED |
-| Dowody tych poprawek | `fixture-core-lifecycle`: 6 PASS; `fixture-g3-current`: 7 PASS; `async-control-current-contract`: 3 PASS; `recovery-readonly-hello`: 22 PASS, w tym nowe zapisy nadal odrzucone RECOVERY_REQUIRED; `fixture-read-errors`: 18 PASS; wszystkie wymienione exit 0 |
-| Checkpointy fixtures | Włączono odpowiednie zmiany `158881b06265a2fa4dc976b6f30e017b2843564a` i `8099dea62659655535be35345b4132f0571371d1`; poprawiono dalsze wspólne przyczyny: canonical storage, await listen, V2 settings, disposal przed usunięciem danych, brak drugiego ownera, poprawne dependency VM/CSS, fake Docker i odczyt bieżącego guardu obrazów |
-| Historyczny baseline / bajty | Rzeczywisty przypięty `e9828e34a06222300a5c38ff751e6321bc9e2823` przez PAIRCOACH_IDENTITY_BASELINE. Przywrócono bajty LF zgodne z istniejącym indeksem Git; bez aktualizacji goldenów/hashy do bieżącego wyniku. Wąskie reguły .gitattributes dla plików kontrolowanych bajtowo |
-| Odchudzenie recovery fixture | Zakres kopiowania 495 plików / 211724994 B → 446 / 48843304 B; mniej o 162881690 B. Pominięto nieużywane archiwa LSP/wheels i payload language-contexts; zachowano rzeczywiste tools, projekty, requests, mały marker oraz kontrolę jego tamper. `recovery-controller-lean`: 41/41 PASS, exit 0; `fixtures-recovery-lean`: 24/24 PASS, exit 0. Niezmieniony planner nadal sprawdził pełne 9 historycznych cache: 13355 plików / 456867366 B |
-| Świadomie zmieniona stymulacja testów | V2 SAVE jest metadata-only: nowe generacje wywołuje prawdziwy HELLO; nową sesję tego samego projektu tworzy rzeczywisty restart, ponieważ same-root open jest idempotentne. Prywatne ustawienia nowego projektu są jawnie przygotowane, nie dziedziczone przez open. Negatywy zachowują złe ścieżki, linki, uprawnienia i recovery |
-| Migracja kontraktów wykonania | W trakcie. `run-event-order`: 2 PASS przez rzeczywisty neutralny Runner/HTTP/WS i kontrolowany port Docker. Test obu granic AI zachowuje nieufny stdout przy kontrolowanym porcie, bez odczytu .env przez Run; jawna allowlista uwzględnia profileId/configurationGeneration V2. To UNIT, nie fizyczny dowód kontenera |
-| Pozostałe czerwone obszary | Dawne hostowe executable RunProfile w G3 i finish/quiescence; część oczekiwań dawnego ledger settings/session lifecycle; końcowe wykonanie pełnej aktywnej selekcji TS/MJS. Nie przywracać hostowego fallbacku, nie wyłączać testów ani zwiększać progów |
-| Końcowe polecenia | Wciąż wymagane na zintegrowanym kandydacie: typecheck, build, pełne npm test oraz powtórzenie GUI odpowiadającego końcowemu kodowi. Ostatni fixture-typecheck-fixed exit 0 poprzedza kolejne drobne zmiany; nie jest końcowym odbiorem |
-| Publikacja / werdykt | Robocza stabilizacja nie jest przyjętym wydaniem. Cały PairCoach Lightweight / Zadanie 9 pozostaje NIEODEBRANY; Spring, pozostała macierz, prawdziwy Coach i native Windows nie zostały tu ponowione |
+| Opublikowany kod stabilizacji | Gałąź `stabilize/single-operator-20261113`, commit kodu **`d7d3d9822d03288ed772752f03109170145565ff`**; ten raport w osobnym commicie dokumentacyjnym powyżej |
+| Kod produktu | **`f0c5c5efdf450070d8c19567ae4b7dfe47fade52`**. Od niego zmieniono wyłącznie dwa pliki testowe: `tests/integration/g3-public.test.ts`, `tests/qa/g2/fixture.ts` |
+| G3 — rzeczywisty Docker i HTTP/WS | **15/15 PASS, exit 0**, około 73 s, `finish-g3`. Stop, Timeout, Finish i deduplikacja Finish potwierdzają usunięcie własnych kontenerów |
+| G2 i selekcja źródeł | **5/5 PASS, exit 0**, około 22 s, `finish-g2-selection`. Celowy `escape.py` nadal odrzucany HTTP 403. Skaner nadal odmawia symlinków w źródłach; 253 aktywne pliki TS/MJS są zaplanowane dokładnie raz |
+| Typecheck / build | **Oba exit 0**, odpowiednio około 8 s / 13 s, `finish-typecheck`, `finish-build`; na `d7d3d982` |
+| Java 21 GUI | **PASS na `f0c5c5e`**: zwykły `npm start`, Main → świeży JUnit FAILED → edycja Monaco → oryginalny ACK → świeży PASSED → kolejny PASSED. Jedna sesja, bez reload/reset/POST zamiast kliknięcia. Końcowy kod produkcyjny identyczny; powiązanie w `finish-production-source-binding.json` |
+| Wcześniejsze kontrole | **123/123 PASS** korelacji/UNKNOWN i **4/4 PASS** fizycznego Runnera; dokładne rewizje startu i zakres w odpowiednich terminal JSON. Wcześniejsze 41/41 i 24/24 recovery zachowane, bez ponawiania kampanii |
+| Thalamus i porządki | Odczyt bazy tylko `mode=ro`: **14 PAUSED, 0 RUNNING, 0 nowych calls po STOP**. Własny backend GUI zamknięty, exit 0. `.paircoach-runtime/` i stare dane pod `tests/qa/.runtime/` usunięto z drzewa repozytorium, zachowując dowody poza nim |
 
-Dowody lokalne (komenda, SHA startu, rzeczywisty exit i log każdego przebiegu):
+Zmiana limitu jest **jawnie autoryzowaną zmianą kryterium**, nie ukryciem FAIL:
+całe fizyczne scenariusze G3 mają **120000 ms** zamiast 12000 ms (decyzja
+FINISH zastępuje wcześniejsze 180000 ms). Wewnętrzny timeout programu **1 s / 5 s**
+oraz progi edytora/weta `METRIC-001..004` pozostały bez zmian.
+Fixture G2 korzysta z kontrolowanego katalogu `os.tmpdir()/paircoach-g2`, poza źródłami.
+Nie usunięto negatywnego testu symlinku ani nie zmieniono selekcji aktywnych testów.
+
+**Pełny historyczny `npm test` pozostaje FAIL, exit 1**, 27 min 11 s.
+Jego główna grupa TSX miała **2403 PASS / 2410, 5 FAIL i 2 anulowane**;
+dodatkowa grupa ujawniła błąd skanera wywołany fixture G2. To nie jest
+pełne PASS najnowszego commitu i nie zostało tak przedstawione.
+Cztery braki konfiguracji LIVE naprawiono i sprawdzono 4/4, błąd zbyt szerokiej
+normalizacji klienta zawężono w `f0c5c5e` (123/123), a timeouty G3 i izolację G2
+zweryfikowano powyżej. Właściciel zaakceptował ten sposób zamknięcia etapu;
+pełnego suite ponownie nie uruchamiano. Nie wykonywano pętli długich przebiegów.
+
+Środowisko: Ubuntu/WSL, Docker Desktop, Chromium headless — **nie native Windows**.
+Dane części fixture QA były na tmpfs RAM; wynik nie jest pomiarem wydajności
+trwałego dysku. Użyto rzeczywistego, publicznie przygotowanego obrazu Node,
+`PAIRCOACH_RUNNER_LIVE_CONFIG` i przypiętego historycznego baseline
+`e9828e34a06222300a5c38ff751e6321bc9e2823`. Bez hostowego fallbacku dla zadań.
+
+Dowody lokalne — dokładne komendy, rewizje startu, exit i logi:
 `\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\paircoach-stabilization-evidence-20261113\`
-W szczególności `gui-sixth/proof.json`, `trace.zip`, `fixture-copy-scope.log`,
-`thalamus-paused-readback.json` i pliki `<nazwa>.terminal.json` z powyższej tabeli.
-Starsze nieudane lub przerwane próby są zachowane; nie zamieniono ich w PASS.
-Usage bieżącego etapu ROOT nie zostało jeszcze ostatecznie rozliczone; UNKNOWN,
-nie zero. Cached input nie należy dodawać drugi raz do input.
+Pliki `finish-{g3,g2-selection,typecheck,build}.terminal.json` i odpowiadające `.log`,
+`gui-probe-candidate-f0c5/proof.json` oraz `trace.zip`, `finish-thalamus-paused.json`,
+`finish-production-source-binding.json`, `finish-check-results.json`.
+Stare nieudane próby i usunięte z repo dane tymczasowe zachowano w tym katalogu.
 
-[STATUS2.md](STATUS2.md) pozostaje niezmienionym raportem awarii nocy.
-Jego historyczne 244 FAIL i koszty nie są wynikami obecnej stabilizacji.
-Poniżej zachowano historię kampanii; starsze ACTIVE/ETA nie wznawiają agentów.
+Pozostały zakres produktu: pełny odbiór wszystkich profili, Spring, rzeczywisty
+AI Coach i native Windows **nie został wykonany w tym etapie**. Brak wdrożenia
+na instalację użytkownika i brak alarmu sukcesu całej kampanii.
+Wiarygodny rachunek fizycznego usage ROOT: **UNKNOWN**, nie zero;
+licznik celu nie zastępuje rozliczenia dostawcy, cached input nie jest dodawany drugi raz.
+
+[STATUS2.md](STATUS2.md) pozostaje niezmienionym raportem incydentu.
+Poniżej zachowano historię; dawne ACTIVE/ETA nie wznawiają pracy agentów.
 
 <!-- CURRENT_LIGHTWEIGHT_STATUS_END -->
 
