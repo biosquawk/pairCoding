@@ -1,0 +1,89 @@
+{
+  "build": 34,
+  "mode": "sonar",
+  "audit_status": "BLOCKED",
+  "gate_verdict": "REJECTED",
+  "scope": {
+    "description": "Unfiltered MCP inventory, including product source, examples, templates, historical investigations and local artifacts",
+    "file_count": 190,
+    "function_count": 4863
+  },
+  "files": 190,
+  "functions": 4863,
+  "coverage": "MISSING",
+  "errors": [
+    "COVERAGE_FAILED: exit=1; rtionFailureBuilder.build(AssertionFailureBuilder.java:151)",
+    "COVERAGE_FAILED: exit=1; [ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.157 s <<< FAILURE! -- in demo.CounterApplicationTest",
+    "COVERAGE_FAILED: exit=1; [ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.085 s <<< FAILURE! -- in demo.StrategyDemoTest",
+    "COVERAGE_FAILED: exit=1; [ERROR] Tests run: 1, Failures: 1, Errors: 0, Skipped: 0, Time elapsed: 0.095 s <<< FAILURE! -- in demo.CounterApplicationTest",
+    "COVERAGE_FAILED: exit=5; ",
+    "COVERAGE_FAILED: exit=1; Node coverage requires scripts.coverage producing coverage/lcov.info or configured coverage_command/coverage_reports",
+    "COVERAGE_FAILED: exit=1; Node coverage requires scripts.coverage producing coverage/lcov.info or configured coverage_command/coverage_reports",
+    "COVERAGE_FAILED: exit=1; Node coverage requires scripts.coverage producing coverage/lcov.info or configured coverage_command/coverage_reports",
+    "COVERAGE_FAILED: exit=1; Node coverage requires scripts.coverage producing coverage/lcov.info or configured coverage_command/coverage_reports",
+    "COVERAGE_FAILED: exit=1; Node coverage requires scripts.coverage producing coverage/lcov.info or configured coverage_command/coverage_reports"
+  ],
+  "blocking_reasons": [
+    "COVERAGE_NOT_CURRENT: No current evidence binds coverage to the workspace.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement.",
+    "COVERAGE_UNKNOWN: Measured function coverage is missing; assumed zero is not a measurement."
+  ],
+  "inspections": [
+    {
+      "target": "src/server/coach/character.ts",
+      "status": "OK",
+      "unit_card_keys": [
+        "file",
+        "namespace",
+        "class_id",
+        "level",
+        "combined_grade",
+        "crap_grade",
+        "mutation_grade",
+        "band",
+        "hash_verified",
+        "evidence",
+        "crap_summary",
+        "mutation_summary",
+        "dependencies",
+        "functions",
+        "anomalies",
+        "max_severity",
+        "recommended_depth"
+      ]
+    },
+    {
+      "target": "src/server/CoachAdapter.ts",
+      "status": "OK",
+      "unit_card_keys": [
+        "file",
+        "namespace",
+        "class_id",
+        "level",
+        "combined_grade",
+        "crap_grade",
+        "mutation_grade",
+        "band",
+        "hash_verified",
+        "evidence",
+        "crap_summary",
+        "mutation_summary",
+        "dependencies",
+        "functions",
+        "anomalies",
+        "max_severity",
+        "recommended_depth"
+      ]
+    }
+  ],
+  "run_id": "run_261113_181920_60a57aa56f80",
+  "report_json": "/home/darulec/dev/codex_prjects/261023_0144_mutators_and_crap/.worktrees/self-repair-build32/.quality-runs/run_261113_181920_60a57aa56f80/report.json",
+  "note": "Audit included intentional red training templates and historical JDT source; missing coverage is not proof of a functional defect. No full npm test rerun or assertion weakening."
+}

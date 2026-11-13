@@ -19,3 +19,9 @@ Nie uruchamiano ponownie 27-minutowego pełnego suite. Historyczny FAIL pełnego
 ## 3. Powrót do default
 
 Ustawiono globalne `character: default` w `paircoach.config.json`. Pakiet Halloween pozostaje do późniejszego wyboru; model gpt-6.1-sol i reasoning medium pozostają bez zmian. Charakter obowiązuje po restarcie backendu.
+
+## 4. Quality Guard MCP
+
+Wersja 1.3.0rc2, build 34; `audit_project(refresh_coverage=true, mode=sonar)`, inspekcje `character.ts` i `CoachAdapter.ts`, następnie `claim_quality_gate(mode=sonar)`. Audyt: BLOCKED; bramka: REJECTED, bez nowego baseline. Analiza obejmowała 190 plików i 4863 funkcje, w tym historyczny JDT, skrypty i celowo czerwone ćwiczenia. Coverage Node nie ma skonfigurowanego pomiaru LCOV; próba Python nie wykonała testów, a szablony Java/Spring zgodnie ze swoim celem nie rozwiązują zadań. To nie jest wiarygodny wynik jakości całego wydania ani lista potwierdzonych błędów funkcjonalnych. Nie zmieniono asercji ani błędnych rozwiązań ćwiczeń dla uzyskania PASS. Szczegóły i lokalizacja pełnego raportu: [quality-guard-20261113.json](quality-guard-20261113.json).
+
+Wykonano lokalne regresje adaptera i kart po audycie; 35/35 PASS, 21,9 s. Historyczny wynik pełnej bramki pozostaje REJECTED. Danych `.metrics` i kompilacji `target` nie publikuje się jako kodu produktu.
