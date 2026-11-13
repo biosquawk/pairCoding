@@ -183,6 +183,12 @@ W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-s
    Ustawienia**. To zgoda na wysłanie do dostawcy dozwolonego kontekstu zadania
    i wiadomości. Nie używaj sekretów ani prywatnego kodu w próbie. Domyślnie
    zgoda jest wyłączona; bez niej trener nie wysyła kontekstu.
+   Sama zgoda przy `contextPatterns: []` nie udostępnia kodu. Przed czatem
+   o kodzie otwórz **Konfiguracja Run/Test i kontekstu AI → Wzorce plików
+   kontekstu AI (JSON)** i wpisz `["src/main/java/demo/StrategyDemo.java"]`.
+   To świadomy opt-in tylko tego pliku. Kliknij **Zapisz Ustawienia** i poczekaj
+   na potwierdzony zapis (zamknięcie formularza bez błędu); przy błędzie nie
+   przechodź do czatu. Domyślna pusta lista pozostaje bez zmian.
 3. Naciśnij przycisk z tytułem **Start sesji** (trójkąt przy zegarze).
    W przykładzie Java zmień `(a, b) -> a - b` na `(a, b) -> a + b`; poczekaj
    na zapis/ACK. Sprawdź też ten plik w prywatnym folderze zadania — sam widok
