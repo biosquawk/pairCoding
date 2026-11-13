@@ -26,6 +26,17 @@ function fixture(t: any) {
 }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve));
 
+// Windows file symlinks require privileges; a real directory junction at the same
+// file slot exercises rejection before warm-cache use without Developer Mode.
+// POSIX retains the exact file-symlink attack as well. No mocked filesystem.
+function linkOutsideFile(target: string, link: string) {
+  const destination = process.platform === 'win32' ? path.dirname(target) : target;
+  fs.symlinkSync(destination, link, process.platform === 'win32' ? 'junction' : 'file');
+  assert.equal(fs.lstatSync(link).isSymbolicLink(), true);
+  assert.equal(fs.realpathSync(link), fs.realpathSync(destination));
+}
+const directoryLinkType = process.platform === 'win32' ? 'junction' : 'dir';
+
 test('history shares a dataDir safely: scoped reads/list/finish and warm cache enforce both frozen project IDs', async t => {
   const f=fixture(t), a=f.service('project-a'), b=f.service('project-b');
   const first=a.finish('COMPLETED',facts('a')), foreign=b.finish('COMPLETED',facts('b','project-b'));
@@ -60,24 +71,26 @@ test('history validates containment before cache, excludes unsafe/corrupt/orphan
   const outside=path.join(f.root,'outside');fs.mkdirSync(outside);
   const reportPath=path.join(f.dir('a'),'report.json'), saved=fs.readFileSync(reportPath);
   fs.writeFileSync(path.join(outside,'report.json'),saved);
-  fs.unlinkSync(reportPath);fs.symlinkSync(path.join(outside,'report.json'),reportPath);
+  fs.unlinkSync(reportPath);linkOutsideFile(path.join(outside,'report.json'),reportPath);
   assert.throws(()=>s.get('a'),{code:'UNSAFE_REPORT_STORAGE'});assert.deepEqual(s.list(),[]);
   fs.unlinkSync(reportPath);fs.writeFileSync(reportPath,saved);
   const factsPath=path.join(f.dir('a'),'facts.json'), savedFacts=fs.readFileSync(factsPath);
   fs.writeFileSync(path.join(outside,'facts.json'),savedFacts);
-  fs.unlinkSync(factsPath);fs.symlinkSync(path.join(outside,'facts.json'),factsPath);
+  fs.unlinkSync(factsPath);linkOutsideFile(path.join(outside,'facts.json'),factsPath);
   assert.throws(()=>s.get('a'),{code:'UNSAFE_REPORT_STORAGE'});assert.deepEqual(s.list(),[]);
   fs.unlinkSync(factsPath);fs.writeFileSync(factsPath,savedFacts);
-  fs.renameSync(f.dir('a'),f.dir('a')+'.saved');fs.symlinkSync(outside,f.dir('a'),'dir');
+  fs.renameSync(f.dir('a'),f.dir('a')+'.saved');fs.symlinkSync(outside,f.dir('a'),directoryLinkType);
   assert.throws(()=>s.get('a'),{code:'UNSAFE_REPORT_STORAGE'});assert.deepEqual(s.list(),[]);
   fs.unlinkSync(f.dir('a'));fs.renameSync(f.dir('a')+'.saved',f.dir('a'));
   const orphan=f.dir('orphan');fs.mkdirSync(orphan);fs.writeFileSync(path.join(orphan,'facts.json'),savedFacts);
   assert.equal(s.list().length,1);assert.equal(fs.existsSync(path.join(orphan,'report.json')),false);
   fs.writeFileSync(reportPath,'{}');assert.deepEqual(s.list(),[]);
   fs.writeFileSync(reportPath,saved);assert.deepEqual(s.get('a'),original);
-  const reports=path.join(f.root,'reports');fs.renameSync(reports,reports+'.saved');fs.symlinkSync(outside,reports,'dir');
+  const reports=path.join(f.root,'reports');fs.renameSync(reports,reports+'.saved');fs.symlinkSync(outside,reports,directoryLinkType);
   assert.throws(()=>s.get('a'),{code:'UNSAFE_REPORT_STORAGE'});assert.throws(()=>s.list(),{code:'UNSAFE_REPORT_STORAGE'});
   fs.unlinkSync(reports);fs.renameSync(reports+'.saved',reports);
+  assert.deepEqual(fs.readFileSync(path.join(outside,'report.json')),saved,'outside report never modified');
+  assert.deepEqual(fs.readFileSync(path.join(outside,'facts.json')),savedFacts,'outside facts never modified');
 });
 
 test('historical restart PENDING becomes REPORT_INTERRUPTED preserving facts/identity; explicit retry uses same facts', async t => {

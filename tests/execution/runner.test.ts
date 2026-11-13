@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { Runner, parseJUnit } from '../../src/server/Runner';
+import { dependencyHash } from '../../src/server/runtime-adapters';
+import { sha256 } from '../../src/server/execution/files';
 import { validatePlan } from '../../src/server/execution/PlanPolicy';
 import { fixture, profile, testsProfile, outputPayload } from '../runner-fixture-migration/fixture';
 import { literalTransport } from '../runner-fixture-migration/transport';
@@ -84,7 +86,10 @@ test('UNIT TEST-019 fresh runId JUnit is PASSED; old unchanged report cannot pro
 
 for (const [xml, outcome, status] of [
     ['<testsuite tests="0"/>', 'NO_TESTS', 'FAILED'],
-    ['<testsuite tests="1"><testcase name="x"><failure/></testcase></testsuite>', 'UNKNOWN', 'FAILED'],
+    // Trusted Node plans count actual failures when optional counters are absent.
+    ['<testsuite tests="1"><testcase name="x"><failure/></testcase></testsuite>', 'FAILED', 'FAILED'],
+    // Declared contradictory counters remain UNKNOWN, never a false pass.
+    ['<testsuite tests="1" failures="0"><testcase name="x"><failure/></testcase></testsuite>', 'UNKNOWN', 'FAILED'],
     ['<testsuite tests="1" failures="1"><testcase name="x"><failure/></testcase></testsuite>', 'FAILED', 'FAILED'],
     ['<testsuite tests="1"/>', 'UNKNOWN', 'FAILED'],
     ['<!DOCTYPE testsuite [<!ENTITY x "test">]><testsuite tests="0"/>', 'UNKNOWN', 'FAILED'],
@@ -94,6 +99,7 @@ for (const [xml, outcome, status] of [
     const result=await f.finish(run,xml);
     assert.equal(result.testOutcome,outcome,xml);assert.equal(result.status,status,xml);
     assert.equal(result.exitCode,0);
+    if (outcome === 'FAILED') assert.equal(result.testCount,1,'one actual failing testcase');
   });
 }
 
@@ -198,3 +204,21 @@ for(const [name,xml,exitCode,outcome,count] of [
     assert.equal(result.testCount,count);assert.equal(result.status,'FAILED');assert.equal(result.exitCode,exitCode);
   });
 }
+
+// Public prepare binds package.json bytes, not the main-only hash([]) UNIT cache.
+test('UNIT prepared package bytes enter immutable inventory without rebinding cache identity', async t => {
+  const packageJson=Buffer.from('{"private":true,"name":"runner-live-fixture","version":"1.0.0"}\r\n');
+  const source='console.log("prepared package fixture");\n';
+  const pinned=dependencyHash([{path:'package.json',sha256:sha256(packageJson)}]);
+  const f=await fixture(t,{source,packageJson,dependencyHash:pinned});
+  const run=await f.start(),input=f.context(run.runId).input;
+  assert.deepEqual(input.files.map(file=>file.path).sort(),['main.cjs','package.json']);
+  assert.deepEqual(await fs.readFile(path.join(input.immutableDirectory,'package.json')),packageJson);
+  assert.equal(dependencyHash(input.files),pinned);
+  assert.equal(f.context(run.runId).caches[0].dependencyHash,pinned);
+  assert.equal((await f.finish(run)).status,'SUCCEEDED');
+  // A changed package may not borrow the same prepared dependency identity.
+  const changed=await fixture(t,{source,packageJson:Buffer.from('{"private":true}\n'),dependencyHash:pinned});
+  await assert.rejects(changed.start(),{code:'PREPARE_REQUIRED'});
+  assert.equal(changed.unit.calls.filter(args=>args[0]==='create').length,0);
+});

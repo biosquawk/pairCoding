@@ -30,7 +30,7 @@ function fixture(t: TestContext) {
 }
 const eio = () => Object.assign(new Error('injected exact report-commit EIO'), { code: 'EIO' });
 
-for (const fault of ['rename-EIO', 'directory-EISDIR'] as const) {
+for (const fault of ['rename-EIO', 'directory-obstruction'] as const) {
   test(`own facts rollback after ${fault} permits fresh current facts without publication`, async t => {
     const f = fixture(t);
     const originalRename = fs.renameSync;
@@ -40,7 +40,7 @@ for (const fault of ['rename-EIO', 'directory-EISDIR'] as const) {
       if (String(to) === f.reportPath) {
         const stored = JSON.parse(fs.readFileSync(f.factsPath, 'utf8'));
         durableFactsSeen = JSON.parse(stored.serialized).snapshot.snapshotId === 'snapshot1';
-        if (fault === 'directory-EISDIR') { fs.mkdirSync(f.reportPath); return originalRename(from, to); }
+        if (fault === 'directory-obstruction') { fs.mkdirSync(f.reportPath); return originalRename(from, to); }
         throw injected;
       }
       return originalRename(from, to);
@@ -48,12 +48,14 @@ for (const fault of ['rename-EIO', 'directory-EISDIR'] as const) {
     syncBuiltinESMExports();
     try {
       assert.throws(() => f.service.finish('COMPLETED', f.facts), error => fault === 'rename-EIO'
-        ? error === injected : (error as NodeJS.ErrnoException).code === 'EISDIR');
+        ? error === injected : (error as NodeJS.ErrnoException).code === (process.platform === 'win32' ? 'EPERM' : 'EISDIR'));
+      // Same real rename-to-directory failure: Windows reports EPERM, POSIX EISDIR.
+      // Rollback and foreign-obstruction assertions below are platform-independent.
     } finally { mocked.mock.restore(); syncBuiltinESMExports(); }
     assert.equal(durableFactsSeen, true, 'fault is after real durable facts, not before creation');
     assert.deepEqual(f.events, [], 'no PENDING/publication before report commit');
     assert.equal(fs.existsSync(f.factsPath), false, 'only own unpublished facts are rolled back');
-    if (fault === 'directory-EISDIR') {
+    if (fault === 'directory-obstruction') {
       assert.equal(fs.lstatSync(f.reportPath).isDirectory(), true, 'obstruction is not ours to delete');
       fs.rmdirSync(f.reportPath); // repair fixture-owned fault, never product cleanup
     }

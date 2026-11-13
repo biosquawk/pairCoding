@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import type { TestContext } from 'node:test';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
+import { sha256 } from '../../src/server/execution/files';
 import { DockerCliTransport, type DockerTransport, type DockerReply } from '../../src/server/execution/DockerTransport';
 import { validateImageLock, validateRuntimeProfile } from '../../src/shared/validation-v2';
 import { fixture, profile, until } from './fixture';
@@ -24,6 +25,15 @@ export async function liveFixture(t:TestContext,source:string) {
   assert.match(value.toolchainHash,/^[a-f0-9]{64}$/);assert.match(value.dependencyHash,/^[a-f0-9]{64}$/);
   assert.ok(object(value.dockerEnvironment));
   const environment:Record<string,string>={};for(const [key,v]of Object.entries(value.dockerEnvironment)){assert.ok(string(v));environment[key]=v;}
+  // Exact public-prepared package bytes enter the genuine immutable inventory.
+  // The unchanged adapter still compares their dependency hash with the trusted cache.
+  assert.ok(object(value.preparedPackage) && string(value.preparedPackage.path) && path.isAbsolute(value.preparedPackage.path) &&
+    string(value.preparedPackage.sha256),'Missing original preparedPackage:{path,sha256}');
+  assert.match(value.preparedPackage.sha256,/^[a-f0-9]{64}$/);
+  const packageStat=await fs.lstat(value.preparedPackage.path);
+  assert.ok(packageStat.isFile() && !packageStat.isSymbolicLink() && packageStat.size<=1024*1024);
+  const packageJson=await fs.readFile(value.preparedPackage.path);
+  assert.equal(sha256(packageJson),value.preparedPackage.sha256,'Original prepared package bytes changed');
   const cli=new DockerCliTransport(value.dockerExecutable,environment);
   const evidence=await fs.mkdtemp(path.join(value.outputDirectory,'runner-live-evidence-'));
   const removals:{id:string;inspection:Record<string,unknown>}[]=[];
@@ -47,7 +57,7 @@ export async function liveFixture(t:TestContext,source:string) {
     return run(args,options);
   }};
   const f=await fixture(t,{transport,engineId:value.engineId,runtime:value.runtime,image,cacheDirectory:value.cacheDirectory,managedCacheRoot:value.managedCacheRoot,
-    toolchainHash:value.toolchainHash,dependencyHash:value.dependencyHash,directory:value.outputDirectory,source,preserve:true});
+    toolchainHash:value.toolchainHash,dependencyHash:value.dependencyHash,directory:value.outputDirectory,source,packageJson,preserve:true});
   return {...f,live:{run,removals,evidence}};
 }
 async function inspect(run:(args:readonly string[])=>Promise<DockerReply>,id:string):Promise<Record<string,unknown>> {

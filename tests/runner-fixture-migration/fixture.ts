@@ -65,7 +65,7 @@ export const unitProfile:RuntimeProfile={id:'javascript-node',label:'UNIT Node',
 export const unitImage:ImageLockEntry={key:'node22',image:'paircoach/unit-node:22',imageId:'sha256:'+'a'.repeat(64),digest:'sha256:'+'b'.repeat(64),tools:unitProfile.expectedTools};
 export interface FixtureOptions {
   transport?:DockerTransport; engineId?:string; runtime?:RuntimeProfile; image?:ImageLockEntry;
-  cacheDirectory?:string; managedCacheRoot?:string; directory?:string; source?:string;
+  cacheDirectory?:string; managedCacheRoot?:string; directory?:string; source?:string; packageJson?:Uint8Array;
   toolchainHash?:string; dependencyHash?:string; preserve?:boolean;
 }
 export async function fixture(t:TestContext, options:FixtureOptions={}) {
@@ -73,6 +73,7 @@ export async function fixture(t:TestContext, options:FixtureOptions={}) {
   const workspace=path.join(root,'workspace'),runs=path.join(root,'runs');
   await fs.mkdir(workspace);await fs.mkdir(runs);
   await fs.writeFile(path.join(workspace,'main.cjs'),options.source??'// UNIT immutable input, never executed by injected transport\n');
+  if(options.packageJson!==undefined)await fs.writeFile(path.join(workspace,'package.json'),options.packageJson);
   const runtime=structuredClone(options.runtime??unitProfile),image=structuredClone(options.image??unitImage),engineId=options.engineId??'engine-unit';
   const installationId='fixture-'+randomUUID(),generation='cfg1';
   const managedCacheRoot=options.managedCacheRoot??path.join(root,'cache');
@@ -80,6 +81,10 @@ export async function fixture(t:TestContext, options:FixtureOptions={}) {
   if(!options.cacheDirectory){await fs.mkdir(managedCacheRoot,{mode:0o700});await fs.mkdir(cacheDirectory,{recursive:true});}
   const source=await fs.readFile(path.join(workspace,'main.cjs'));
   const files=[{path:'main.cjs',documentVersion:1,sha256:sha256(source),bytes:source.length}];
+  if(options.packageJson!==undefined) {
+    const bytes=await fs.readFile(path.join(workspace,'package.json'));
+    files.push({path:'package.json',documentVersion:1,sha256:sha256(bytes),bytes:bytes.length});
+  }
   const caches=[{directory:cacheDirectory,family:runtime.adapterFamily,toolchainHash:options.toolchainHash??'d'.repeat(64),dependencyHash:options.dependencyHash??dependencyHash(files),readOnly:true}];
   const unit=new UnitDocker(engineId,image),transport=options.transport??unit;
   const policy:ExecutorPolicy={installationId,engineId,runRoot:runs,nonRootUser:'10001:10001',managedCacheRoot,serviceNetwork:null,

@@ -22,11 +22,12 @@ The JSON has these **measured final campaign** values (not these placeholder str
   "cacheDirectory": "/absolute/prepared/node-cache",
   "toolchainHash": "actual 64-hex prepared identity",
   "dependencyHash": "actual 64-hex prepared source dependency identity",
-  "outputDirectory": "/absolute/approved/new/evidence-parent"
+  "outputDirectory": "/absolute/approved/new/evidence-parent",
+  "preparedPackage": {"path":"/absolute/original-public-prepare-project/package.json","sha256":"actual 64-hex SHA256 of those exact prepared bytes"}
 }
 ```
 
-Do not copy UNIT image IDs or `engine-unit`. Provision the credential-free Docker config and the **already-prepared approved Node runtime image**, containing `/opt/paircoach/node/bin/node` and `/opt/paircoach/runtime-task.mjs`, plus cache compatible with the source-only fixture (no npm dependencies). Actual runtime catalog/image/engine validation and immutable input/plan validation remain production code; no read stub or parser mock is used. Paths must be usable as Docker daemon bind sources on the final Windows/WSL topology. Windows native and WSL results are distinct; this harness does not change their mapping/settings. No pull/build is performed here. Config is trusted operator input, never HTTP/task input.
+Do not copy UNIT image IDs or `engine-unit`. Provision the credential-free Docker config and the **already-prepared approved Node runtime image**, containing `/opt/paircoach/node/bin/node` and `/opt/paircoach/runtime-task.mjs`, plus cache compatible with the original public-prepared package (no npm dependencies/lockfiles for this fixture). The trusted `preparedPackage` binding supplies those original package.json bytes; the fixture copies them byte-for-byte into its workspace and acknowledged immutable inventory. It neither rewrites cache dependencyHash nor edits/grafts a receipt. Missing/changed package bytes or a dependency mismatch fail visibly before task execution. All existing lifecycle/output/credential/time bounds remain unchanged. Actual runtime catalog/image/engine validation and immutable input/plan validation remain production code; no read stub or parser mock is used. Paths must be usable as Docker daemon bind sources on the final Windows/WSL topology. Windows native and WSL results are distinct; this harness does not change their mapping/settings. No pull/build is performed here. Config is trusted operator input, never HTTP/task input.
 
 ## Obligations and evidence
 
