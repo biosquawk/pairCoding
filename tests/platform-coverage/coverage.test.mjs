@@ -196,4 +196,15 @@ test('cleanup waits for termination after signalling and rejects an unconfirmed 
   await assert.rejects(runBounded(process.execPath, ['orphan.mjs'], { cwd: dir, timeout: 3000, stdio: 'ignore' }), /cleanup did not complete/);
   assert.ok(Date.now() - start < 4000, 'unconfirmed cleanup must fail within its bounded budget');
   assert.equal(signals, 2);
+
+  // A cleanup failure during timeout must reject even if the direct child has
+  // not emitted exit; timedOut must remain true so no further test lane starts.
+  let watchdog;
+  try {
+    await assert.rejects(Promise.race([
+      runBounded(process.execPath, ['-e', 'setInterval(()=>{},100)'], { timeout: 100, stdio: 'ignore' }),
+      new Promise((_, reject) => { watchdog = setTimeout(() => reject(Error('cleanup test watchdog expired')), 4000); }),
+    ]), error => /cleanup did not complete/.test(error.message) && error.timedOut === true);
+  } finally { clearTimeout(watchdog); }
+  assert.equal(signals, 3);
 });

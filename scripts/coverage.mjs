@@ -57,9 +57,9 @@ export async function runBounded(command, args, { timeout, cwd = root, env = pro
   if (!Number.isFinite(timeout) || timeout <= 0) throw Error('Positive execution timeout required');
   const child = spawn(command, args, { cwd, stdio, shell: false, env, detached: process.platform !== 'win32' && !inheritGroup });
   let timedOut = false, cleanup;
-  const clean = () => cleanup ??= killOwnedTree(child, inheritGroup);
-  const result = await new Promise(resolve => {
-    const timer = setTimeout(() => { timedOut = true; void clean().catch(() => {}); }, timeout);
+  const clean = () => cleanup ??= killOwnedTree(child, inheritGroup).catch(error => { error.timedOut = timedOut; throw error; });
+  const result = await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { timedOut = true; void clean().catch(reject); }, timeout);
     const done = result => { clearTimeout(timer); resolve(result); };
     child.once('error', error => done({ error: error.message }));
     child.once('exit', (status, signal) => done({ status, signal }));
