@@ -189,7 +189,7 @@ test('malformed-settings zero-port await uses admitted source materialization an
   const admitted=latch();let first=true,capture!:ReturnType<typeof f.capture>;
   const actual=f.app.workspace._withQueuedRead.bind(f.app.workspace);
   // Test seam only orders real collaborators; neither frames, guards nor failures are forged.
-  t.mock.method(f.app.workspace,'_withQueuedRead',read=>actual(()=>{
+  t.mock.method(f.app.workspace,'_withQueuedRead',<T>(read:()=>T)=>actual(()=>{
     const value=read();
     if(first){first=false;capture=f.capture(initial.body.capabilities.execution.runtime.configurationGeneration);admitted.resolve();}
     return value;
