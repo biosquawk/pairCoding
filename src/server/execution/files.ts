@@ -11,6 +11,9 @@ export function requireThat(ok: unknown, message: string): asserts ok {
   if (!ok) throw new Error(message);
 }
 export const safeId = (s: unknown): s is string => typeof s === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,79}$/.test(s);
+// Profile metadata is embedded in Docker names/labels, not a filesystem component.
+// Builtin python-3.13 is valid; preserve the stricter path/Run/session ID policy above.
+export const safeProfileId = (s: unknown): s is string => typeof s === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/.test(s);
 export const safeRelative = (s: string) => typeof s === 'string' && s.length <= 1024 && !/[\\:\x00-\x1f\x7f]/.test(s) && !s.startsWith('/') && s.split('/').every(p => p && p !== '.' && p !== '..' && !/[. ]$/.test(p) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.|$)/i.test(p));
 export function inside(root: string, file: string) {
   const rel = path.relative(root,file);

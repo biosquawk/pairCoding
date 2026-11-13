@@ -4,7 +4,7 @@ import type {
   AcknowledgedRunInput, InputFile
 } from './ports';
 import {
-  canonicalDirectory, durableWrite, inside, readRegular, requireThat, safeId, safeRelative, sha256, fsyncDirectory, canonicalJson
+  canonicalDirectory, durableWrite, inside, readRegular, requireThat, safeId, safeProfileId, safeRelative, sha256, fsyncDirectory, canonicalJson
 } from './files';
 export interface SettledAcknowledgement {
   projectId: string;
@@ -91,7 +91,7 @@ export async function copyAcknowledgedInput(options: CopyInputOptions): Promise<
     workspaceDirectory:source,runDirectory:run,acknowledgement:ack
   }
   =options;
-  requireThat([options.runId,options.profileId,options.configurationGeneration,ack.projectId,ack.sessionId].every(safeId),'Unsafe input identity');
+  requireThat(safeProfileId(options.profileId) && [options.runId,options.configurationGeneration,ack.projectId,ack.sessionId].every(safeId),'Unsafe input identity');
   await canonicalDirectory(source);
   await canonicalDirectory(path.dirname(run));
   requireThat(!inside(source,run) && !inside(run,source) && source!==run,'Input/output overlap');

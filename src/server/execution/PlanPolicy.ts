@@ -13,7 +13,7 @@ import {
   validateRuntimeProfile
 } from '../../shared/validation-v2';
 import {
-  canonicalDirectory, inside, requireThat, safeId, canonicalJson
+  canonicalDirectory, inside, requireThat, safeId, safeProfileId, canonicalJson
 } from './files';
 import {
   validateRuntimeCommand
@@ -65,7 +65,7 @@ export async function validateApprovedCaches(policy:ExecutorPolicy,runtime:Appro
 export async function validatePlan(policy:ExecutorPolicy,plan:ExecutionPlan) {
   requireThat(Buffer.byteLength(canonicalJson(plan))<=2*1024*1024,'Plan byte limit');
   const trusted=approvedRuntime(policy,plan.profile),o=plan.ownership,i=plan.input;
-  requireThat([policy.installationId,o.runId,o.profileId].every(safeId) && o.installationId===policy.installationId && o.profileId===plan.profile.id && o.engineId===policy.engineId,'Unapproved ownership');
+  requireThat([policy.installationId,o.runId].every(safeId) && safeProfileId(o.profileId) && o.installationId===policy.installationId && o.profileId===plan.profile.id && o.engineId===policy.engineId,'Unapproved ownership');
   requireThat(o.containerName===`paircoach-${o.installationId}-${o.profileId}-${o.runId}` && o.containerName.length<=240,'Invalid container name');
   requireThat(o.imageId===trusted.image.imageId && /^sha256:[a-f0-9]{64}$/.test(o.imageId) && /^sha256:[a-f0-9]{64}$/.test(trusted.image.digest) && canonicalJson(plan.lockedImage)===canonicalJson(trusted.image),'Unapproved image');
   requireThat(i.identity.runId===o.runId && i.identity.profileId===o.profileId && safeId(i.identity.configurationGeneration),'Input/run mismatch');
