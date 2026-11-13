@@ -1,52 +1,30 @@
+/** Real HTTP/WS/neutral Runner; controlled Docker exit boundary, not native runtime proof. */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createPairCoachServer } from '../../src/server/http';
-import { LocalFallbackProvider } from '../../src/server/coach/provider';
-import { workspaceFiles, Peer, id, settings } from '../qa/helpers';
+import { httpRunFixture, until } from '../backend-cutover/http-run-report-fixture';
+import { id } from '../qa/helpers';
 
 for (const exitCode of [0, 1]) {
   test(`completed Run with exit ${exitCode} preserves wire ordering and subsequent settings access`, async t => {
-    const dirs = await workspaceFiles(t, { 'main.py': 'value = 0\n' });
-    const token = id();
-    const app = createPairCoachServer({ ...dirs, port: 0, token,
-      enableCoach: true, enableExecution: true, coachProvider: new LocalFallbackProvider() });
-    const peers = new Set<{ close(): void }>();
-    t.after(async () => {
-      for (const peer of peers) peer.close();
-      await app.close();
-      await dirs.cleanup();
-    });
-    app.workspace.updateSettings({ ...settings, runProfiles: [{ kind: 'RUN_MAIN',
-      executable: process.execPath, args: ['-e', `process.exit(${exitCode})`], cwd: '.',
-      timeoutMs: 10000, testReportFormat: 'NONE', testReportGlob: null }] });
-    const port = await app.listen();
-    const baseURL = `http://127.0.0.1:${port}`;
-    const clientId = id(), sessionId = app.session.getSession().sessionId;
-    const peer = new Peer({ port, baseURL, token, clientId, sessionId, peers } as any);
-    const sequences: number[] = [];
-    peer.socket.on('message', data => sequences.push(JSON.parse(data.toString()).seq));
-    await peer.connect();
-    const command = () => ({ requestId: id(), clientId, sessionId });
-    const request = (endpoint: string, method: string, body: unknown) => fetch(baseURL + endpoint, {
-      method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body), signal: AbortSignal.timeout(5000),
-    });
-    const start = await request('/api/session/start', 'POST', { ...command(), limitMs: null, pauseOnHidden: true });
-    assert.equal(start.status, 200);
-    const run = await request('/api/run', 'POST', { ...command(), mode: 'RUN_MAIN',
-      expectedWorkspaceVersion: app.workspace.workspaceVersion });
-    assert.equal(run.status, 202);
-    const { runId } = await run.json();
-    await peer.take(frame => frame.type === 'RUN_STATE' && frame.payload.runId === runId && frame.payload.finishedAt);
+    const f=await httpRunFixture(t),app=f.app(),port=await app.listen();
+    const project=(await f.http(port,'GET','/api/project?readiness=actual')).body;
+    const peer=await f.connect(port,project.sessionId),clientId='tab',sessionId=project.sessionId;
+    const command=()=>({requestId:id(),clientId,sessionId});
+    const start=await f.http(port,'POST','/api/session/start',{...command(),limitMs:null,pauseOnHidden:true});
+    assert.equal(start.status,200);
+    const accepted=await f.http(port,'POST','/api/run',f.runRequest(project,'RUN_MAIN'));
+    assert.equal(accepted.status,202,JSON.stringify(accepted));
+    const runId=accepted.body.runId;
+    f.fake.finish(exitCode);
+    await until(()=>peer.frames.some(frame=>frame.type==='RUN_STATE'&&frame.payload.runId===runId&&frame.payload.finishedAt));
     await delay(10);
-    peer.assertProtocol();
-    for (let index = 1; index < sequences.length; index++) {
-      assert.equal(sequences[index], sequences[index - 1] + 1);
-    }
-    assert.equal(app.session.leaseClientId, clientId);
-    const update = await request('/api/project/settings', 'PUT', { ...command(),
-      expectedWorkspaceVersion: app.workspace.workspaceVersion, settings: app.workspace.settings });
-    assert.equal(update.status, 200);
+    const terminal=peer.frames.find(frame=>frame.type==='RUN_STATE'&&frame.payload.runId===runId&&frame.payload.finishedAt).payload;
+    assert.equal(terminal.exitCode,exitCode);assert.equal(terminal.status,exitCode===0?'SUCCEEDED':'FAILED');
+    const sequences=peer.frames.map(frame=>frame.seq);
+    for(let index=1;index<sequences.length;index++)assert.equal(sequences[index],sequences[index-1]+1);
+    assert.equal(app.session.leaseClientId,clientId);
+    const update=await f.http(port,'PUT','/api/project/settings',{...command(),expectedWorkspaceVersion:app.workspace.workspaceVersion,settings:f.settings});
+    assert.equal(update.status,200);
   });
 }

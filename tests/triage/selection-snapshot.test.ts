@@ -14,7 +14,8 @@ async function until(fn: () => boolean, label: string) {
 async function fixture(t: any) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selection-real-')), root = path.join(dir, 'root'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# Task\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true, enableCoach: false });
+  const token=crypto.randomUUID();
+  let app = createPairCoachServer({ token, rootPath: root, port: 0, devBootstrap: true, enableCoach: false });
   const port = await app.listen();
   let holdSnapshot = false, holding = false, readPath: string | null = null, releaseRead: (() => void) | null = null;
   let gateMutation = false, releaseMutation: (() => void) | null = null;
@@ -43,7 +44,8 @@ async function fixture(t: any) {
   t.after(async () => { releaseRead?.(); releaseMutation?.(); client.close(); await app.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   await client.connect(); await until(() => !client.getState().isOffline, 'initial snapshot');
   assert.equal(client.getState().activePath, 'challenge.md');
-  return { client, root, app, port, sent, received,
+  return { client, root, get app(){return app;}, port, sent, received,
+    async restart(){await app.close();app=createPairCoachServer({token,rootPath:root,port,devBootstrap:true,enableCoach:false});await app.listen();client.reconnect();},
     gateMutation() { gateMutation = true; }, mutationHeld: () => releaseMutation !== null, releaseMutation() { releaseMutation?.(); releaseMutation = null; },
     gateSnapshot() { holdSnapshot = true; }, queued: () => queued.length,
     releaseSnapshot() { holdSnapshot = false; holding = false; queued.splice(0).forEach(deliver => deliver()); },
@@ -102,7 +104,7 @@ test('001 REAL negative scope: selected view is not inherited by a new project w
   await until(() => !f.client.getState().isOffline, 'create settled'); await f.client.selectFile('solution.py');
   const next = path.join(f.root, '..', 'next'); fs.mkdirSync(next);
   fs.writeFileSync(path.join(next, 'challenge.md'), '# Next task\n'); fs.writeFileSync(path.join(next, 'solution.py'), 'next = 2\n');
-  assert.equal(await f.client.openProject(next), true);
+  assert.equal(await f.client.openProject(next), true, f.client.getState().connectionError ?? undefined);
   await until(() => !f.client.getState().isOffline && f.client.getState().scenario.title === next, 'new project');
   assert.equal(f.client.getState().activePath, 'challenge.md');
   assert.equal(f.client.getState().connectionError, null);
@@ -130,10 +132,11 @@ test('001 REAL negative session scope: same-root remote reopen invalidates old s
   await until(() => f.received.filter(m => m.type === 'SESSION_SNAPSHOT').length >= 4 && !f.client.getState().isOffline, 'cache reset');
   f.gateRead('slow.py'); const oldSelection = f.client.selectFile('slow.py'); await until(f.readHeld, 'old-session GET held');
   const oldSession = f.app.session.state.sessionId, oldProject = f.app.workspace.projectId;
-  const response = await fetch(`http://127.0.0.1:${f.port}/api/project/open`, { method: 'POST', headers: {
-    Authorization: `Bearer ${f.client.getAuthToken()}`, 'Content-Type': 'application/json'
-  }, body: JSON.stringify({ requestId: crypto.randomUUID(), clientId: 'selection-client', rootPath: f.root, settings: f.app.workspace.settings }) });
-  assert.equal(response.status, 201); const project = await response.json();
+  // Same-root open is deliberately idempotent in V2. A real server restart
+  // creates the different session required by this negative fixture.
+  await f.restart();
+  const response = await fetch(`http://localhost:${f.port}/api/project`,{headers:{Authorization:`Bearer ${f.client.getAuthToken()}`,Connection:'close'}});
+  assert.equal(response.status,200); const project=await response.json();
   assert.notEqual(project.sessionId, oldSession);
   assert.equal(project.projectId, oldProject, 'same project identity, genuinely different session');
   await until(() => f.received.some(m => m.type === 'SESSION_SNAPSHOT' && m.sessionId === project.sessionId) && !f.client.getState().isOffline, 'replacement session');
@@ -159,7 +162,7 @@ test('001 REAL negative mutation scope: late CREATE response cannot install a pr
   const create = f.client.mutateFile('CREATE', 'solution.py', null, 'old = 1\n');
   await until(() => f.mutationHeld() && f.received.filter(m => m.type === 'SESSION_SNAPSHOT').length >= 2 && !f.client.getState().isOffline, 'old CREATE response gated');
   const next = path.join(f.root, '..', 'new-root'); fs.mkdirSync(next); fs.writeFileSync(path.join(next, 'challenge.md'), '# New root\n');
-  assert.equal(await f.client.openProject(next), true);
+  assert.equal(await f.client.openProject(next), true, f.client.getState().connectionError ?? undefined);
   await until(() => !f.client.getState().isOffline && f.client.getState().scenario.title === next, 'replacement root synced');
   f.releaseMutation(); await create;
   assert.equal(f.client.getState().scenario.title, next);

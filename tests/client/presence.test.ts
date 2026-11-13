@@ -49,7 +49,7 @@ async function fixture(t: any) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p2-presence-'));
   const root = path.join(dir, 'root'); fs.mkdirSync(root); fs.writeFileSync(path.join(root, 'challenge.md'), '# Presence\n');
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const value = 0;\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, port: 0, devBootstrap: true });
   const port = await app.listen();
   const clients: LiveBackend[] = [];
   const create = (gate?: { entered: boolean; wait: Promise<void> }, badHello = false) => {
@@ -57,7 +57,7 @@ async function fixture(t: any) {
     let closed = 0;
     const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`,
       fetch: (async (url: string, options: any) => {
-        if (gate && new URL(url).pathname === '/api/file' && new URL(url).searchParams.get('path') === 'challenge.md') {
+        if (gate && new URL(url).pathname === '/api/file' && new URL(url).searchParams.get('path') === 'hydration.md') {
           gate.entered = true; await gate.wait;
         }
         return fetch(url, options);
@@ -136,7 +136,7 @@ test('REAL HTTP/WS latest update during reconnect is retained and replays again 
   assertReplay(current.connections[1], 'BLURRED');
   const previousSession = f.app.session.getSession().sessionId;
   const root2 = path.join(f.dir, 'root2'); fs.mkdirSync(root2); fs.writeFileSync(path.join(root2, 'challenge.md'), '# New session\n');
-  assert.equal(await current.client.openProject(root2), true);
+  assert.equal(await current.client.openProject(root2), true, current.client.getState().connectionError ?? undefined);
   await until(() => current.connections.length === 3 && !current.client.getState().isOffline, 'new session sync');
   await until(() => current.connections[2].some(m => m.type === 'WINDOW_STATE'), 'new session presence replay');
   await until(() => f.app.session.getSession().presence === 'BLURRED', 'new session authoritative presence');
@@ -148,9 +148,15 @@ test('REAL HTTP/WS latest update during reconnect is retained and replays again 
 test('REAL HTTP/WS latest change while snapshot file hydration is unsynced is not lost', async t => {
   const f = await fixture(t);
   await f.old.client.selectFile('solution.ts');
-  f.old.client.close(); await until(() => f.app.session.leaseClientId === null, 'old lease release');
   let release!: () => void;
   const gate = { entered: false, wait: new Promise<void>(resolve => { release = resolve; }) };
+  // The authoritative bundle now includes its active document. Select a task
+  // distinct from that active document so this test really exercises hydration.
+  fs.writeFileSync(path.join(f.app.workspace.rootPath,'hydration.md'),'# Hydrated task\n');
+  f.app.workspace.scanExternal();
+  await until(()=>f.old.client.getState().workspaceVersion===f.app.workspace.workspaceVersion,'external task version observed');
+  assert.equal(await f.old.client.updateProjectSettings({...f.old.client.getState().projectSettings,taskFilePath:'hydration.md'}),true);
+  f.old.client.close(); await until(() => f.app.session.leaseClientId === null, 'old lease release');
   const next = f.create(gate); next.client.sendWindowState('FOCUSED');
   t.after(() => release());
   await next.client.connect(); await until(() => gate.entered, 'snapshot task hydration');

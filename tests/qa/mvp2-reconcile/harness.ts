@@ -17,7 +17,7 @@ export class Backend {
   constructor() {
     const root = path.resolve('artifacts/mvp2-reconcile'); fs.mkdirSync(root, { recursive: true });
     this.base = fs.mkdtempSync(path.join(root, 'case-'));
-    this.rootPath = path.join(this.base, 'project'); this.dataDir = path.join(this.base, 'data');
+    this.rootPath = path.join(this.base, 'project'); this.dataDir = path.join(this.rootPath, '.paircoach');
     fs.mkdirSync(this.rootPath); fs.mkdirSync(this.dataDir);
     fs.writeFileSync(path.join(this.rootPath, 'main.py'), seed);
     fs.writeFileSync(path.join(this.rootPath, 'challenge.md'), '# Reconcile a real snapshot\n');

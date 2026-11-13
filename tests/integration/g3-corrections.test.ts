@@ -11,10 +11,11 @@ import {SessionController} from '../../src/server/SessionController';
 import {ReportService} from '../../src/server/ReportService';
 import type {CoachContext} from '../../src/server/coach/context';
 import {Peer, workspaceFiles, settings, id} from '../qa/helpers';
+import {httpRunFixture} from '../backend-cutover/http-run-report-fixture';
 
 async function fixture(t:TestContext,options:Partial<ServerOptions>={}) {
   const dirs=await workspaceFiles(t,{'main.py':'ORIGINAL\n'}),token='corrective-'+id();
-  const app=createPairCoachServer({...dirs,token,port:0,enableExecution:true,...options});
+  const app=createPairCoachServer({rootPath:dirs.rootPath,token,port:0,enableExecution:true,...options});
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,clientId=id(),sessionId=app.session.state.sessionId;
   const peers=new Set<{close():void}>();
   t.after(async()=>{for(const p of peers)p.close();try{await app.close();}finally{await dirs.cleanup();}});
@@ -45,10 +46,10 @@ for(const obstruction of ['report-store','coach-constructor'] as const)test(`G3 
   t.mock.method(SessionController.prototype,'close',function(this:SessionController){closedSessions.push(this);return sc.call(this);});
   t.mock.method(ReportService.prototype,'close',function(this:ReportService){closedReports.push(this);return rc.call(this);});
   if(obstruction==='report-store') {
-    const data=path.join(f.dataDir,createHash('sha256').update(path.resolve(nextRoot)).digest('hex').slice(0,24));
+    const data=path.join(nextRoot,'.paircoach');
     fs.mkdirSync(data,{recursive:true});fs.writeFileSync(path.join(data,'reports'),'OBSTRUCTION');
   }else refuse=true;
-  const r=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:nextRoot,settings});
+  const r=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:nextRoot,settings:{...settings,schemaVersion:2}});
   assert.equal(r.status,500);
   assert.equal(f.app.workspace,old.workspace);assert.equal(f.app.session,old.session);assert.equal(f.app.gate,old.gate);
   assert.equal(old.session.leaseClientId,f.clientId);assert.equal(old.session.state.controlEpoch,epoch);
@@ -68,7 +69,7 @@ for(const obstruction of ['report-store','coach-constructor'] as const)test(`G3 
 test('G3 prepared successful open adopts new core once; new peer gate/external events use new binding',async t=>{
   const f=await fixture(t),oldWorkspace=f.app.workspace,oldSession=f.app.session;
   const nextRoot=path.join(f.base,'next');fs.mkdirSync(nextRoot);fs.writeFileSync(path.join(nextRoot,'main.py'),'NEXT');
-  const body={requestId:id(),clientId:f.clientId,rootPath:nextRoot,settings};
+  const body={requestId:id(),clientId:f.clientId,rootPath:nextRoot,settings:{...settings,schemaVersion:2}};
   const r=await f.http('POST','/api/project/open',body);assert.equal(r.status,201);assert.notEqual(r.body.sessionId,f.sessionId);
   const again=await f.http('POST','/api/project/open',body);assert.deepEqual(again,r);
   assert.equal(f.app.workspace.rootPath,nextRoot);assert.equal(oldSession.leaseClientId,null);
@@ -82,34 +83,38 @@ test('G3 prepared successful open adopts new core once; new peer gate/external e
 });
 
 test('G3 both AI boundaries share structural Run allowlist; arbitrary stdout stays local in UI and frozen facts',async t=>{
-  const received:ReportAIFacts[]=[],contexts:Readonly<CoachContext>[]=[];
   const apiToken='synthetic_gemini_'+id(),previous=process.env.GEMINI_API_KEY;
   process.env.GEMINI_API_KEY=apiToken;
   t.after(()=>{if(previous===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=previous;});
-  const f=await fixture(t,{enableCoach:true,coachProvider:{name:'INJECTED',mode:'INJECTED',async decide(ctx){contexts.push(ctx);return {kind:'SILENT',reason:'structural fact fixture'};}},
-    reportGenerate:async facts=>{received.push(facts);return '# Structural facts only';}});
-  fs.appendFileSync(path.join(f.rootPath,'main.py'),apiToken);f.app.workspace.scanExternal();
-  const opaque='opaque_private_'+id();fs.writeFileSync(path.join(f.rootPath,'.env.fixture'),opaque);f.app.workspace.scanExternal();
-  const profile={kind:'RUN_MAIN',executable:process.execPath,args:['-e',"console.log(require('fs').readFileSync('.env.fixture','utf8'))"],cwd:'.',timeoutMs:3000,testReportFormat:'NONE',testReportGlob:null};
-  assert.equal((await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,aiConsent:true,contextPatterns:['**/*.py'],runProfiles:[profile]}})).status,200);
-  assert.equal((await f.http('POST','/api/session/start',{...f.command(),limitMs:null,pauseOnHidden:true})).status,200);
-  const r=await f.http('POST','/api/run',{...f.command(),mode:'RUN_MAIN',expectedWorkspaceVersion:f.app.workspace.workspaceVersion});assert.equal(r.status,202);
-  const run=await until(async()=>(await f.http('GET',`/api/run/${r.body.runId}`)).body,v=>!!v.finishedAt);
+  // Current neutral HTTP/Runner composition, modeled Docker stdout only. A Run
+  // must not read the pupil's .env; untrusted process output enters at that port.
+  const f=await httpRunFixture(t),opaque='opaque_private_'+id();
+  fs.appendFileSync(path.join(f.project,'main.js'),'// '+apiToken+'\n');
+  fs.writeFileSync(path.join(f.project,'.env.fixture'),opaque);
+  f.fake.logs={stdout:opaque+'\n',stderr:''};
+  const app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project?readiness=actual')).body;
+  const peer=await f.connect(port,p.sessionId),command=()=>({requestId:id(),clientId:'tab',sessionId:p.sessionId});
+  assert.equal((await f.http(port,'POST','/api/session/start',{...command(),limitMs:null,pauseOnHidden:true})).status,200);
+  const r=await f.http(port,'POST','/api/run',f.runRequest(p,'RUN_MAIN'));assert.equal(r.status,202,JSON.stringify(r));
+  f.fake.finish();
+  const run=await until(async()=>(await f.http(port,'GET',`/api/run/${r.body.runId}`)).body,v=>!!v.finishedAt);
   assert.equal(run.status,'SUCCEEDED');assert(run.outputTail.includes(opaque));
-  await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes(opaque));
+  await until(async()=>peer.frames.find(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes(opaque)),Boolean);
+  const contexts=f.analyses as CoachContext[],received=f.ai;
   const runContext=await until(async()=>contexts.find(c=>c.lastRun?.runId===run.runId),Boolean);
   assert(runContext?.lastRun);assert.equal(JSON.stringify(contexts).includes(opaque),false);
   assert.equal(Object.hasOwn(runContext.lastRun,'outputTail'),false);assert.equal(runContext.lastRun.testOutcome,run.testOutcome);
   assert.equal(JSON.stringify(contexts).includes(apiToken),false,'configured Gemini token is sensitive at Coach boundary');
-  assert.equal((await f.http('POST','/api/session/finish',{...f.command(),reason:'COMPLETED',expectedWorkspaceVersion:f.app.workspace.workspaceVersion})).status,202);
-  await until(async()=>(await f.http('GET',`/api/session/report?sessionId=${f.sessionId}`)).body,v=>v.status==='READY');
+  assert.equal((await f.http(port,'POST','/api/session/finish',{...command(),reason:'COMPLETED',expectedWorkspaceVersion:app.workspace.workspaceVersion})).status,202);
+  await until(async()=>(await f.http(port,'GET',`/api/session/report?sessionId=${p.sessionId}`)).body,v=>v.status==='READY');
   assert.equal(received.length,1);assert.equal(JSON.stringify(received).includes(opaque),false);
   assert.equal(JSON.stringify(received).includes(apiToken),false);assert.deepEqual(received[0].runs[0],runContext.lastRun);
-  assert.deepEqual(Object.keys(received[0].runs[0]).sort(),['runId','mode','status','exitCode','workspaceVersionAtStart','workspaceChangedDuringRun','testOutcome','testCount','startedAt','finishedAt'].sort());
+  assert.deepEqual(Object.keys(received[0].runs[0]).sort(),['runId','mode','status','exitCode','workspaceVersionAtStart','workspaceChangedDuringRun','testOutcome','testCount','startedAt','finishedAt','profileId','configurationGeneration'].sort());
   assert.equal(received[0].runs[0].testOutcome,run.testOutcome);assert.equal(received[0].runs[0].runId,run.runId);
-  const reportRoot=path.join(f.app.workspace.dataDir,'reports'),dir=fs.readdirSync(reportRoot).find(n=>fs.existsSync(path.join(reportRoot,n,'facts.json')))!;
+  const reportRoot=path.join(app.workspace.dataDir,'reports'),dir=fs.readdirSync(reportRoot).find(n=>fs.existsSync(path.join(reportRoot,n,'facts.json')))!;
   const frozen=JSON.parse(JSON.parse(fs.readFileSync(path.join(reportRoot,dir,'facts.json'),'utf8')).serialized);
   assert(frozen.runs[0].outputTail.includes(opaque));assert(frozen.events.some((e:any)=>e.type==='RUN'&&e.run.outputTail.includes(opaque)));
+
 });
 
 for(const revoked of [false,true])test(`G3 async seam awaits one gate promise before terminal ACK; ${revoked?'VETO revokes captured auth':'success deduplicates'}`,async t=>{

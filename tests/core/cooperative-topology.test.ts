@@ -158,8 +158,11 @@ test('root replaced by a foreign directory link remains fail-closed, not a mass 
   await scan(w); await scan(w);
   assert.deepEqual(obs.errors, ['UNSAFE_PATH', 'UNSAFE_PATH']);
   assert.deepEqual(obs.external, []);
+  // Private snapshot ancestry now fences metadata reads as well as source reads.
+  assert.throws(() => entries(w), code('RECOVERY_REQUIRED'));
+  assert.throws(() => w.getDocument('secret.ts'), code('RECOVERY_REQUIRED'));
+  fs.unlinkSync(f.root);fs.renameSync(path.join(f.parent,'original-root'),f.root);
   assert.ok(entries(w).includes('FILE:nested/child.ts'));
-  assert.throws(() => w.getDocument('secret.ts'), code('UNSAFE_PATH'));
   assert.deepEqual(opened, [], 'a replaced root must not produce even one file descriptor');
   assert.equal(fs.readFileSync(path.join(foreign, 'secret.ts'), 'utf8'), 'FOREIGN ROOT SECRET');
 });

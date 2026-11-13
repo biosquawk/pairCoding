@@ -13,7 +13,7 @@ async function fixture(t:TestContext) {
   const peers=new Set<Peer>();
   t.after(async()=>{for(const p of peers)p.close();try{await app?.close();}finally{await dirs.cleanup();}});
   async function start() {
-    app=createPairCoachServer({...dirs,token,port:0,enableExecution:true,enableCoach:false});port=await app.listen();
+    app=createPairCoachServer({rootPath:dirs.rootPath,token,port:0,enableExecution:true,enableCoach:false});port=await app.listen();
     return connect();
   }
   async function connect() {
@@ -42,7 +42,10 @@ async function fixture(t:TestContext) {
     return {report,body};
   }
   async function open(rootPath=dirs.rootPath) {
-    const r=await http('POST','/api/project/open',{requestId:id(),clientId,rootPath,settings});assert.equal(r.status,201);
+    // Same-root open retains its session in V2; restart the real owner to create
+    // a new session for historical-report isolation without replacing history.
+    if(rootPath===app.workspace.rootPath){for(const p of peers)p.close();await app.close();await start();return (await http('GET','/api/project')).body;}
+    const r=await http('POST','/api/project/open',{requestId:id(),clientId,rootPath,settings:{...settings,schemaVersion:2}});assert.equal(r.status,201);
     await connect();return r.body;
   }
   await start();

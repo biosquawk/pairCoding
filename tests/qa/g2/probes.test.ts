@@ -100,7 +100,7 @@ test('G2 probe TEST025/026: real consent boundary, exact token/file exclusion, H
   await f.write(seed + '# manual_no_consent\n'); await f.chat('No consent'); await delay(450);
   assert.equal(provider.calls.length, 0);
   assert.equal((await f.request('PUT', '/api/project/settings', { ...f.command(), expectedWorkspaceVersion: f.app.workspace.workspaceVersion,
-    settings: { ...approved, aiConsent: true } })).status, 200);
+    settings: { ...approved, schemaVersion:2, aiConsent: true } })).status, 200);
   await f.chat(`Pasted synthetic session token ${f.token}`); await until(() => provider.calls.length === 1, 'consented provider call');
   const context = provider.calls[0].context, payload = JSON.stringify(context);
   assert(payload.includes('main.py')); assert(payload.includes('manual_no_consent'));

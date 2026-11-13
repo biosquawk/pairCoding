@@ -5,6 +5,8 @@ import path from 'node:path';
 import os from 'node:os';
 import { LiveBackend } from '../../src/services/LiveBackend';
 import { createPairCoachServer } from '../../src/server/http';
+import type { RunProfileV2 } from '../../src/shared/runtime-v2';
+import { seedRuntimeSettings, settings as fixtureSettings } from '../qa/helpers';
 
 async function until(condition: () => boolean, label: string) {
   const end = Date.now() + 6000;
@@ -15,7 +17,7 @@ test('REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, exte
   const root = path.join(dir, 'workspace'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# Real client exercise\n');
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const value = 0;\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, port: 0, devBootstrap: true });
   const port = await app.listen();
   const stored = new Map<string, string>();
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, storage: { getItem: k => stored.get(k) ?? null, setItem: (k,v) => { stored.set(k,v); }, removeItem: k => { stored.delete(k); } } });
@@ -29,9 +31,12 @@ test('REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, exte
   await until(() => client.getState().pendingPaths.length === 0, 'CODE_CHANGED ACK');
   assert.equal(fs.readFileSync(path.join(root, 'solution.ts'), 'utf8'), 'const value = 2;\n');
   assert.equal(client.getState().files.find(f => f.path === 'solution.ts')?.version, app.workspace.getDocument('solution.ts').version);
-  const approved = { kind: 'RUN_MAIN' as const, executable: 'node', args: ['main.js'], cwd: '.', timeoutMs: 1000, testReportFormat: 'NONE' as const, testReportGlob: null };
-  assert.equal(await client.updateProjectSettings({ ...client.getState().projectSettings, wireRunProfiles: [approved], contextPatterns: ['**/*.ts', '**/*.md'] }), true);
-  assert.deepEqual(app.workspace.settings.runProfiles, [approved]);
+  const approved:RunProfileV2={kind:'RUN_MAIN',task:{workingDirectory:'.',entry:{kind:'SCRIPT',path:'main.js'},tests:{paths:[],names:[]}},timeoutMs:1000};
+  const currentSettings=client.getState().projectSettings.runtimeSettings!;
+  assert.equal((await client.saveRuntimeSettings({...currentSettings,runProfiles:[approved],contextPatterns:['**/*.ts','**/*.md']},client.getState().workspaceVersion)).ok,true);
+  const persisted=JSON.parse(fs.readFileSync(path.join(root,'.paircoach','settings.json'),'utf8'));
+  assert.deepEqual(persisted.runProfiles,[approved]);
+  assert.deepEqual(app.workspace.settings.runProfiles,[],'V2 tasks never become legacy host executable profiles');
   assert.deepEqual(app.workspace.settings.contextPatterns, ['**/*.ts', '**/*.md']);
   const epoch = client.getState().controlEpoch;
   client.triggerVeto(); client.saveFileContent('solution.ts', 'const value = 3;\n');
@@ -59,6 +64,7 @@ test('REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, exte
   assert.equal(client.getState().projectSettings.aiConsent, false);
   assert.deepEqual(client.getState().projectSettings.runProfiles, []);
   const noTask = path.join(dir, 'no-task'); fs.mkdirSync(noTask); fs.writeFileSync(path.join(noTask, 'main.py'), 'value = 1\n');
+  await seedRuntimeSettings(noTask,{...fixtureSettings,taskFilePath:'challenge.md'});
   await client.openProject(noTask);
   await until(() => !client.getState().isOffline && client.getState().scenario.title === noTask, 'missing task does not disconnect editor');
   assert.match(client.getState().connectionError ?? '', /challenge.md/);
@@ -73,7 +79,7 @@ test('REGRESSION: lost veto ACK then real reconnect snapshot proves cutoff and u
   const root = path.join(dir, 'workspace'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# Task\n');
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const value = 0;\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, port: 0, devBootstrap: true });
   const port = await app.listen();
   const sockets: { block: boolean }[] = [];
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, socket: url => {

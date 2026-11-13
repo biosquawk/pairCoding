@@ -5,3 +5,9 @@ investigations/stage09/** -text
 tests/k-async87cf/** -text
 tests/language-provider-preview-policy/** -text
 tests/node-junit-dialect/actual-node22-failed.xml -text
+
+# These contracts compare actual Git/source bytes, not platform line endings.
+src/server/Runner.ts text eol=lf
+scripts/runtime-image-retention.mjs text eol=lf
+runtimes/catalog.json text eol=lf
+examples/*/task.v2.json text eol=lf

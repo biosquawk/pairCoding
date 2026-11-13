@@ -6,12 +6,12 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createPairCoachServer} from '../../src/server/http';
 import type {CoachContext} from '../../src/server/coach/context';
-import {workspaceFiles,Peer,id,settings} from '../qa/helpers';
+import {seedRuntimeSettings,workspaceFiles,Peer,id,settings} from '../qa/helpers';
 
 async function fixture(t: TestContext) {
   const dirs=await workspaceFiles(t,{'main.py':'a😀b\nsecond\n','.env.fixture':'PRIVATE_EXCLUDED','hidden.txt':'PRIVATE_PATTERN'});
   const contexts:Readonly<CoachContext>[]=[];
-  const token='sensitive-'+id(),app=createPairCoachServer({...dirs,port:0,token,enableCoach:true,
+  const token='sensitive-'+id(),app=createPairCoachServer({rootPath:dirs.rootPath,port:0,token,enableCoach:true,
     coachProvider:{name:'VIEW_CAPTURE',mode:'INJECTED',async decide(c){contexts.push(c);return {kind:'REPLY',text:'captured'};}}});
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,clientId=id(),sessionId=app.session.getSession().sessionId;
   const peers=new Set<{close():void}>(),f={...dirs,app,port,baseURL,clientId,sessionId,token,peers};
@@ -24,7 +24,7 @@ async function fixture(t: TestContext) {
   const command=()=>({clientId,sessionId,requestId:id()});
   assert.equal((await http('POST','/api/session/start',{...command(),limitMs:null,pauseOnHidden:true})).status,200);
   assert.equal((await http('PUT','/api/project/settings',{...command(),expectedWorkspaceVersion:app.workspace.workspaceVersion,
-    settings:{...settings,aiConsent:true,contextPatterns:['*.py','*.md','.env*']}})).status,200);
+    settings:{...settings,schemaVersion:2,aiConsent:true,contextPatterns:['*.py','*.md','.env*']}})).status,200);
   const view=async(payload:unknown)=>(await peer.ack(peer.send('VIEW_CHANGED',payload))).payload;
   const chat=async()=>{
     // Bogus legacy CHAT selection is not authoritative. The validated view is.
@@ -94,7 +94,8 @@ test('WS policy/redaction and project switch: no secret or foreign view reaches 
   assert.equal((await f.chat()).view,null);
   assert.equal((await f.view({path:'main.py',documentVersion:2,cursor:null,selection:null})).status,'OK');
   const other=path.join(f.base,'other-project');await mkdir(other);await writeFile(path.join(other,'main.py'),'foreign project');
-  const open=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:other,settings:f.app.workspace.settings});
+  await seedRuntimeSettings(other,{...settings,aiConsent:true,taskFilePath:null,contextPatterns:['*.py']});
+  const open=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:other,settings:{...f.app.workspace.settings,schemaVersion:2}});
   assert.equal(open.status,201);assert.notEqual(f.app.workspace.projectId,secret.view?.projectId);assert.equal(f.app.session.getEditorView(),null);
   const sessionId=f.app.session.getSession().sessionId;
   const nextPeer=new Peer({...f,sessionId} as any);await nextPeer.connect();

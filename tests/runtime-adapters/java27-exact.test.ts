@@ -14,7 +14,7 @@ test('same exact-version predicate: original metadata rejects actual tools, corr
  const catalog=read('runtimes/catalog.json'),profile=catalog.profiles.find((p:any)=>p.id==='java-maven-27');
  assert.ok(validateRuntimeCatalog(catalog)); assert.ok(matches(profile.expectedTools.filter((t:any)=>['java','javac'].includes(t.name)),actual));
  for(const bad of ['27.0.1.0','27.0.1.0.3','27','26.0.1'])assert.equal(matches(actual,actual.map(t=>({...t,version:bad}))),false);
- for(const p of catalog.profiles.filter((p:any)=>p.adapterFamily==='java-maven'))assert.equal(p.language.serverJvm,'27.0.1.0.2');
+ for(const p of catalog.profiles.filter((p:any)=>p.adapterFamily==='java-maven'))assert.deepEqual(p.language,{provider:'builtin',imageLockKey:null,serverJvm:null});
  assert.equal(profile.compilerRelease,27);
  const lock=read('runtimes/production-inputs.lock.json');assert.deepEqual(lock.images.java27.observedTools,actual);
  assert.ok(lock.images.java27.env.includes('JAVA_VERSION=jdk-27.0.1.0'));assert.equal(lock.language.jdt.serverJvm,27);

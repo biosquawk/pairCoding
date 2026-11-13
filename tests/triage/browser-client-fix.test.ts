@@ -7,15 +7,22 @@ import os from 'node:os';
 import vm from 'node:vm';
 import { LiveBackend } from '../../src/services/LiveBackend';
 import { createPairCoachServer } from '../../src/server/http';
+import { disableNativeCompletionProviders, SAFE_SUGGEST_OPTIONS } from '../../src/services/monacoLspBridge';
+import { createBuiltinLanguageRegistry, languageForPath } from '../../src/services/builtinLanguageRegistry';
 const panel = fs.readFileSync(new URL('../../src/components/EditorPanel.tsx', import.meta.url), 'utf8');
 // Source-extracted callbacks with explicit fake editor; NOT React/Monaco integration.
 const mountStart = panel.indexOf('const handleEditorMount: OnMount = (editor, monaco) => {');
 const mountBody = panel.slice(panel.indexOf('{', mountStart) + 1, panel.indexOf('\n  };', mountStart));
 test('001 lifetime unit: only current instance disposal invalidates refs; stable editor shell across loading', () => {
   const refs: any = { editorRef: { current: null }, monacoRef: { current: null }, decorationsRef: { current: ['old'] },
-    setEditorReady() {}, setEditorGeneration() {} };
+    setEditorReady() {}, setEditorGeneration() {}, disableNativeCompletionProviders, SAFE_SUGGEST_OPTIONS,
+    createBuiltinLanguageRegistry, client:{setBuiltinLanguageProvider() {}} };
   const fake = () => { const callbacks: (() => void)[] = [], locks: any[] = []; return { callbacks, locks, updateOptions(v: any) { locks.push(v); }, onDidDispose(cb: () => void) { callbacks.push(cb); }, dispose() { callbacks.forEach(cb => cb()); } }; };
-  const monaco = { editor: { defineTheme() {}, setTheme() {} } }, first = fake(), second = fake();
+  const mode=()=>({modeConfiguration:{completionItems:true,diagnostics:true},setModeConfiguration(value:any){this.modeConfiguration=value;}});
+  const monaco = { editor: { defineTheme() {}, setTheme() {} },
+    typescript:{typescriptDefaults:mode(),javascriptDefaults:mode()},json:{jsonDefaults:mode()},
+    css:{cssDefaults:mode(),lessDefaults:mode(),scssDefaults:mode()},
+    html:{htmlDefaults:mode(),handlebarDefaults:mode(),razorDefaults:mode()} }, first = fake(), second = fake();
   const mount = (editor: any) => vm.runInNewContext('(function(){' + mountBody + '})()', { ...refs, editor, monaco });
   mount(first); assert.equal(first.locks.at(-1).readOnly, true); assert.equal(first.callbacks.length, 1, 'a disposed editor must invalidate its refs');
   mount(second); first.dispose(); assert.equal(refs.editorRef.current, second, 'late old disposal cannot clear new instance');
@@ -36,7 +43,7 @@ test('003 REAL HTTP/WS error projection: binary, oversized, settings missing tas
   fs.writeFileSync(path.join(root, 'challenge.md'), '# task');
   fs.writeFileSync(path.join(root, 'binary.dat'), Buffer.from([0x51,0,0xff]));
   fs.writeFileSync(path.join(root, 'oversized.txt'), 'A'.repeat(1024*1024+1));
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true, enableCoach: false });
+  const app = createPairCoachServer({ rootPath: root, port: 0, devBootstrap: true, enableCoach: false });
   const port = await app.listen();
   const requests: any[] = [], states: any[] = [];
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, fetch: (async (url, options) => {
@@ -71,13 +78,13 @@ test('003 REAL HTTP/WS error projection: binary, oversized, settings missing tas
 test('003 positive control REAL HTTP/WS: no active binary failure, missing task IS exposed', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-control-')), root = path.join(dir, 'root'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# valid task');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true, enableCoach: false });
+  const app = createPairCoachServer({ rootPath: root, port: 0, devBootstrap: true, enableCoach: false });
   const port = await app.listen(), client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}` });
   t.after(async () => { client.close(); await app.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   await client.connect(); await until(() => !client.getState().isOffline, 'control sync');
   const transitions: any[] = [];
   const stop = client.subscribe('state', s => transitions.push({ activePath: s.activePath, loaded: s.files.find((f: any) => f.path === s.activePath)?.loaded ?? null, offline: s.isOffline }));
-  assert.equal(await client.openProject(root), true);
+  assert.equal(await client.openProject(root), true, client.getState().connectionError ?? undefined);
   await until(() => !client.getState().isOffline && client.getState().files.some(f => f.path === 'challenge.md' && f.loaded), 'reopen same root');
   stop(); console.log('001 real openProject conditional-editor inputs', JSON.stringify(transitions));
   assert.ok(transitions.some(s => s.activePath === '' || s.loaded === false), 'conditional Editor absent at least once');
@@ -92,7 +99,7 @@ test('003 stale REAL read failure from previous root cannot contaminate new task
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'triage-stale-')), root = path.join(dir, 'old'), next = path.join(dir, 'next');
   fs.mkdirSync(root); fs.mkdirSync(next);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# old'); fs.writeFileSync(path.join(next, 'challenge.md'), '# next');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true, enableCoach: false });
+  const app = createPairCoachServer({ rootPath: root, port: 0, devBootstrap: true, enableCoach: false });
   const port = await app.listen(); let release!: () => void, held = false;
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, fetch: (async (url, options) => {
     const response = await fetch(url, options);
@@ -102,7 +109,7 @@ test('003 stale REAL read failure from previous root cannot contaminate new task
   t.after(async () => { release?.(); client.close(); await app.close(); fs.rmSync(dir, { recursive: true, force: true }); });
   await client.connect(); await until(() => !client.getState().isOffline, 'old sync');
   const oldRead = client.selectFile('old-missing.txt'); await until(() => held, 'actual old404 held');
-  assert.equal(await client.openProject(next), true);
+  assert.equal(await client.openProject(next), true, client.getState().connectionError ?? undefined);
   await until(() => !client.getState().isOffline && client.getState().scenario.title === next, 'next sync');
   release(); await oldRead;
   assert.equal(client.getState().taskReadError ?? null, null);
@@ -126,7 +133,8 @@ test('001 switch unit: detach during loading retains named model/Undo, restores 
     restoreViewState: (v: any) => restores.push(v), updateOptions: (v: any) => options.push(v) };
   const models = new Map([[oldUri.toString(), oldModel], [newUri.toString(), nextModel]]);
   const context: any = { editorRef: { current: editor }, monacoRef: { current: { editor: { getModel: (uri: any) => models.get(uri.toString()), setModelLanguage() {} } } },
-    activeFile: undefined, modelUri: () => oldUri, getLanguageForPath: () => 'typescript', viewStatesRef: { current: new Map() }, isApplyingCoachStepRef: { current: false } };
+    activeFile: undefined, modelUri: () => oldUri, languageForPath, retiredModelsRef:{current:new Set()},
+    viewStatesRef: { current: new Map() }, isApplyingCoachStepRef: { current: false } };
   const effect = () => vm.runInNewContext('(function(){' + body + '})()', context);
   effect(); assert.equal(current, null); assert.equal(options.at(-1).readOnly, true);
   context.activeFile = { path: 'main.ts', loaded: true, content: 'human' }; effect();

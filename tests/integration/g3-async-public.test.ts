@@ -52,13 +52,14 @@ for(const revoke of [false,true])test(`G3 real async public restore: ${revoke?'V
         const duplicate=f.peer.send('PROPOSAL_RESPONSE',payload);
         const ping=f.peer.send('PING',{lastAppliedSeq:0});
         const veto=revoke?f.peer.send('VETO_ESCAPE',{controlEpoch:epoch,activeInterventionId:null,lastAppliedSeq:0}):null;
+        let pingBeforeSettlement=false;
         const [pingAck,busy,vetoAck]=await Promise.all([
-          f.peer.ack(ping),f.http('GET','/api/file?path='+paths[0]),veto?f.peer.ack(veto):Promise.resolve(null),
+          f.peer.ack(ping).then(ack=>{pingBeforeSettlement=!settled;return ack;}),f.http('GET','/api/file?path='+paths[0]),veto?f.peer.ack(veto):Promise.resolve(null),
         ]);
-        assert.equal(pingAck.payload.status,'OK');
+        assert.equal(pingAck.payload.status,'OK',JSON.stringify(pingAck.payload));
         assert.equal(busy.status,409);assert.equal(busy.body.code,'WORKSPACE_BUSY');
-        if(vetoAck)assert.equal(vetoAck.payload.status,'OK');
-        return {duplicate,pingBeforeSettlement:!settled};
+        if(vetoAck)assert.equal(vetoAck.payload.status,'OK',JSON.stringify(vetoAck.payload));
+        return {duplicate,pingBeforeSettlement};
       })();
     }
   });
@@ -77,7 +78,7 @@ for(const revoke of [false,true])test(`G3 real async public restore: ${revoke?'V
     assert.deepEqual(a.payload.error,revoke?{...ack.payload.error,requestId:a.payload.replyTo}:null);
   }
   const bundle=(await f.peer.take(m=>m.type==='SESSION_SNAPSHOT'&&m.payload.proposals.length===0&&m.payload.project.workspaceVersion>proposal.basedOnWorkspaceVersion)).payload;
-  assert.equal(bundle.proposals.length,0);assert.equal(bundle.project.capabilities.docs,'NOT_INSTALLED');assert.equal(bundle.project.capabilities.autocomplete,'NOT_INSTALLED');
+  assert.equal(bundle.proposals.length,0);assert.equal(Object.hasOwn(bundle.project.capabilities,'docs'),false,'V2 omits retired legacy docs capability');assert.equal(bundle.project.capabilities.language.docs,'N/A');assert.equal(bundle.languageBootstrap.provider,'builtin');assert.equal(bundle.project.capabilities.language.profileId,bundle.project.capabilities.execution.runtime.profileId);
   const snapshots=(await f.http('GET','/api/snapshots')).body;assert.equal(snapshots.length,2);
   const backup=f.app.workspace.readSnapshot(snapshots.find((s:any)=>s.snapshotId!==source.snapshotId).snapshotId);
   assert.equal(backup.files.length,paths.length);
@@ -103,8 +104,9 @@ test('G3 real async public finish captures once: BUSY reads and responsive contr
       const [pingAck,vetoAck,hiddenAck,project,file,snapshots,session,report]=await Promise.all([
         f.peer.ack(ping),f.peer.ack(veto),f.peer.ack(hidden),f.http('GET','/api/project'),f.http('GET','/api/file?path=f0.ts'),f.http('GET','/api/snapshots'),f.http('GET','/api/session'),f.http('GET',`/api/session/report?sessionId=${f.sessionId}`),
       ]);
-      for(const a of [pingAck,vetoAck,hiddenAck])assert.equal(a.payload.status,'OK');
-      for(const r of [project,file,snapshots]){assert.equal(r.status,409);assert.equal(r.body.code,'WORKSPACE_BUSY');}
+      for(const a of [pingAck,vetoAck,hiddenAck])assert.equal(a.payload.status,'OK',JSON.stringify(a.payload));
+      assert.equal(project.status,409);assert.equal(project.body.code,'PROJECT_STATE_CHANGED');
+      for(const r of [file,snapshots]){assert.equal(r.status,409);assert.equal(r.body.code,'WORKSPACE_BUSY');}
       assert.equal(session.body.lifecycle,'READY');assert.equal(report.status,404);
       assert.equal(f.peer.frames.some(m=>m.type==='SESSION_REPORT'),false,'no early report during real capture');
       return {duplicate};

@@ -91,7 +91,7 @@ test('REAL socket loss after capture admission: valid task file, asynchronous au
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'finish-socket-edge-')), root = path.join(base, 'project'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# Real fixture task\n');
   fs.writeFileSync(path.join(root, 'main.py'), 'PRESERVED\n');
-  const token = 'ephemeral-unit-integration', app = createPairCoachServer({ rootPath: root, dataDir: path.join(base, 'data'),
+  const token = 'ephemeral-unit-integration', app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'),
     token, port: 0, enableCoach: false, enableExecution: true });
   const port = await app.listen(), posts: any[] = [], requests: string[] = [];
   let response: any, cut = false, client: LiveBackend | undefined;

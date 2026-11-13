@@ -57,7 +57,7 @@ test('ledger project/open lifecycle: old open replay cannot rebind project and o
   const f=await serverFixture(t,{'solution.js':'original\n'}),p=await connected(t,f);
   const roots=[path.join(f.base,'project-A'),path.join(f.base,'project-B')];
   for(const root of roots){await fs.mkdir(root);await fs.writeFile(path.join(root,'challenge.md'),'task\n');await fs.writeFile(path.join(root,'solution.js'),path.basename(root)+'\n');}
-  const body={requestId:id(),clientId:f.clientId,rootPath:roots[0],settings};
+  const body={requestId:id(),clientId:f.clientId,rootPath:roots[0],settings:{...settings,schemaVersion:2}};
   assert.equal((await f.http('POST','/api/project/open',body)).status,201);
   const projectA=await f.http('GET','/api/project');assert.notEqual(projectA.body.sessionId,f.sessionId);
   assert.equal((await f.http('POST','/api/project/open',{...body,requestId:id(),rootPath:roots[1]})).status,201);
@@ -113,7 +113,7 @@ test('ledger real budget lifecycle: PING bypasses history, adoption resets sessi
   const dirs=await workspaceFiles(t,{'solution.js':'start\n'}),token='budget-'+id(),clientId=id();
   const budget={maxEntries:2,maxBytes:65536,maxPending:2,maxOutcomeBytes:8192,tempRoot:path.join(dirs.base,'journals')};
   await fs.mkdir(budget.tempRoot); // Healthy-storage precondition; fault injection is covered separately.
-  const app=createPairCoachServer({...dirs,port:0,token,enableCoach:false,ledgerOptions:budget,openLedgerOptions:budget} as any);
+  const app=createPairCoachServer({rootPath:dirs.rootPath,port:0,token,enableCoach:false,ledgerOptions:budget,openLedgerOptions:budget} as any);
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,peers=new Set<{close():void}>();
   t.after(async()=>{for(const p of peers)p.close();try{await app.close();}finally{await dirs.cleanup();}});
   const http=async(method:string,target:string,body?:unknown)=>{
@@ -131,7 +131,7 @@ test('ledger real budget lifecycle: PING bypasses history, adoption resets sessi
   assert.equal((await http('GET','/api/file?path=solution.js')).body.content,'two\n');
   const roots=['A','B','C'].map(name=>path.join(dirs.base,name));
   for(const root of roots){await fs.mkdir(root);await fs.writeFile(path.join(root,'challenge.md'),'task\n');await fs.writeFile(path.join(root,'solution.js'),path.basename(root)+'\n');}
-  const openA={requestId:id(),clientId,rootPath:roots[0],settings};
+  const openA={requestId:id(),clientId,rootPath:roots[0],settings:{...settings,schemaVersion:2}};
   const opened=await http('POST','/api/project/open',openA);assert.equal(opened.status,201);
   const fresh=new Peer({...f,sessionId:opened.body.sessionId} as any);await fresh.connect();
   const newDoc=(await http('GET','/api/file?path=solution.js')).body,newState=(await http('GET','/api/session')).body;

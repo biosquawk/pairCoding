@@ -11,7 +11,7 @@ const TOKEN='test-token-0123456789abcdef-0123456789abcdef';
 async function fixture(t:any) {
   const parent=fs.mkdtempSync(path.join(os.tmpdir(),'paircoach-http-')),root=path.join(parent,'workspace');fs.mkdirSync(root);
   fs.writeFileSync(path.join(root,'challenge.md'),'# Zadanie\n');fs.writeFileSync(path.join(root,'solution.js'),'// start\r\n');
-  const app=createPairCoachServer({rootPath:root,dataDir:path.join(parent,'data'),port:0,token:TOKEN});
+  const app=createPairCoachServer({rootPath:root,dataDir:path.join(root,'.paircoach'),port:0,token:TOKEN});
   const port=await app.listen(),base=`http://127.0.0.1:${port}`;
   t.after(async()=>{await app.close();fs.rmSync(parent,{recursive:true,force:true});});
   const request=async(p:string,body?:unknown,method=body?'POST':'GET',headers:Record<string,string>={})=>{

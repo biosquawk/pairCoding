@@ -141,7 +141,7 @@ const serverRoot = process.env.PAIRCOACH_PROPOSAL_SERVER_ROOT ?? fileURLToPath(n
 for (const mode of ['success', 'recovery'] as const) for (const lost of [false, true]) {
   test(`REAL separate-process >5s restore: ${mode}, ${lost ? 'lost ACK + client ledger reconnect' : 'late ACK'}`, { timeout: 25000 }, async t => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p2-proposal-unknown-'));
-    const root = path.join(dir, 'workspace'), data = path.join(dir, 'data'); fs.mkdirSync(root); fs.mkdirSync(data);
+    const root = path.join(dir, 'workspace'), data = path.join(root, '.paircoach'); fs.mkdirSync(root);
     fs.writeFileSync(path.join(root, 'main.py'), 'ORIGINAL\n');
     fs.writeFileSync(path.join(root, 'challenge.md'), '# Real proposal exercise\n');
     const token = 'fixture-' + crypto.randomUUID(), sent: string[] = [], frames: any[] = [], errors: string[] = [];
@@ -149,6 +149,7 @@ for (const mode of ['success', 'recovery'] as const) for (const lost of [false, 
       import fs from 'node:fs'; import path from 'node:path';
       import { createPairCoachServer } from ${JSON.stringify(pathToFileURL(path.join(serverRoot, 'src/server/http.ts')).href)};
       const app = createPairCoachServer({ rootPath: ${JSON.stringify(root)}, dataDir: ${JSON.stringify(data)}, token: ${JSON.stringify(token)}, port: 0, enableCoach: false });
+      const port = await app.listen();
       const source = app.workspace.createSnapshot('Original', ['main.py']);
       app.workspace.on('snapshotCheckpoint', e => {
         if (e.phase !== 'BEFORE_PUBLICATION') return;
@@ -156,7 +157,7 @@ for (const mode of ['success', 'recovery'] as const) for (const lost of [false, 
         Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 6500);
         if (${JSON.stringify(mode)} === 'recovery') fs.writeFileSync(path.join(${JSON.stringify(root)}, 'main.py'), 'FOREIGN', { flag: 'wx' });
       });
-      const port = await app.listen(); process.send({ port, snapshotId: source.snapshotId });
+      process.send({ port, snapshotId: source.snapshotId });
     `;
     const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '--eval', script], { cwd: serverRoot, stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     let stderr = ''; child.stderr!.on('data', chunk => { stderr += chunk; });
@@ -225,6 +226,15 @@ for (const mode of ['success', 'recovery'] as const) for (const lost of [false, 
     const backupBytesRetained = privateFiles.some(file => file.endsWith('.bin') && fs.readFileSync(path.join(data, file), 'utf8') === 'USER WORK\n');
     assert(backupBytesRetained, 'actual pre-restore backup retains confirmed USER WORK bytes');
     assert.equal(client.getState().activeProposal, null);
+    if(mode==='recovery') {
+      // Read-only HELLO/ledger replay must never grant a new write through the
+      // retained ambiguous restore journal.
+      const state=await fetch(baseUrl+'/api/session',{headers:{Authorization:`Bearer ${token}`}}).then(r=>r.json());
+      const denied=await fetch(baseUrl+'/api/file',{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({requestId:crypto.randomUUID(),clientId:JSON.parse(original).clientId,sessionId:state.sessionId,controlEpoch:state.controlEpoch,operation:'CREATE',path:'forbidden.py',newPath:null,content:'MUST NOT WRITE',baseVersion:null})});
+      assert.equal(denied.status,503);assert.equal((await denied.json()).code,'RECOVERY_REQUIRED');
+      assert.equal(fs.existsSync(path.join(root,'forbidden.py')),false);
+      assert.equal(fs.readFileSync(path.join(root,'main.py'),'utf8'),'FOREIGN');
+    }
     assert(!errors.some(error => error.includes(token)), 'no token in UI errors');
     t.diagnostic(JSON.stringify({ mode, lost, serverRoot, delayMs: 6500, deadlineMs: Math.round(deadlineMs), decision: JSON.parse(original), statuses: outcomes.map(outcome => outcome.status), displayedRecovery: errors.some(error => /RECOVERY_REQUIRED/.test(error)), backupCount: snapshots.length - 1, publicationCheckpoints: 1 }));
   });

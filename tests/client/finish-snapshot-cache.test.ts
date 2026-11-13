@@ -14,9 +14,9 @@ async function until(read: () => boolean, label: string) {
   while (!read()) { assert.ok(Date.now() < end, label); await delay(10); }
 }
 function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>(r => { resolve = r; });
-  return { promise, resolve };
+  let resolve!: () => void, settled=false;
+  const promise = new Promise<void>(r => { resolve = () => { settled=true; r(); }; });
+  return { promise, resolve, get settled(){return settled;} };
 }
 type Gate = { path: string; drop: boolean; arrived: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> };
 async function fixture(t: TestContext) {
@@ -27,7 +27,7 @@ async function fixture(t: TestContext) {
     fs.writeFileSync(path.join(dir, 'main.py'), `print(${JSON.stringify(path.basename(dir))})\n`);
   }
   const token = 'fixture-' + crypto.randomUUID();
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(base, 'data'), token,
+  const app = createPairCoachServer({ rootPath: root, token,
     port: 0, enableCoach: false, enableExecution: true });
   const port = await app.listen(), baseUrl = `http://127.0.0.1:${port}`;
   const gates: Gate[] = [], allGates: Gate[] = [], requests: { path: string; method: string; body: any; status?: number; value?: any; done?: boolean }[] = [];
@@ -153,7 +153,10 @@ for (const dropOld of [false, true]) {
     const durable = await f.app.workspace.createSnapshotAsync('generation fixture');
     const fresh = f.hold('/api/snapshots');
     assert.equal(await f.client.updateProjectSettings({ ...f.client.getState().projectSettings, aiConsent: false }), true);
-    await fresh.arrived.promise; // New generation's GET still in flight, not yet installed.
+    // V2 SAVE is metadata-only. Obtain a genuine same-project HELLO snapshot
+    // through the public reconnect; the held old GET still resolves afterwards.
+    f.client.reconnect();
+    await until(()=>fresh.arrived.settled, 'Expected new generation GET: '+JSON.stringify(f.requests.map(r=>({path:r.path,status:r.status,done:r.done})))); // New generation's GET still in flight, not yet installed.
     const before = { ids: f.ids(), error: f.client.getState().snapshotsError };
     let stalePublishes = 0; const unsubscribe = f.client.subscribe('state', () => { stalePublishes++; });
     old.release.resolve(); await oldRead; unsubscribe();
@@ -174,8 +177,8 @@ for (const dropOld of [false, true]) {
     const fresh = f.hold('/api/snapshots');
     const leaked: string[] = [];
     f.client.subscribe('state', state => { if (state.scenario.title === f.other && (state.snapshots.length || state.snapshotsError)) leaked.push(JSON.stringify({ ids: state.snapshots.map((s: any) => s.id), error: state.snapshotsError })); });
-    assert.equal(await f.client.openProject(f.other), true);
-    await fresh.arrived.promise;
+    assert.equal(await f.client.openProject(f.other), true, f.client.getState().connectionError ?? undefined);
+    await until(()=>fresh.arrived.settled, 'Expected new generation GET: '+JSON.stringify(f.requests.map(r=>({path:r.path,status:r.status,done:r.done}))));
     assert.deepEqual(f.ids(), [], 'old project copies hidden before new list resolves');
     assert.equal(f.client.getState().snapshotsError, null);
     old.release.resolve(); await oldRead;

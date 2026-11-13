@@ -123,7 +123,7 @@ test('G3 missing profile and real zero-test/green JUnit are honest; green never 
     // Each prior run creates an external result.xml; consume its real watcher event before the next command version.
     if(count) await f.peer.take(m=>m.type==='EXTERNAL_FILE_SYNC'&&m.payload.path==='result.xml');
     const script=`require('fs').writeFileSync('result.xml','<testsuite tests="${count}" failures="0" errors="0" skipped="0">${count?'<testcase name="actual"/>':''}</testsuite>');console.log('RUN_REAL_${count}')`;
-    const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,runProfiles:[{
+    const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,runProfiles:[{
       kind:'RUN_TESTS',executable:process.execPath,args:['-e',script],cwd:'.',timeoutMs:3000,testReportFormat:'JUNIT_XML',testReportGlob:'result.xml'}]}});assert.equal(update.status,200);
     assert.deepEqual(update.body.capabilities,{docs:'NOT_INSTALLED',autocomplete:'NOT_INSTALLED',canRunMain:false,canRunTests:true});
     const start=await run();assert.equal(start.status,202,JSON.stringify(start.body));
@@ -140,7 +140,7 @@ function alive(pid:number) {
   try {process.kill(pid,0);if(process.platform==='linux'&&fs.readFileSync('/proc/'+pid+'/stat','utf8').split(') ')[1].startsWith('Z'))return false;return true;}catch{return false;}
 }
 async function startTree(f:Awaited<ReturnType<typeof fixture>>, timeoutMs:number) {
-  const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,runProfiles:[{
+  const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,runProfiles:[{
     kind:'RUN_MAIN',executable:process.execPath,args:['-e',treeScript],cwd:'.',timeoutMs,testReportFormat:'NONE',testReportGlob:null}]}});assert.equal(update.status,200);
   const start=await f.http('POST','/api/run',{...f.command(),mode:'RUN_MAIN',expectedWorkspaceVersion:f.app.workspace.workspaceVersion});assert.equal(start.status,202,JSON.stringify(start.body));
   await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes('TREE_READY'));
@@ -164,7 +164,7 @@ test('G3 frozen report facts/consent/AI attribution and allowlisted AI projectio
   const received:ReportAIFacts[]=[];let fail=true;let release!:(v:string)=>void;
   const f=await fixture(t,{reportGenerate:async(facts,signal)=>{received.push(facts);assert.equal(signal.aborted,false);if(fail)throw new Error('synthetic failure');return new Promise(r=>{release=r;});}},
     {'hidden.txt':'EXCLUDED_CONTEXT','key.pem':'EXCLUDED_KEY','.env.fixture':'EXCLUDED_ENV'});
-  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,aiConsent:true,contextPatterns:['**/*.py','**/*.pem','**/.env*']}});
+  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:true,contextPatterns:['**/*.py','**/*.pem','**/.env*']}});
   await f.write('FROZEN '+f.token+'\n');
   await f.peer.ack(f.peer.send('CHAT_MESSAGE',{text:'token '+f.token,path:null,documentVersion:null,selection:null}));
   // Real executed cutoff, including retransmission, not an invented fact.
@@ -190,14 +190,14 @@ test('G3 consent OFF never calls injected report AI; local facts retain real coa
   const f=await fixture(t,{enableCoach:true,coachProvider:{name:'INJECTED',mode:'INJECTED',async decide(c){return c.messages.length?{
     kind:'EDIT',purpose:'Attribution fixture',path:'main.py',documentVersion:c.documents.find(d=>d.path==='main.py')!.version,workspaceVersion:c.workspaceVersion,
     steps:[{range:{startLine:1,startColumn:1,endLine:1,endColumn:1},textBlock:'# AI fragment\n'}]}:{kind:'SILENT',reason:'not yet'};}},reportGenerate:async()=>{calls++;return 'SHOULD NOT RUN';}});
-  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,aiConsent:true}});
+  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:true}});
   await f.http('POST','/api/session/start',{...f.command(),limitMs:null,pauseOnHidden:true});
   await f.peer.ack(f.peer.send('CHAT_MESSAGE',{text:'Demonstrate',path:null,documentVersion:null,selection:null}));
   const prep=(await f.peer.take(m=>m.type==='CONTROL_PREPARE')).payload;
   await f.peer.ack(f.peer.send('CONTROL_READY',{requestId:prep.requestId,workspaceVersion:prep.basedOnWorkspaceVersion,ready:true}));
   const step=(await f.peer.take(m=>m.type==='COACH_STEP_EDIT')).payload;
   await f.peer.ack(f.peer.send('STEP_RENDERED',{stepId:step.stepId,interventionId:step.interventionId,documentVersion:step.version}));
-  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,aiConsent:false}});
+  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:false}});
   assert.equal((await f.finish()).status,202);
   const r=await until(async()=>(await f.http('GET',`/api/session/report?sessionId=${f.sessionId}`)).body,r=>r.status==='READY');
   assert.equal(calls,0);assert(r.markdown.includes('kroki AI: 1'));assert(r.markdown.includes('main.py'));assert(r.markdown.includes('Nie przypisujemy ich uczniowi'));
@@ -223,9 +223,10 @@ test('G3 pending-root gate refusal cleans startup/open resources and retains the
   t.mock.method(WorkspaceService.prototype,'close',function(this:WorkspaceService){workspaceCloses++;return wc.call(this);});
   t.mock.method(SessionController.prototype,'close',function(this:SessionController){sessionCloses++;return sc.call(this);});
   t.mock.method(WorkspaceService.prototype,'updateSettings',function(this:WorkspaceService,s:Parameters<typeof us>[0]){settingsCalls++;return us.call(this,s);});
-  assert.throws(()=>createPairCoachServer({rootPath:blocked,dataDir:path.join(f.base,'blocked-data'),port:0,enableExecution:true}),{code:'RECOVERY_REQUIRED'});
+  const refused=createPairCoachServer({rootPath:blocked,port:0,enableExecution:false});
+  await assert.rejects(refused.listen(),{code:'RECOVERY_REQUIRED'});await refused.close();
   assert.equal(workspaceCloses,1);assert.equal(sessionCloses,1);
-  const response=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:blocked,settings});
+  const response=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:blocked,settings:{...settings,schemaVersion:2}});
   assert.equal(response.body.code,'RECOVERY_REQUIRED');assert.equal(workspaceCloses,2);assert.equal(sessionCloses,2);assert.equal(settingsCalls,0,'settings not touched before gate recovery');
   assert.equal(f.app.session.state.sessionId,f.sessionId);assert.equal(f.app.workspace.rootPath,f.rootPath);await f.write('Original session remains live');
   assert.equal(fs.readFileSync(path.join(journal,'unknown-material'),'utf8'),'PRESERVE JOURNAL');
@@ -246,7 +247,7 @@ test('G3 concurrent FINISH_EXERCISE acceptance deduplicates even while real Stop
   const f=await fixture(t,{enableCoach:true,coachProvider:{name:'INJECTED',mode:'INJECTED',async decide(){return sendProposal?{
     kind:'PROPOSE',proposalKind:'FINISH_EXERCISE',questionText:'Zakończyć?',snapshotId:null,paths:[],resetTimer:false
   }:{kind:'SILENT',reason:'wait'};}}});
-  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,aiConsent:true}});
+  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:true}});
   await f.http('POST','/api/session/start',{...f.command(),limitMs:null,pauseOnHidden:true});
   // A real child keeps Stop asynchronous; wait for its external pids file before creating a current proposal.
   const {pids}=await startTree(f,5000);t.after(()=>{for(const pid of pids)if(alive(pid))try{process.kill(pid,'SIGKILL');}catch{}});

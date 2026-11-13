@@ -6,6 +6,7 @@ import {createPairCoachServer} from '../../src/server/http';
 
 const [rootPath,dataDir,token,mode]=process.argv.slice(2);
 const app=createPairCoachServer({rootPath,dataDir,token,port:0,enableCoach:false});
+const port=await app.listen();
 const source=app.workspace.createSnapshot('Original',['main.py']);
 let checkpoints=0;
 app.workspace.on('snapshotCheckpoint',e=>{
@@ -15,6 +16,5 @@ app.workspace.on('snapshotCheckpoint',e=>{
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500);
   if(mode==='recovery')fs.writeFileSync(path.join(rootPath,'main.py'),'FOREIGN',{flag:'wx'});
 });
-const port=await app.listen();
 process.send?.({port,snapshotId:source.snapshotId,sessionId:app.session.state.sessionId});
 process.on('message',message=>{if(message==='close')void app.close().then(()=>process.exit(0));});

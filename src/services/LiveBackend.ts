@@ -1432,7 +1432,10 @@ export class LiveBackend {
       const wireSettings:SettingsV2={...base,aiConsent:settings.aiConsent,taskMode:settings.taskMode,taskFilePath:settings.taskFilePath||null,reviewNotesPath:settings.reviewNotesPath,contextPatterns:settings.contextPatterns??base.contextPatterns};
       const result=await this.saveRuntimeSettings(wireSettings,this.state.workspaceVersion);
       if(!result.ok)return false;
-      if (wireSettings.taskFilePath) { try { await this.loadFile(wireSettings.taskFilePath); } catch (error) { this.fail(new Error(`Ustawienia zapisano, ale plik zadania jest niedostępny: ${error instanceof Error ? error.message : String(error)}`)); } }
+      if (wireSettings.taskFilePath) { try { await this.loadFile(wireSettings.taskFilePath); } catch (error) {
+        const activePath=this.state.activePath,activeError=activePath!==wireSettings.taskFilePath ? this.loadErrors.get(activePath) : undefined;
+        this.fail(new Error(`${activeError ? `Nie można odczytać ${activePath}: ${activeError}\n` : ''}Ustawienia zapisano, ale plik zadania jest niedostępny: ${error instanceof Error ? error.message : String(error)}`));
+      } }
       this.publish(); return true;
     } catch (error) { if (this.project?.projectId === projectId) this.fail(error); return false; }
   }

@@ -70,6 +70,19 @@ test('NEW image/transport/UNKNOWN/publication guard failures stop; images are no
  await t.test('old receipt tamper with valid images stops before mutation',async()=>{const file=f.p.preserveRun[0].leafReceipt.file,before=fs.readFileSync(file);try{const r=await failure('receipt-after-plan',(a)=>{if(a[0]==='ps')put(file,Buffer.concat([before,Buffer.from(' ')]));},/historical\/source file bytes differ/);noMutation(r.m);}finally{put(file,before);}});
 });
 
+test('small retained context fixture still refuses post-plan tampering before Docker dispatch',async t=>{
+ const f=await fixture(t),p=await f.plan('context-tamper');
+ const retained=p.historical.protectedInventories.find(i=>path.basename(i.root)==='language-contexts');
+ assert.ok(retained);assert.equal(retained.files,1,'one deterministic identity marker, no unused LSP payload');
+ const marker=path.join(retained.root,'retained-state.json'),before=fs.readFileSync(marker);
+ const bytes=f.m.planBytes(p),ph=hash(bytes),gb=Buffer.from(JSON.stringify(guard(p,ph,f.dir)));let calls=0;
+ try{
+  put(marker,Buffer.concat([before,Buffer.from('tampered')]));
+  await assert.rejects(f.m.executeRecoveryPlan(bytes,ph,gb,hash(gb),{spawnSync:()=>{calls++;assert.fail('context tamper must not dispatch');}}));
+  assert.equal(calls,0);assert.equal(fs.existsSync(p.options.outputRoot),false);
+ }finally{put(marker,before);}
+});
+
 test('NEW exact inventory and shared dispatch budget boundaries (no Docker)',async t=>{
  const dir=root(t),m=await load(),file=path.join(dir,'file');put(file,'before');const before=m.inventory(dir);put(file,'after');assert.notDeepEqual(m.inventory(dir),before);
  assert.doesNotThrow(()=>m.assertCommandBudget(1023,100,99));assert.throws(()=>m.assertCommandBudget(1024,100,99),/count/);assert.throws(()=>m.assertCommandBudget(0,100,100),/budget/);assert.throws(()=>m.assertCommandBudget(-1,100,0),/budget/);

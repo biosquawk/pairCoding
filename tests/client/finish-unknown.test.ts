@@ -126,17 +126,18 @@ test('FINISH UNKNOWN: close ignores a read completing after disposal',async t=>{
 async function until<T>(read:()=>T,valid:(v:T)=>boolean,label:string){const end=Date.now()+12000;do{const v=read();if(valid(v))return v;await delay(10);}while(Date.now()<end);assert.fail('Timeout: '+label);}
 const serverRoot=process.env.PAIRCOACH_FINISH_SERVER_ROOT??fileURLToPath(new URL('../../',import.meta.url));
 test('REAL FINISH separate process: 6500ms capture, original 5s UNKNOWN, durable READY+FINISHED, one POST and one final snapshot', {timeout:25000},async t=>{
-  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p2-finish-')),root=path.join(dir,'workspace'),data=path.join(dir,'data');fs.mkdirSync(root);fs.mkdirSync(data);
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'p2-finish-')),root=path.join(dir,'workspace'),data=path.join(root,'.paircoach');fs.mkdirSync(root);
   fs.writeFileSync(path.join(root,'main.py'),'FROZEN FINAL\n');fs.writeFileSync(path.join(root,'challenge.md'),'# Exercise\n');
   const token='fixture-'+crypto.randomUUID(),messages:any[]=[],frames:any[]=[],requests:any[]=[],errors:string[]=[];
   const script=`import {createPairCoachServer} from ${JSON.stringify(pathToFileURL(path.join(serverRoot,'src/server/http.ts')).href)};
     const app=createPairCoachServer({rootPath:${JSON.stringify(root)},dataDir:${JSON.stringify(data)},token:${JSON.stringify(token)},port:0,enableCoach:false,enableExecution:true});
+    const port=await app.listen();
     let delayed=false;app.workspace.on('snapshotCheckpoint',e=>{if(e.phase!=='SNAPSHOT_FILE_CAPTURED'||delayed)return;delayed=true;
       let captureReadCode='NO_GUARD';
       try{app.workspace.listSnapshots();}catch(error){captureReadCode=error.code;}
       process.send({phase:'CAPTURE_PENDING',lifecycle:app.session.state.lifecycle,captureReadCode});
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,6500);});
-    const port=await app.listen();process.send({port,sessionId:app.session.state.sessionId});`;
+    process.send({port,sessionId:app.session.state.sessionId});`;
   const child=spawn(process.execPath,['--import','tsx','--input-type=module','--eval',script],{cwd:serverRoot,stdio:['ignore','pipe','pipe','ipc']});
   child.on('message',m=>messages.push(m));let stderr='';child.stderr!.on('data',c=>stderr+=c);let client:LiveBackend|undefined;
   t.after(async()=>{

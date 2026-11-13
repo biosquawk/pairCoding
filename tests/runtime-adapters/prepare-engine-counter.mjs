@@ -15,11 +15,17 @@ const toolFiles=[{path:'node_modules/unit-tool/index.js',sha256:hash('unit')}],p
 fs.writeFileSync(path.join(fixture,'runtimes/catalog.json'),JSON.stringify({profiles:[{id:'javascript-node',adapterFamily:'node',expectedTools:[{name:'node',version:'22.22.0'}]}]}));
 fs.writeFileSync(path.join(fixture,'runtimes/production-inputs.lock.json'),JSON.stringify({images:{node:{reference:pin},maven:{reference:'maven@sha256:be898b0cf3929205778d61b2841aa36733513a79b0404f9cac67837863c8641f'}},artifacts:[{kind:'npm',name:'unit-tool',files:[{path:'index.js',sha256:hash('unit')}]}]}));
 for(const [dir,files] of [['tools',toolFiles],['project',projectFiles]])for(const f of files){const p=path.join(root,dir,f.path);fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,dir==='tools'?'unit':'console.log(1)');}
-let scenario,calls,infoCount,request;
+let scenario,calls,infoCount,request,built,refs;
 childProcess.spawnSync=(exe,args)=>{
- assert.equal(exe,'docker');calls.push(args);let stdout='';
+ assert.equal(exe,'docker');assert.equal(args[0],'--host');assert.equal(args[2],'--config');assert.deepEqual(fs.readdirSync(args[3]),[]);args=args.slice(4);calls.push(args);let stdout='';
  if(args[0]==='info'){infoCount++;stdout=JSON.stringify(scenario==='absent'?{...engine,ID:''}:scenario==='switch'&&infoCount>1?{...engine,ID:'other'}:engine);}
- else if(args[0]==='image')stdout=JSON.stringify([{Id:image,RepoDigests:[],Descriptor:scenario==='no-manifest'?undefined:{digest:'sha256:'+'d'.repeat(64),mediaType:'application/vnd.oci.image.manifest.v1+json'},Config:{User:'10001:10001',Entrypoint:[]}}]);
+ else if(args[0]==='image'){
+  if(!built || args[2]!==image&&!refs.has(args[2]))return {status:1,stdout:'[]',stderr:`Error: No such image: ${args[2]}`,signal:null};
+  stdout=JSON.stringify([{Id:image,RepoDigests:[],Descriptor:scenario==='no-manifest'?undefined:{digest:'sha256:'+'d'.repeat(64),size:123,mediaType:'application/vnd.oci.image.manifest.v1+json'},Config:{User:'10001:10001',Entrypoint:[]}}]);
+ }
+ else if(args[0]==='build'){built=true;refs.add(request.imageTag);}
+ else if(args[0]==='tag'){assert.equal(args[1],image);refs.add(args[2]);}
+ else if(args[0]==='container')return {status:1,stdout:'[]',stderr:`Error: No such container: ${args[2]}`,signal:null};
  else if(args[0]==='create') {
   const mount=args.find(a=>a.includes('target=/cache/0')),cache=mount.match(/source=([^,]+)/)[1];
   fs.writeFileSync(path.join(cache,'tools.json'),JSON.stringify(tools));
@@ -31,17 +37,17 @@ childProcess.spawnSync=(exe,args)=>{
 const mod=await import(pathToFileURL(path.join(fixture,'scripts/runtime-prepare.mjs')).href);
 let success=0,negatives=0;
 for(scenario of ['success','absent','switch','expected-mismatch','bad-cache','no-manifest']) {
- calls=[];infoCount=0;request={schemaVersion:1,workingDirectory:'.',installationId:'unit',family:'node',key:'javascript-node',imageTag:'paircoach/runtime-node:unit',baseImage:pin,nodeImage:pin,tools:{root:path.join(root,'tools'),files:toolFiles},project:{root:path.join(root,'project'),files:projectFiles},expectedTools:[{name:'node',version:'22.22.0'}],dependencySha256:hash('[]'),outputRoot:path.join(root,scenario)};
+ calls=[];infoCount=0;built=false;refs=new Set();request={schemaVersion:1,workingDirectory:'.',installationId:'unit',family:'node',key:'javascript-node',imageTag:'paircoach/runtime-node:unit',baseImage:pin,nodeImage:pin,tools:{root:path.join(root,'tools'),files:toolFiles},project:{root:path.join(root,'project'),files:projectFiles},expectedTools:[{name:'node',version:'22.22.0'}],dependencySha256:hash('[]'),outputRoot:path.join(root,scenario)};
  const expected=scenario==='expected-mismatch'?{...engine,ID:'wrong'}:engine;
- if(['success','no-manifest'].includes(scenario)) {
+ if(scenario==='success') {
   const result=mod.prepare(request,true,Infinity,expected);assert.deepEqual(result.engine,engine);assert.deepEqual(result.toolchainHash,mod.resolvePreparedToolchainIdentity(request).toolchainHash);assert.deepEqual(result.dispatcherFiles,mod.resolvePreparedToolchainIdentity(request).dispatcherFiles);
   assert.deepEqual(result.cacheEvidence.tools.actual,tools);assert.equal(result.cacheEvidence.dependencies.actual.dependencySha256,request.dependencySha256);assert.deepEqual(calls.find(c=>c[0]==='rm'),['rm',id]);
   const rmReceipt=JSON.parse(fs.readFileSync(path.join(request.outputRoot,'receipt.json')));assert.equal(rmReceipt.status,'PREPARED_REQUIRES_OFFLINE_AND_TOOL_VALIDATION');
-  if(scenario==='no-manifest') {assert.equal(result.observedImage.Descriptor,null);assert.deepEqual(result.observedImage.RepoDigests,[]);assert.equal(Object.hasOwn(result.observedImage,'digest'),false);negatives++;}else success++;
+  success++;
  } else {
-  assert.throws(()=>mod.prepare(request,true,Infinity,expected),/engine|cache\/tool/);
+  assert.throws(()=>mod.prepare(request,true,Infinity,expected),/engine|cache\/tool|manifest/);
   const receipt=JSON.parse(fs.readFileSync(path.join(request.outputRoot,'receipt.json')));assert.equal(receipt.status,'FAILED_RETAIN_AND_RECONCILE');assert.equal(calls.some(c=>c[0]==='rm'),false);
-  if(scenario!=='bad-cache')assert.equal(calls.some(c=>c[0]!=='info'),false);
+  if(!['bad-cache','no-manifest'].includes(scenario))assert.equal(calls.some(c=>c[0]!=='info'),false);
   negatives++;
  }
 }

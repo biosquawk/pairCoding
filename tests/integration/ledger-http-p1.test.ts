@@ -20,11 +20,13 @@ class Frames {
     this.listeners.add(check);check();
   });}
 }
-async function fixture(t:any, options:ServerOptions={}) {
+async function fixture(t:any, options:ServerOptions={}, consent=false) {
   const temp=fs.mkdtempSync(path.join(os.tmpdir(),'p1-ledger-http-'));
   const roots=['a','b','c'].map(name=>{const root=path.join(temp,name);fs.mkdirSync(root);fs.writeFileSync(path.join(root,'challenge.md'),'# task');fs.writeFileSync(path.join(root,'solution.js'),'original\n');return root;});
   const tempRoot=path.join(temp,'receipts');fs.mkdirSync(tempRoot);
-  const app=createPairCoachServer({port:0,token,rootPath:roots[0],dataDir:path.join(temp,'data'),...options,
+  fs.mkdirSync(path.join(roots[0],'.paircoach'),{mode:0o700});
+  fs.writeFileSync(path.join(roots[0],'.paircoach','settings.json'),JSON.stringify({schemaVersion:2,taskFilePath:'challenge.md',taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',runProfiles:[],aiConsent:consent,contextPatterns:[]}),{mode:0o600});
+  const app=createPairCoachServer({port:0,token,rootPath:roots[0],...options,
     ledgerOptions:{tempRoot,...options.ledgerOptions},openLedgerOptions:{tempRoot,...options.openLedgerOptions}});
   const port=await app.listen(),base=`http://127.0.0.1:${port}`;
   const clients:WebSocket[]=[];
@@ -47,10 +49,10 @@ async function fixture(t:any, options:ServerOptions={}) {
     send('HELLO',{token,lastServerSeq:0});await frames.take(frame=>frame.type==='SESSION_SNAPSHOT');
     return {ws,frames,send,ack};
   }
-  const open=(i:number,requestId:string=randomUUID())=>({requestId,clientId:'p1-client',rootPath:roots[i],settings:initial.settings});
+  const open=(i:number,requestId:string=randomUUID())=>({requestId,clientId:'p1-client',rootPath:roots[i],settings:{...initial.settings,schemaVersion:2}});
   return {app,tempRoot,roots,request,initial,peer,open};
 }
-const view=(file:string)=>({path:file,documentVersion:null,cursor:null,selection:null});
+const view=(file:string)=>({path:file,documentVersion:1,cursor:null,selection:null});
 
 test('P1 real HTTP/WS: PING no history, VIEW dedupe, truthful session reset, old open IDs never switch again',async t=>{
   const f=await fixture(t,{ledgerOptions:{maxEntries:2}}),client=await f.peer();
@@ -95,10 +97,10 @@ test('P1 real HTTP: deferred old stop settles to retired ledger; pending open ca
       reports:{finish(){throw new Error('unused');},get(){throw new Error('unused');},retry(){throw new Error('unused');},close(){}}};
   }});
   await f.peer();
-  const stop=f.request('/api/run/old-run/stop',{requestId:'stop-old',clientId:'p1-client',sessionId:f.initial.sessionId});await stopStarted.promise;
-  const first=f.open(1),open=f.request('/api/project/open',first);await openingStarted.promise;
+  const stop=f.request('/api/run/old-run/stop',{requestId:'stop-old',clientId:'p1-client',sessionId:f.initial.sessionId});await Promise.race([stopStarted.promise,stop.then(result=>{assert.equal(result.status,202,JSON.stringify(result.body));assert.fail('stop service was not entered');})]);
+  const first=f.open(1),open=f.request('/api/project/open',first);await Promise.race([openingStarted.promise,open.then(result=>{assert.equal(result.status,201,JSON.stringify(result.body));assert.fail('transition stopAll was not entered');})]);
   const competing=await f.request('/api/project/open',f.open(2));assert.equal(competing.status,409);assert.equal(competing.body.code,'SESSION_TRANSITION');
-  assert.equal((await f.request('/api/project')).body.sessionId,f.initial.sessionId);
+  assert.equal((await f.request('/api/session')).body.sessionId,f.initial.sessionId);
   opening.resolve();const adopted=await open;assert.equal(adopted.status,201);
   assert.equal(fs.readdirSync(f.tempRoot).length,2,'old stop receipt scope stays until pending settles; open scope remains');
   const current=(await f.request('/api/session')).body;
@@ -113,8 +115,7 @@ test('P1 real HTTP: deferred old stop settles to retired ledger; pending open ca
 });
 
 test('P1 real WS: VETO receipts survive new epochs and do not revoke a later coach intervention twice',async t=>{
-  const f=await fixture(t),client=await f.peer();
-  f.app.workspace.updateSettings({...f.initial.settings,aiConsent:true});
+  const f=await fixture(t,{},true),client=await f.peer();
   f.app.session.start(null,false);f.app.session.setAiStatus('READY');
   const payload={controlEpoch:f.app.session.state.controlEpoch,activeInterventionId:null,lastAppliedSeq:0};
   const id=client.send('VETO_ESCAPE',payload);assert.equal((await client.ack(id)).payload.status,'OK');
@@ -160,10 +161,11 @@ test('P1 real HTTP: closing during deferred project adoption never installs a fr
       stopAll(){if(context.workspace.rootPath===initialRoot){started.resolve();return release.promise;}return Promise.resolve();}},
       reports:{finish(){throw new Error('unused');},get(){throw new Error('unused');},retry(){throw new Error('unused');},close(){}}};
   }});
-  const pending=f.request('/api/project/open',f.open(1));await started.promise;
+  const pending=f.request('/api/project/open',f.open(1));await Promise.race([started.promise,pending.then(result=>{assert.equal(result.status,201,JSON.stringify(result.body));assert.fail('transition stopAll was not entered');})]);
+  const originalWorkspace=f.app.workspace;
   const closing=f.app.close();release.resolve();
   const response=await pending;assert.equal(response.status,503);assert.equal(response.body.code,'SESSION_CLOSED');
-  await closing;assert.equal(f.app.workspace.rootPath,f.roots[0]);assert.deepEqual(fs.readdirSync(f.tempRoot),[]);
+  await closing;assert.equal(originalWorkspace.rootPath,f.roots[0]);assert.throws(()=>f.app.workspace,{code:'SESSION_CLOSED'});assert.deepEqual(fs.readdirSync(f.tempRoot),[]);
 });
 
 test('P1 real HTTP: oversize after-effect warns publicly, identical retry stays failed without another effect',async t=>{

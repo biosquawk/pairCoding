@@ -24,7 +24,7 @@ async function until(condition: () => boolean) {
 test('HeaderBar actual Start handler -> real POST200/lifecycle RUNNING; Pause and Resume use WS actions', async t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p2-header-'));
   const root = path.join(dir, 'root'); fs.mkdirSync(root); fs.writeFileSync(path.join(root, 'challenge.md'), '# Task\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, devBootstrap: true });
   const port = await app.listen();
   const requests: { path: string; method: string; status: number }[] = [];
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, fetch: (async (url: string, options: any) => {

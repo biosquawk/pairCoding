@@ -409,6 +409,7 @@ export class WorkspaceService extends EventEmitter {
   }
 
   getDocument(relative: string): Document {
+    if (this.closed) throw new AppError(503, 'WORKSPACE_CLOSED', 'Workspace is closed.');
     this.assertReadable();
     this.external(relative, this.disk(relative));
     const tracked = this.records.get(relative);

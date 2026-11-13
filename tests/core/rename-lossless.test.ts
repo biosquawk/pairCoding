@@ -132,7 +132,7 @@ for (const persistent of [false, true]) test(`RENAME cleanup ${persistent ? 'per
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'rename-cleanup-'));
   const root = path.join(parent, 'project'); fs.mkdirSync(root);
   const source = path.join(root, 'main.ts'), target = path.join(root, 'target.ts'); fs.writeFileSync(source, original);
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(parent, 'data'), port: 0, token });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, token });
   const port = await app.listen(), base = `http://127.0.0.1:${port}`;
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/session`, { origin: base }), messages: any[] = [];
   ws.on('message', raw => messages.push(JSON.parse(String(raw))));
@@ -192,27 +192,44 @@ for (const persistent of [false, true]) test(`RENAME cleanup ${persistent ? 'per
   const recovered = path.join(root, 'recovered.ts');
   fs.copyFileSync(path.join(locator, 'original'), recovered, fs.constants.COPYFILE_EXCL);
   assert.deepEqual(fs.readFileSync(recovered), original);
-  const restarted = new WorkspaceService(root, path.join(parent, 'data-restarted'));
-  try {
-    assert.ok(restarted.listFiles().some(e => e.path === 'target.ts'));
-    if (persistent) assert.throws(() => restarted.getDocument('target.ts'), (e: any) => e.status === 403);
-    else assert.equal(restarted.getDocument('target.ts').content, 'ORIGINAL SOURCE\n');
-  } finally { restarted.close(); }
   // A separate, genuinely foreign hardlink is not opened or granted an exception.
   const outside = path.join(parent, 'outside'); fs.writeFileSync(outside, foreign);
   fs.linkSync(outside, path.join(root, 'foreign.ts'));
   assert.equal((await request('/api/file?path=foreign.ts')).status, 403);
   assert.deepEqual(fs.readFileSync(outside), foreign);
+  // Release the real durable owner before opening it again; a second legacy
+  // WorkspaceService is correctly forbidden while the V2 journal is owned.
+  ws.terminate(); await app.close();
+  const reopened = createPairCoachServer({rootPath:root,port:0,token});
+  const reopenedPort = await reopened.listen();
+  const resumed = new WebSocket(`ws://127.0.0.1:${reopenedPort}/ws/session`), resumedMessages:any[]=[];
+  resumed.on('message',raw=>resumedMessages.push(JSON.parse(String(raw))));
+  try {
+    const restarted = reopened.workspace;
+    assert.ok(restarted.listFiles().some(e => e.path === 'target.ts'));
+    if (persistent) assert.throws(() => restarted.getDocument('target.ts'), (e: any) => e.status === 403);
+    else assert.equal(restarted.getDocument('target.ts').content, 'ORIGINAL SOURCE\n');
+    await once(resumed,'open');
+    resumed.send(JSON.stringify({protocolVersion:'3.0',messageId:'hello-reopened',clientId:'tab-reopened',sessionId:reopened.session.state.sessionId,type:'HELLO',payload:{token,lastServerSeq:0}}));
+    const waitResumed=async(predicate:(m:any)=>boolean)=>{
+      const deadline=Date.now()+2000;
+      while(Date.now()<deadline){const found=resumedMessages.find(predicate);if(found)return found;await new Promise(r=>setTimeout(r,5));}
+      assert.fail('Missing reopened WS state: '+JSON.stringify(resumedMessages));
+    };
+    await waitResumed(m=>m.type==='SESSION_SNAPSHOT');
   if (persistent) {
     // Only after recovery and lifting the injected fault: remove the known
     // retained private alias, then normal scanning makes the target readable.
     t.mock.restoreAll(); syncBuiltinESMExports(); fs.unlinkSync(intent.temporary);
-    app.workspace.scanExternal();
-    const restored = await request('/api/file?path=target.ts');
+    reopened.workspace.scanExternal();
+    const address = reopened.server.address() as {port:number};
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/file?path=target.ts`,{headers:{Authorization:`Bearer ${token}`}});
+    const restored = {status:response.status,body:await response.json()};
     assert.equal(restored.status, 200); assert.equal(restored.body.content, 'ORIGINAL SOURCE\n');
-    assert.ok(app.workspace.workspaceVersion > 1);
-    await wait(m => m.type === 'EXTERNAL_FILE_SYNC' && m.payload.path === 'target.ts' && m.payload.document !== null);
+    assert.ok(reopened.workspace.workspaceVersion > 1);
+    await waitResumed(m => m.type === 'EXTERNAL_FILE_SYNC' && m.payload.path === 'target.ts' && m.payload.document !== null);
   }
+  } finally {resumed.terminate();await reopened.close();}
   console.log('CLEANUP_RECOVERY ' + JSON.stringify({ persistent, http: reply.status, readStatus: read.status, attempts, recoveryCopied: true, targetInTree: true, workspaceVersion: project.body.workspaceVersion }));
 });
 

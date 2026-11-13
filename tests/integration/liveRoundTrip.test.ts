@@ -11,7 +11,7 @@ async function until(predicate:()=>boolean) { const deadline=Date.now()+3000;whi
 async function fixture(t:any) {
   const parent=fs.mkdtempSync(path.join(os.tmpdir(),'paircoach-live-real-')),root=path.join(parent,'workspace');fs.mkdirSync(root);
   fs.writeFileSync(path.join(root,'challenge.md'),'# Real task\n');fs.writeFileSync(path.join(root,'solution.ts'),'const start = true;\n');
-  const app=createPairCoachServer({rootPath:root,dataDir:path.join(parent,'data'),port:0});const port=await app.listen();
+  const app=createPairCoachServer({rootPath:root,dataDir:path.join(root,'.paircoach'),port:0});const port=await app.listen();
   const stored=new Map<string,string>();
   const live=new LiveBackend({baseUrl:`http://127.0.0.1:${port}`,clientId:'real-client',socket:url=>new WebSocket(url) as any,storage:{getItem:k=>stored.get(k)??null,setItem:(k,v)=>{stored.set(k,v);},removeItem:k=>{stored.delete(k);}}});
   t.after(async()=>{live.close();await app.close();fs.rmSync(parent,{recursive:true,force:true});});

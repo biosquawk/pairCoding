@@ -64,7 +64,7 @@ fs.createReadStream = ((file: fs.PathLike, options?: any) => {
   return stream;
 }) as typeof fs.createReadStream;
 
-const app = createPairCoachServer({ rootPath: path.join(base, 'workspace'), dataDir: path.join(base, 'data'),
+const app = createPairCoachServer({ rootPath: path.join(base, 'workspace'), dataDir: path.join(base, 'workspace', '.paircoach'),
   staticDir, token, port: 0, devBootstrap: false, enableCoach: false, enableExecution: false });
 app.server.on('request', (req, res) => {
   const name = path.basename((req.url || '').split('?')[0]);

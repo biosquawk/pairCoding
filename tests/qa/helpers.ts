@@ -16,13 +16,20 @@ export const settings: Settings = {
   runProfiles: [], aiConsent: false, contextPatterns: ['**/*.py', '**/*.md'],
 };
 
+/** Explicit fixture input, before constructing the production V2 owner. */
+export async function seedRuntimeSettings(rootPath: string, value: Settings) {
+  const dataDir=path.join(rootPath,'.paircoach');
+  await mkdir(dataDir,{recursive:true,mode:0o700});
+  await writeFile(path.join(dataDir,'settings.json'),JSON.stringify({...value,schemaVersion:2}),{mode:0o600});
+}
+
 export async function workspaceFiles(t: TestContext, files: Record<string, string | Buffer> = {}) {
   const parent = path.resolve(process.env.PAIRCOACH_QA_TMP || 'tests/qa/.runtime');
   await mkdir(parent, { recursive: true });
   const base = await mkdtemp(path.join(parent, 'case-'));
   const rootPath = path.join(base, 'project');
-  const dataDir = path.join(base, 'data');
-  await mkdir(rootPath); await mkdir(dataDir);
+  const dataDir = path.join(rootPath, '.paircoach');
+  await mkdir(rootPath); await mkdir(dataDir, { mode: 0o700 });
   for (const [name, content] of Object.entries({ 'challenge.md': '# Independent QA challenge\n', ...files })) {
     const dest = path.join(rootPath, name);
     await mkdir(path.dirname(dest), { recursive: true });
@@ -81,7 +88,7 @@ export async function serverFixture(t: TestContext, files: Record<string, string
   // K owns this export/path. Missing implementation is NOT_RUN, not a fallback to mock.
   const { createPairCoachServer } = await import('../../src/server/http');
   const token = `qa-fixture-${id()}`; // ephemeral, fixture only; never a production secret
-  app = createPairCoachServer({ ...dirs, token, port: 0, enableCoach: false });
+  app = createPairCoachServer({ rootPath:dirs.rootPath, token, port: 0, enableCoach: false });
   const port = await app.listen();
   assert(Number.isInteger(port) && port > 0 && port <= 65535);
   assert(![8765, 8766, 8767, 8768].includes(port), 'reserved platform ports forbidden');

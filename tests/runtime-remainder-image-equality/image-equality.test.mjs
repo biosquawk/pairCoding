@@ -6,13 +6,25 @@ import { isDeepStrictEqual } from 'node:util';
 // not a copied algorithm; no execute/plan/Docker operation is invoked.
 await import('../../scripts/runtime-operator-remainder.mjs');
 const source = fs.readFileSync(new URL('../../scripts/runtime-operator-remainder.mjs', import.meta.url), 'utf8');
-const expression = source.match(/check\((values\.length[^\n]+), 'Reused image identity\/manifest changed'\);/);
-assert.ok(expression, 'exact image guard located');
-const guard = new Function('values', 'reused', 'equal', 'isDeepStrictEqual', 'return ' + expression[1]);
+const expression = source.match(/check\((Array\.isArray\(values\)[^\n]+), 'Reused image identity\/manifest changed'\);/);
+const priorExpression = source.match(/check\((leaf\.imageInspect[^\n]+), 'Prior full inspect proof differs'\);/);
+assert.ok(expression, 'exact image guard located');assert.ok(priorExpression,'exact saved-proof guard located');
+const guard = new Function('values','pin','assertImagePin','return '+expression[1]);
+const priorGuard = new Function('leaf','reused','isDeepStrictEqual','return '+priorExpression[1]);
+const {imagePin,assertImagePin}=await import('../../scripts/runtime-image-retention.mjs');
 const exactBytes = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const fixture = JSON.parse(fs.readFileSync(new URL('./captured-r2-image.json', import.meta.url), 'utf8'));
 const copy = () => structuredClone(fixture);
-const accepted = ({ values, reused }) => guard(values, reused, exactBytes, isDeepStrictEqual);
+// The old saved projection has three fields; the current pin additionally binds
+// Config from the captured full leaf inspect. Preserve both actual source guards.
+const accepted = ({ values, reused }) => {
+  const leaf={imageInspect:{...reused.observedImage,Config:structuredClone(fixture.values[0].Config)}};
+  try {
+    if(!priorGuard(leaf,reused,isDeepStrictEqual))return false;
+    const pin=imagePin({ID:'unit',ServerVersion:'29.7.2',OSType:'linux',Architecture:'x86_64'},leaf.imageInspect,'captured-r2-leaf');
+    return guard(values,pin,assertImagePin);
+  }catch{return false;}
+};
 const reverseKeys = value => Array.isArray(value) ? value.map(reverseKeys)
   : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([k, v]) => [k, reverseKeys(v)])) : value;
 

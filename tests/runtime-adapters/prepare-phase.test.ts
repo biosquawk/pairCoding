@@ -46,7 +46,7 @@ test('UNIT fake Docker producer preserves actual engine/manifest/tools/cache evi
  assert.equal(r.status,0,r.stdout+r.stderr);const result=JSON.parse(r.stdout);assert.equal(result.success,1);assert.equal(result.negatives,5);assert.equal(result.scope,'UNIT_FAKE_DOCKER_NOT_RUNTIME_PROOF');
 });
 
-test('UNIT exact operator PREPARE_ONLY executes nine injected preparation jobs and two language-image closure without entering offline path',()=>{
+test('UNIT exact operator PREPARE_ONLY executes nine injected preparation jobs without retired language images or offline execution',()=>{
  const r=spawnSync(process.execPath,['tests/runtime-adapters/prepare-orchestration-counter.mjs'],{encoding:'utf8',env:{...process.env},maxBuffer:1024*1024});
- assert.equal(r.status,0,r.stdout+r.stderr);const result=JSON.parse(r.stdout);assert.equal(result.caches,9);assert.equal(result.languageImages,2);assert.equal(result.offlineContainers,0);
+ assert.equal(r.status,0,r.stdout+r.stderr);const result=JSON.parse(r.stdout);assert.equal(result.caches,9);assert.equal(result.languageImages,0);assert.equal(result.offlineContainers,0);
 });

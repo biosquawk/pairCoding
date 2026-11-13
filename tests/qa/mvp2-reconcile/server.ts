@@ -5,11 +5,12 @@ import path from 'node:path';
 import { createPairCoachServer } from '../../../src/server/http';
 
 const [rootPath, dataDir, token, portArg] = process.argv.slice(2);
+if (!fs.existsSync(path.join(dataDir,'settings.json'))) fs.writeFileSync(path.join(dataDir,'settings.json'),JSON.stringify({schemaVersion:2,taskFilePath:'challenge.md',taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',runProfiles:[],aiConsent:true,contextPatterns:['**/*.py','**/*.md']}),{mode:0o600});
 const app = createPairCoachServer({ rootPath, dataDir, token, port: Number(portArg),
   devBootstrap: true, staticDir: path.resolve('dist'), enableCoach: false, enableExecution: true,
   reportGenerate: async () => 'MVP2 GUI reconciliation: deterministic report boundary, NOT real AI.',
 });
-app.workspace.updateSettings({ ...app.workspace.settings, taskFilePath: 'challenge.md', aiConsent: true });
+const port = await app.listen();
 const metaPath = path.join(dataDir, 'fixture-meta.json');
 const source = fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, 'utf8'))
   : app.workspace.createSnapshot('MVP2 original', ['main.py']);
@@ -28,7 +29,6 @@ app.workspace.on('snapshotCheckpoint', event => {
   // NOT a scaled restore benchmark, production 5000ms deadlines are untouched.
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, kind === 'crash' ? 30000 : 6500);
 });
-const port = await app.listen();
 process.send?.({ ready: { port, snapshotId: source.snapshotId, sessionId: app.session.state.sessionId } });
 process.on('message', (message: any) => {
   if (message?.arm) { armed = message.arm; process.send?.({ armed }); }

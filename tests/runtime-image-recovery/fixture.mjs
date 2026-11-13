@@ -2,11 +2,12 @@
  * No worker Docker/host lane, downloads or execution of tools. */
 import * as fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 export const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-export const shared=path.resolve(repo,'../../../..');
+export const shared=path.resolve(process.env.PAIRCOACH_HISTORICAL_SHARED_DESK??path.resolve(repo,'../../../..'));
 export const historical=path.join(shared,'deliveries/_drafts/ROOT/sequential-review-20261111');
 export const controller=path.join(repo,'scripts/runtime-operator-image-recovery.mjs');
 export const hash=b=>createHash('sha256').update(b).digest('hex');
@@ -18,7 +19,7 @@ export const originalOptions=outputRoot=>({
  cacheSnapshotFile:path.join(historical,'producer-retention-f6a0-independent-readback/all-nine-historical-cache-preflight.json'),
  producerRoot:path.join(historical,'stage09-host-operator/prepare-only-source-f6a0a856'),outputRoot,
 });
-export function root(t){const dir=fs.mkdtempSync(path.join(path.dirname(repo),'recovery-unit-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));return dir;}
+export function root(t){const dir=fs.mkdtempSync(path.join(process.env.TMPDIR??os.tmpdir(),'recovery-unit-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));return dir;}
 export function guard(plan,planHash,root){
  const evidence=path.join(root,'unit-measured-disk.json');if(!fs.existsSync(evidence))put(evidence,{unitOnly:true,freeBytes:20*1024**3});
  return {schemaVersion:1,operator:'ROOT',observedAtMs:Date.now(),planSha256:planHash,controllerSha256:plan.controller.sha256,closureSha256:hash(JSON.stringify(plan.sourceInventory)),base:plan.base,engine:plan.engine,
@@ -88,8 +89,19 @@ export async function fixture(t){
  const mapping=new Map(oldRoots.map((r,i)=>[r,path.join(dir,i===0?'r1':'r3')]));
  const relocate=file=>{for(const [old,next] of mapping)if(file===old||file.startsWith(old+'/'))return next+file.slice(old.length);return file;};
  const copyDir=(from,to)=>{fs.mkdirSync(path.dirname(to),{recursive:true,mode:0o700});fs.cpSync(from,to,{recursive:true,mode:fs.constants.COPYFILE_FICLONE});};
- for(const [old,next] of mapping){fs.mkdirSync(next,{mode:0o700});copyDir(path.join(old,'stage'),path.join(next,'stage'));for(const sub of ['projects','requests'])copyDir(path.join(old,sub),path.join(next,sub));}
- const languageRoot=path.dirname(p.preserveLanguage[0].receipt.file);copyDir(path.join(languageRoot,'language-contexts'),relocate(path.join(languageRoot,'language-contexts')));
+ const stageManifest=json(p.staging.frozenManifestSource.file);
+ // Only the actual tools of the two Pure-Java prepares are consumed here.
+ // Old LSP archives/wheels are covered by the independent unmodified full planner.
+ stageManifest.staging.files=stageManifest.staging.files.filter(f=>f.path.startsWith('tools/'));
+ p.staging.fileCount=stageManifest.staging.files.length;
+ p.staging.canonicalInventorySha256=hash(JSON.stringify(stageManifest.staging.files.map(({bytes,path,sha256})=>({bytes,path,sha256}))));
+ for(const [old,next] of mapping){fs.mkdirSync(next,{mode:0o700});copyDir(path.join(old,'stage/tools'),path.join(next,'stage/tools'));for(const sub of ['projects','requests'])copyDir(path.join(old,sub),path.join(next,sub));}
+ // The controller guards this tree's identity/bytes, never executes or interprets
+ // its historical LSP payload. Keep that guarantee with a small retained state.
+ // The separate UNMODIFIED planner case still reads the real historical evidence.
+ const languageRoot=path.dirname(p.preserveLanguage[0].receipt.file),languageState=relocate(path.join(languageRoot,'language-contexts'));
+ fs.mkdirSync(languageState,{recursive:true,mode:0o700});
+ put(path.join(languageState,'retained-state.json'),{version:1,retained:p.preserveLanguage.map(l=>l.key)});
  const caches=[];
  for(const record of [...p.preserveRun,...p.recoverOnly]){
   const leaf=json(record.leafReceipt.file),oldFile=record.leafReceipt.file;
@@ -106,7 +118,7 @@ export async function fixture(t){
  const aggregate=json(p.preserveLanguage[0].receipt.file),aggregateFile=relocate(p.preserveLanguage[0].receipt.file);put(aggregateFile,aggregate);
  for(const l of p.preserveLanguage){l.receipt=proof(aggregateFile);l.pin.source=aggregateFile+'#language/'+l.key;}
  p.initialRequiredPins=[...p.preserveRun.map(j=>j.pin),...p.preserveLanguage.map(l=>l.pin)];
- const stageManifest=json(p.staging.frozenManifestSource.file);stageManifest.staging.root=relocate(stageManifest.staging.root);
+ stageManifest.staging.root=relocate(stageManifest.staging.root);
  const manifestFile=path.join(dir,'old-stage-plan.json');put(manifestFile,stageManifest);p.staging.frozenManifestSource=proof(manifestFile);p.staging.root=stageManifest.staging.root;
  const r1=path.dirname(p.staging.root);fs.mkdirSync(path.join(r1,'download-journal'),{mode:0o700});put(path.join(r1,'download-journal/receipt.json'),{status:'STAGED_NOT_PREPARED'});
  const prior=path.join(dir,'prior-readonly-evidence.json');put(prior,{unitOnly:true});p.requiredPriorEvidence=[proof(prior)];

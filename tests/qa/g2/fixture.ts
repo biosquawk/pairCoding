@@ -54,16 +54,16 @@ export function deferred() {
 export async function fixture(provider: CoachProvider, consent = true, staticDir?: string) {
   const runtime = path.resolve('tests/qa/.runtime/g2'); fs.mkdirSync(runtime, { recursive: true });
   const base = fs.mkdtempSync(path.join(runtime, 'case-'));
-  const rootPath = path.join(base, 'project'), dataDir = path.join(base, 'data');
+  const rootPath = path.join(base, 'project'), dataDir = path.join(rootPath, '.paircoach');
   fs.mkdirSync(rootPath); fs.mkdirSync(dataDir);
   for (const [name, value] of Object.entries({ 'main.py': seed, 'challenge.md': '# G2 independent QA\n', ...canaries })) {
     const target = path.join(rootPath, name); fs.mkdirSync(path.dirname(target), { recursive: true }); fs.writeFileSync(target, value);
   }
   // Synthetic ephemeral token, never read from operator environment.
   const token = `g2-qa-${randomUUID()}`;
+  fs.writeFileSync(path.join(dataDir,'settings.json'),JSON.stringify({...approved,schemaVersion:2,aiConsent:consent}),{mode:0o600});
   const app = createPairCoachServer({ rootPath, dataDir, port: 0, token, devBootstrap: true,
     enableCoach: true, coachProvider: provider, ...(staticDir ? { staticDir } : {}) });
-  app.workspace.updateSettings({ ...approved, aiConsent: consent });
   const port = await app.listen();
   const baseURL = `http://127.0.0.1:${port}`;
   const disk = () => fs.readFileSync(path.join(rootPath, 'main.py'), 'utf8').replace(/\r\n/g, '\n');

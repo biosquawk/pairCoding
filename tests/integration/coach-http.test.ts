@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { createPairCoachServer, type ReportAIFacts } from '../../src/server/http';
 import { LocalFallbackProvider, type CoachProvider } from '../../src/server/coach/provider';
 import type { CoachContext } from '../../src/server/coach/context';
-import { workspaceFiles, Peer, id, settings } from '../qa/helpers';
+import { seedRuntimeSettings, workspaceFiles, Peer, id, settings } from '../qa/helpers';
 
 const silent = {kind:'SILENT',reason:'Injected integration fixture only'};
 const insertion = (textBlock:string) => ({range:{startLine:1,startColumn:1,endLine:1,endColumn:1},textBlock});
@@ -20,9 +20,9 @@ const hint = (c:Readonly<CoachContext>) => ({kind:'HINT',severity:'NEUTRAL',text
 async function fixture(t:TestContext, provider:CoachProvider, consent=true, reportGenerate?: (facts:ReportAIFacts, signal:AbortSignal)=>Promise<string>) {
   const dirs=await workspaceFiles(t,{'main.py':'value = 0\n','.env.fixture':'SYNTHETIC_EXCLUDED_ONLY'});
   const token=`integration-sensitive-${id()}`;
+  await seedRuntimeSettings(dirs.rootPath,{...settings,aiConsent:consent,contextPatterns:['**/*']});
   const app=createPairCoachServer({...dirs,port:0,token,enableCoach:true,coachProvider:provider,enableExecution:!!reportGenerate,reportGenerate});
   // These settings represent the user's approved input; provider cannot change them.
-  app.workspace.updateSettings({...settings,aiConsent:consent,contextPatterns:['**/*']});
   const port=await app.listen(), baseURL=`http://127.0.0.1:${port}`;
   const clientId=id(),sessionId=app.session.getSession().sessionId;
   const peers=new Set<{close():void}>();
@@ -52,7 +52,7 @@ test('G2 real REST/WS: consent OFF means no provider call; enabling consent yiel
   await f.chat('No consent');await f.write('manual without AI\n');await delay(400);assert.equal(contexts.length,0);
   const state=f.app.session.getSession();
   const reply=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:state.workspaceVersion,
-    settings:{...f.app.workspace.settings,aiConsent:true}});assert.equal(reply.status,200);
+    settings:{...f.app.workspace.settings,schemaVersion:2,aiConsent:true}});assert.equal(reply.status,200);
   await f.chat('Now consented');const bubble=await f.peer.take(m=>m.type==='COACH_HINT_BUBBLE');
   assert.equal(bubble.payload.text,'Injected integration hint');assert.equal(contexts.length,1);
   assert.equal(contexts[0].documents.some(d=>d.path==='.env.fixture'),false);

@@ -1,46 +1,41 @@
-# PairCoach — STOP / checkpoint 13.11.2026
+# PairCoach — stabilizacja ROOT / STOP ról Thalamusa, 13.11.2026
 
 <!-- CURRENT_LIGHTWEIGHT_STATUS_BEGIN -->
 
-**Stan nadrzędny: STOP właściciela od 13.11.2026 08:51:06 Europe/Warsaw. Wszystkie 14 ról PAUSED, 0 tur RUNNING. Wydanie NO-GO.**
+**13.11.2026 — GOAL-PC-STABILIZE-01, SINGLE-OPERATOR: W TRAKCIE.**
+Właściciel wznowił wyłącznie lokalną stabilizację wykonywaną przez ROOT.
+Thalamus nadal zatrzymany: odczyt `mode=ro` o 10:41:10 UTC potwierdził
+14 pauz, 0 tur RUNNING i 0 nowych calls po STOP. Bez nowych agentów,
+rzeczywistych wywołań Coacha, restartu Thalamusa, wdrożenia i alarmu.
+Samoweryfikacja ROOT; nie niezależny audyt ani odbiór całego Zadania 9.
 
-Pełny raport nocy, odpowiedzialność operatora, drzewo ról, per-agent usage,
-81 powiązań kosztu z zadaniami i stan niewykonanych odbiorów:
-**[STATUS2.md](STATUS2.md)**. To aktualne źródło stanu po STOP.
-Nie wolno wznawiać implementacji na podstawie historycznych poleceń poniżej.
-
-| Element | Stan po zatrzymaniu |
+| Zakres stabilizacji | Bieżący, ograniczony dowodem stan |
 | --- | --- |
-| Projekt | PairCoach Lightweight / Thalamus `software_dev_2` |
-| Kod produktu | `257e90b838abec4e9b332385c71f1be8201fc013`, tree `72549aa8b933467426d448cf64df153f3b5297c0` |
-| Git źródła K | Tracked clean; 4 zachowane nieśledzone katalogi testowe. Cały status nie jest pusty |
-| Agenci | 14 ról PAUSED; 0 RUNNING; projektowe app-servery i pozostałe helpery zatrzymane |
-| Własne serwery testowe | Brak listenerów 18110/18120/18080; daemon Thalamusa 8768 pozostawiony |
-| Integracyjne testy celowane | 344 PASS; typecheck i build exit0. To nie jest pełny odbiór |
-| Końcowy npm test | Log 05:50:52–06:20:02 lokalnie, 16 pełnych podsumowań: 2775 tests / 2529 PASS / 244 FAIL / 2 skip |
-| Nadzór testu | Proces skończył się przed STOP. Kod wyjścia zewnętrznego supervisora UNKNOWN; nie twierdzić, że suite nadal działa albo że STOP go przerwał |
-| Java21 final GUI | FAIL: Main i JUnit FAILED prawdziwe; po poprawce/ACK drugi Tests zablokowany. Dalsze kontrole NOT_RUN |
-| Lokalny edytor / AI | Część TS i Java/AI PASS; JS-first FAIL; popup→CONTROL_PREPARE→Enter/Tab NOT_RUN |
-| Docker | Cztery fizyczne scoped LIVE potwierdzone. Nie zastępują pełnej macierzy produktu |
-| Windows / świeży ZIP | Poprawka native lease ma scoped dowody, ale aktualny końcowy ZIP / 7 checks / Edge Spring GUI NOT_RUN |
-| Zadania 1–8 | Istnieją wcześniejsze implementacje i scoped odbiory; końcowe regresje niezaliczone |
-| 9.1 / 9.2 / 9.3 | Lokalny edytor częściowy; prepare i timeouty zintegrowane |
-| 9.4 / 9.5 / 9.6 / 9.7 | Java21 FAIL; starsze Spring/profile/AI nie zamykają odbioru końcowej wersji; finał NO-GO |
-| Koszt 8 godzin przed STOP | Znane kanały Thalamus + ROOT: 690033448 input+output, z tego 321571584 cached input; brak przeliczenia na fakturę/tygodniowy limit |
-| Niescalone prace | P1 `158881b…`, P1_2 `8099dea…`, P4 `ef98df3…`; zachowane jako checkpointy, bez odbioru wydania |
-| Runtime Thalamusa | Wdrożone b235eea4; publikowane źródło 4f2fea7c to odrębny stan, bez nowego wdrożenia |
-| ETA / decyzja | Brak nowej ETA. Implementacja pozostaje zatrzymana |
+| Linia integracji | Jeden checkout, `stabilize/single-operator-20261113`; baza publiczna `2a9af09af15f4b2fb13236f0a6f4bb23271a2255` |
+| Pierwsze poprawki produktu | Commit `2961d84649a7e883006b06632b953d490fdc4951`: własny MAIN/TESTS zachowuje korelację przy pochodnej zmianie gotowości; startup zachowuje pierwotną przyczynę i dodatkowy cleanup failure. Test przed: 5 FAIL; po: 111 PASS, exit 0 |
+| Wczesny Java21 LIVE | PASS na kodzie `2961d846`: zwykłe `npm start`, GUI Main → świeży JUnit FAILED → jednorazowa edycja Monaco → oryginalny ACK → świeży PASSED → następny PASSED; jedna sesja, bez reload/reset/POST zamiast kliknięcia. 4 własne kontenery REMOVED, odczytano ich nieobecność. WSL/Docker Desktop/Chromium, nie native Windows |
+| Wykryte podczas aktywnych testów | `http.ts`: kontrole PING/Veto/okna/timera nie czekają za transakcją; komendy źródłowe w fazie przejścia są odrzucane przed późniejszym zastosowaniem. HELLO korzysta z istniejącej kolejki odczytu, bez udzielania prawa zapisu przez pending recovery. `LiveBackend.ts`: niezależny błąd aktywnego pliku nie znika pod błędem zadania. `WorkspaceService.ts`: stary, zamknięty owner odmawia odczytu jako WORKSPACE_CLOSED |
+| Dowody tych poprawek | `fixture-core-lifecycle`: 6 PASS; `fixture-g3-current`: 7 PASS; `async-control-current-contract`: 3 PASS; `recovery-readonly-hello`: 22 PASS, w tym nowe zapisy nadal odrzucone RECOVERY_REQUIRED; `fixture-read-errors`: 18 PASS; wszystkie wymienione exit 0 |
+| Checkpointy fixtures | Włączono odpowiednie zmiany `158881b06265a2fa4dc976b6f30e017b2843564a` i `8099dea62659655535be35345b4132f0571371d1`; poprawiono dalsze wspólne przyczyny: canonical storage, await listen, V2 settings, disposal przed usunięciem danych, brak drugiego ownera, poprawne dependency VM/CSS, fake Docker i odczyt bieżącego guardu obrazów |
+| Historyczny baseline / bajty | Rzeczywisty przypięty `e9828e34a06222300a5c38ff751e6321bc9e2823` przez PAIRCOACH_IDENTITY_BASELINE. Przywrócono bajty LF zgodne z istniejącym indeksem Git; bez aktualizacji goldenów/hashy do bieżącego wyniku. Wąskie reguły .gitattributes dla plików kontrolowanych bajtowo |
+| Odchudzenie recovery fixture | Zakres kopiowania 495 plików / 211724994 B → 446 / 48843304 B; mniej o 162881690 B. Pominięto nieużywane archiwa LSP/wheels i payload language-contexts; zachowano rzeczywiste tools, projekty, requests, mały marker oraz kontrolę jego tamper. `recovery-controller-lean`: 41/41 PASS, exit 0; `fixtures-recovery-lean`: 24/24 PASS, exit 0. Niezmieniony planner nadal sprawdził pełne 9 historycznych cache: 13355 plików / 456867366 B |
+| Świadomie zmieniona stymulacja testów | V2 SAVE jest metadata-only: nowe generacje wywołuje prawdziwy HELLO; nową sesję tego samego projektu tworzy rzeczywisty restart, ponieważ same-root open jest idempotentne. Prywatne ustawienia nowego projektu są jawnie przygotowane, nie dziedziczone przez open. Negatywy zachowują złe ścieżki, linki, uprawnienia i recovery |
+| Migracja kontraktów wykonania | W trakcie. `run-event-order`: 2 PASS przez rzeczywisty neutralny Runner/HTTP/WS i kontrolowany port Docker. Test obu granic AI zachowuje nieufny stdout przy kontrolowanym porcie, bez odczytu .env przez Run; jawna allowlista uwzględnia profileId/configurationGeneration V2. To UNIT, nie fizyczny dowód kontenera |
+| Pozostałe czerwone obszary | Dawne hostowe executable RunProfile w G3 i finish/quiescence; część oczekiwań dawnego ledger settings/session lifecycle; końcowe wykonanie pełnej aktywnej selekcji TS/MJS. Nie przywracać hostowego fallbacku, nie wyłączać testów ani zwiększać progów |
+| Końcowe polecenia | Wciąż wymagane na zintegrowanym kandydacie: typecheck, build, pełne npm test oraz powtórzenie GUI odpowiadającego końcowemu kodowi. Ostatni fixture-typecheck-fixed exit 0 poprzedza kolejne drobne zmiany; nie jest końcowym odbiorem |
+| Publikacja / werdykt | Robocza stabilizacja nie jest przyjętym wydaniem. Cały PairCoach Lightweight / Zadanie 9 pozostaje NIEODEBRANY; Spring, pozostała macierz, prawdziwy Coach i native Windows nie zostały tu ponowione |
 
-Obowiązujący zakres produktu nie przywraca LSP. Storage Ports & Adapters,
-Flat Files, Flight Board i sandbox/flow są osobnym [trwałym backlogiem](docs/next/BACKLOG_MVP_STORAGE_FLIGHT_BOARD_AND_RUNTIME.md),
-a nie ukończonym elementem Zadania 9.
+Dowody lokalne (komenda, SHA startu, rzeczywisty exit i log każdego przebiegu):
+`\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\paircoach-stabilization-evidence-20261113\`
+W szczególności `gui-sixth/proof.json`, `trace.zip`, `fixture-copy-scope.log`,
+`thalamus-paused-readback.json` i pliki `<nazwa>.terminal.json` z powyższej tabeli.
+Starsze nieudane lub przerwane próby są zachowane; nie zamieniono ich w PASS.
+Usage bieżącego etapu ROOT nie zostało jeszcze ostatecznie rozliczone; UNKNOWN,
+nie zero. Cached input nie należy dodawać drugi raz do input.
 
-Publikacja kodu i raportu jest zabezpieczeniem checkpointu.
-Nie nadaje finalacceptedSHA, nie stanowi zgody na wydanie ani wznowienie ról.
-
-Poniżej pozostaje **historyczny zapis zakresu i kampanii**, zachowany bajtowo
-po znaczniku końca bieżącego statusu. Historyczne ACTIVE, następne kroki,
-FAIL/PASS oraz stare rewizje nie opisują obecnie pracujących procesów.
+[STATUS2.md](STATUS2.md) pozostaje niezmienionym raportem awarii nocy.
+Jego historyczne 244 FAIL i koszty nie są wynikami obecnej stabilizacji.
+Poniżej zachowano historię kampanii; starsze ACTIVE/ETA nie wznawiają agentów.
 
 <!-- CURRENT_LIGHTWEIGHT_STATUS_END -->
 

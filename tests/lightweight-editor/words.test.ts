@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCurrentDocumentWordsProvider } from '../../src/services/editor-language/currentDocumentWords';
-import { createBuiltinLanguageRegistry } from '../../src/services/builtinLanguageRegistry';
+import { build } from 'esbuild';
+// This Node unit controls only the browser-only lazy mode. Registry, mirror and
+// provider logic stay real; ordering of that dependency has its own regression.
+const output=await build({entryPoints:['src/services/builtinLanguageRegistry.ts'],bundle:true,write:false,
+  platform:'node',format:'esm',plugins:[{name:'browser-mode-boundary',setup(b){
+    b.onResolve({filter:/monaco-editor\/esm\/vs\/language\/typescript\/tsMode\.js$/},()=>({path:'mode',namespace:'unit-browser'}));
+    b.onLoad({filter:/.*/,namespace:'unit-browser'},()=>({contents:'export {};',loader:'js'}));
+  }}]});
+const {createBuiltinLanguageRegistry}=await import('data:text/javascript;base64,'+Buffer.from(output.outputFiles[0].text).toString('base64')) as typeof import('../../src/services/builtinLanguageRegistry');
 import { stamp } from '../editor-language/fixtures';
 import { contentSha256 } from '../../src/language/uriCodec';
 const provider=createCurrentDocumentWordsProvider();

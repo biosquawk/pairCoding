@@ -824,11 +824,15 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     ws.on('message',(data)=>{
       if(++peer.queued>64){peer.queued--;ws.close(1008,'Admission queue limit');return;}
       const raw=data.toString();
-      // Veto is an immediate cutoff, not queued behind asynchronous source preparation/writes.
-      let immediateVeto=false;
-      try {immediateVeto=JSON.parse(raw)?.type==='VETO_ESCAPE';} catch { /* normal validator closes */ }
+      // Controls must remain responsive during a pending source transaction.
+      // receive still validates the complete envelope, authentication and current scope.
+      let immediateControl=false;
+      try {
+        const type=JSON.parse(raw)?.type;
+        immediateControl=['VETO_ESCAPE','PING','WINDOW_STATE','TIMER_ACTION'].includes(type) || (transitioning && type!=='HELLO');
+      } catch { /* normal validator closes */ }
       const operation=()=>receive(ws,raw).finally(()=>{peer.queued--;});
-      if(immediateVeto) void operation();
+      if(immediateControl) void operation();
       else peer.queue=peer.queue.then(operation,operation);
     });
     ws.on('error',()=>{ /* close handler revokes this connection; no token-bearing errors logged */ });
@@ -864,7 +868,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         coach?.abort();session.releaseCoach();controlPreparing=false;session.clearEditorView();peer.clientId=message.clientId;
         // Revoke immediately, then await the SAME real root FIFO before reading a snapshot.
         // Reading inside another held capture is correctly WORKSPACE_BUSY, not a cached bootstrap.
-        await helloBinding.core!.workspace._withQueuedMutation(async()=>{});
+        await helloBinding.core!.workspace._withQueuedRead(()=>undefined);
         if(peer.handshakeGeneration!==helloGeneration || startup!==helloBinding || closing)return;
         binding?.connectLocal(helloGeneration);
         const bundle=await getBundle();
@@ -875,10 +879,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       }
       if(!peer.authenticated || message.clientId!==peer.clientId) {ws.close(1008,'HELLO required');return;}
       const admitted=startup, admittedGate=gate,admittedOwner=binding!;
+      const transitionControl=['PING','VETO_ESCAPE','WINDOW_STATE','TIMER_ACTION','PROPOSAL_RESPONSE'].includes(message.type);
       const assertPeerCurrent=()=>{
-        if(startup!==admitted || closing || transitioning || peers.get(ws)!==peer || !peer.authenticated ||
+        if(startup!==admitted || closing || peers.get(ws)!==peer || !peer.authenticated ||
           peer.clientId!==message!.clientId || ws.readyState!==WebSocket.OPEN) fail(409,'PEER_REVOKED','Connection authority is no longer current.');
         session.assertClient(message!.clientId,message!.sessionId);
+        if(transitioning&&!transitionControl) fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
       };
       assertPeerCurrent();
       if(validateLanguageClientMessage(message))

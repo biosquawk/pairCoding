@@ -47,7 +47,7 @@ async function fixture(t:any,storage:boolean) {
   fs.mkdirSync(root);fs.mkdirSync(receipts);fs.writeFileSync(path.join(root,'solution.js'),'initial\n');
   fs.writeFileSync(path.join(root,'challenge.md'),'# valid task\n');
   let effects=0;
-  const app=createPairCoachServer({port:0,rootPath:root,dataDir:path.join(temp,'data'),token:'public-test-token',
+  const app=createPairCoachServer({port:0,rootPath:root,dataDir:path.join(root,'.paircoach'),token:'public-test-token',
     ledgerOptions:{tempRoot:receipts,maxOutcomeBytes:1024},executionFactory:()=>({
       runner:{setApprovedProfiles(){},start(){throw new Error('unused');},get(){throw new Error('unused');},list(){return [];},stopAll(){return Promise.resolve();},
         stop(){effects++;return Promise.resolve({runId:'oversize',outputTail:'x'.repeat(2048)} as any);}},

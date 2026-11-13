@@ -4,14 +4,14 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {createPairCoachServer, type ServerOptions} from '../../src/server/http';
-import {workspaceFiles, Peer, id, settings} from './helpers';
+import {seedRuntimeSettings, workspaceFiles, Peer, id, settings} from './helpers';
 import type {CoachContext} from '../../src/server/coach/context';
 
 const disabled={kind:'PROPOSE',proposalKind:'GENERATE_TESTS',questionText:'Wygenerować?',snapshotId:null,paths:['main.py'],resetTimer:false} as const;
 async function fixture(t:TestContext,options:Partial<ServerOptions>) {
   const dirs=await workspaceFiles(t,{'main.py':'student work\n'}), token='ephemeral-'+id();
+  await seedRuntimeSettings(dirs.rootPath,{...settings,aiConsent:true});
   const app=createPairCoachServer({...dirs,port:0,token,enableCoach:true,...options});
-  app.workspace.updateSettings({...settings,aiConsent:true});
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`;
   const f={...dirs,app,port,baseURL,token,clientId:id(),sessionId:app.session.getSession().sessionId,peers:new Set<{close():void}>()};
   t.after(async()=>{for(const p of f.peers)p.close();await app.close();await dirs.cleanup();});

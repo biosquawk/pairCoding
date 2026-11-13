@@ -6,6 +6,7 @@ import path from 'node:path';
 import os from 'node:os';
 import WebSocket from 'ws';
 import { createPairCoachServer } from '../../src/server/http';
+import { seedRuntimeSettings, settings } from '../qa/helpers';
 import { PairCoachClient } from '../../src/services/PairCoachClient';
 
 const pause = (ms = 0) => new Promise(resolve => setTimeout(resolve, ms));
@@ -18,10 +19,10 @@ test('real VIEW ACK owns documentVersion; motion alone no provider; next CHAT ge
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'editor-view-p2-real-'));
   const root = path.join(base, 'project'); fs.mkdirSync(root); fs.writeFileSync(path.join(root, 'solution.ts'), 'A😀B\nsecond');
   const contexts: any[] = [], sent: any[] = [], received: any[] = [];
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(base, 'data'), port: 0, token: 'unit-editor-view-p2-token', enableCoach: true,
+  await seedRuntimeSettings(root,{...settings,aiConsent:true,taskFilePath:null,contextPatterns:['**/*.ts']});
+  const app = createPairCoachServer({ rootPath: root, port: 0, token: 'unit-editor-view-p2-token', enableCoach: true,
     coachProvider: { name: 'editor-view-service-capture', decide: async context => { contexts.push(structuredClone(context)); return { kind: 'REPLY', text: 'deterministic provider boundary' }; } } });
   t.after(async () => { await app.close(); fs.rmSync(base, { recursive: true, force: true }); });
-  app.workspace.updateSettings({ ...app.workspace.settings, aiConsent: true, taskFilePath: null, contextPatterns: ['**/*.ts'] });
   const port = await app.listen(); assert.ok(![8080, 8081, 8765, 8766, 8767, 8768].includes(port));
   const client = new PairCoachClient({ baseUrl: `http://127.0.0.1:${port}`, token: 'unit-editor-view-p2-token', clientId: 'editor-view-integration',
     socket: url => {
