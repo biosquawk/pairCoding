@@ -56,11 +56,12 @@ test('real synthetic Git -> ZIP exact closure -> trusted archive -> verified dis
   pack(f, ['--output', output]);
   const manifestPath = path.join(output, 'manifest.json'), rawManifest = fs.readFileSync(manifestPath), manifest = JSON.parse(rawManifest);
   assert.equal(manifest.sourceCommit, f.revision); assert.equal(manifest.sourceVerification.execution, 'NOT_RUN_BY_PACKAGER');
-  // HUMAN577 structural migration: mandatory runtime:prepare makes exactly 11.
-  assert.equal(manifest.commands.length, 11);
+  // Coverage task 2026-11-13 adds two bounded commands to the existing eleven.
+  assert.equal(manifest.commands.length, 13);
   assert.deepEqual(manifest.commands.map(({ name, command }) => [name, command]).sort(), [
     ['build', 'vite build'],
     ['clean', 'node scripts/clean.mjs'],
+    ['coverage', 'node scripts/coverage.mjs'],
     ['dev', 'vite --port 3000 --host 127.0.0.1'],
     ['dev:full', 'concurrently --kill-others "npm run server" "npm run dev"'],
     ['lint', 'tsc --noEmit'],
@@ -69,6 +70,7 @@ test('real synthetic Git -> ZIP exact closure -> trusted archive -> verified dis
     ['server', 'tsx src/server/index.ts'],
     ['start', 'tsx src/server/index.ts'],
     ['test', 'node scripts/runtime-test.mjs'],
+    ['test:coverage', 'node scripts/coverage.mjs --tests'],
     ['typecheck', 'tsc --noEmit'],
   ]);
   assert.deepEqual(manifest.sourceVerification.recoveryTests, ['tests/snapshots/snapshot-crash.test.ts']);

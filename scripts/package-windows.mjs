@@ -53,7 +53,7 @@ function git(cwd, args) {
   return r.stdout;
 }
 const text = b => b.toString('utf8').trim();
-const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts']);
+const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts', '.c8rc.json', '.quality-policy.json', '.quality-runner.json']);
 // Finite source contract. These are source inputs, never prepared images, caches or receipts.
 const runtimeScripts = [
   'runtime-prepare-cli.mjs', 'runtime-prepare-control.mjs', 'runtime-prepare.mjs', 'runtime-language-prepare.mjs',
@@ -88,7 +88,7 @@ const runtimeAssets = [
   'examples/spring-counter/src/test/java/demo/CounterApplicationTest.java',
 ];
 const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
-const sourceRequired = [...new Set([...top, ...runtimeRequired, 'java-puzzlers/README.md', 'java-puzzlers/SOURCE.json', 'java-puzzlers/prepare-tasks.mjs', 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
+const sourceRequired = [...new Set([...top, ...runtimeRequired, 'scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'java-puzzlers/README.md', 'java-puzzlers/SOURCE.json', 'java-puzzlers/prepare-tasks.mjs', 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
 const runtimeScriptSet = new Set(runtimeScripts);
 // Finite source formats within the three product source roots, not arbitrary binary/runtime data.
 const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||
@@ -100,7 +100,7 @@ function allowed(name) {
   if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
   if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || name === runtimeTestSupport || runtimeSource(name) || /^java-puzzlers\/[A-Za-z0-9._/-]+\.(?:java|xml|json|md|mjs)$/.test(name) || /^characters\/[A-Za-z0-9._/-]+\.(?:md|txt|json|ya?ml|py|mjs|js|sh)$/.test(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
+  return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || ['scripts/coverage.mjs', 'scripts/coverage-policy.mjs'].includes(name) || name === runtimeTestSupport || runtimeSource(name) || /^java-puzzlers\/[A-Za-z0-9._/-]+\.(?:java|xml|json|md|mjs)$/.test(name) || /^characters\/[A-Za-z0-9._/-]+\.(?:md|txt|json|ya?ml|py|mjs|js|sh)$/.test(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 // Deliberately finite contract, not a shell parser. Unknown/changed scripts require
@@ -117,6 +117,8 @@ function commandClosure(pkg, paths) {
     start: ['tsx src/server/index.ts', ['src/server/index.ts', 'paircoach.config.json'], ['tsx']],
     'dev:full': ['concurrently --kill-others "npm run server" "npm run dev"', ['src/server/index.ts', 'vite.config.ts', 'index.html'], ['concurrently', 'tsx', 'vite']],
     typecheck: ['tsc --noEmit', ['tsconfig.json'], ['typescript']],
+    coverage: ['node scripts/coverage.mjs', ['scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'scripts/runtime-test.mjs', 'scripts/runtime-test-policy.mjs', '.c8rc.json', '.quality-policy.json', '.quality-runner.json'], ['c8', 'tsx'], 'BOUNDED_SUBSET_NOT_FULL_SUITE; all production sources including unexecuted files; see README coverage'],
+    'test:coverage': ['node scripts/coverage.mjs --tests', ['scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'scripts/runtime-test.mjs', 'scripts/runtime-test-policy.mjs'], ['tsx'], 'Same explicit bounded subset as coverage; NOT npm test/full suite'],
     test: ['node scripts/runtime-test.mjs', ['scripts/runtime-test.mjs', 'scripts/runtime-test-policy.mjs', 'playwright.config.ts', ...(runtimeTestImporters.some(p => paths.has(p)) ? [runtimeTestSupport] : [])], ['tsx'], 'Test sources included; browser campaigns need browser/environment and separate explicit invocation'],
   };
   if (!pkg.scripts || typeof pkg.scripts !== 'object' || Array.isArray(pkg.scripts)) throw new Error('Brak poprawnych npm scripts.');

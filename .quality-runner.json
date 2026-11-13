@@ -1,0 +1,32 @@
+{
+  "javascript": {
+    "test_command": [
+      "npm",
+      "run",
+      "test:coverage"
+    ],
+    "coverage_command": [
+      "npm",
+      "run",
+      "coverage"
+    ],
+    "coverage_reports": [
+      "coverage/lcov.info"
+    ]
+  },
+  "typescript": {
+    "test_command": [
+      "npm",
+      "run",
+      "test:coverage"
+    ],
+    "coverage_command": [
+      "npm",
+      "run",
+      "coverage"
+    ],
+    "coverage_reports": [
+      "coverage/lcov.info"
+    ]
+  }
+}

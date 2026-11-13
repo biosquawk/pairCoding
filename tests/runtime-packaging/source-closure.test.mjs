@@ -83,7 +83,7 @@ test('list/dry-run: complete finite polyglot source closure, exact SHA256 of eve
     assert.equal(plan.sourceVerification.requiredFiles.includes(name),false,name);
     assert.ok(plan.commands.every(c=>!c.requiredFiles.includes(name)),name);
   }
-  assert.equal(plan.commands.length,11);const cmd=plan.commands.find(c=>c.name==='runtime:prepare');
+  assert.equal(plan.commands.length,13);const cmd=plan.commands.find(c=>c.name==='runtime:prepare');
   assert.equal(cmd.command,'node scripts/runtime-prepare-cli.mjs');assert.deepEqual(cmd.requiredFiles,runtimeRequired);
   assert.match(cmd.prerequisite,/plan-only is NOT prepared/);assert.equal(cmd.execution,'NOT_RUN_BY_PACKAGER');
   assert.match(plan.sourceVerification.trust,/colocated SHA256SUMS is not trust/);

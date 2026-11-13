@@ -85,3 +85,38 @@ Dostępność `gpt-6.1-sol` zależy od konta; konfiguracja i `login status` nie 
 ## Równoległa praca w IntelliJ
 
 Możesz otworzyć ten sam folder zadania w PairCoding i IntelliJ. Źródła zapisane z IDE są normalnymi zmianami zewnętrznymi i trafiają do edytora przez istniejące uzgadnianie wersji; konflikt nie daje AI prawa do nadpisania nowszego kodu. `.idea`, `.git`, `target`, `.gitignore` oraz pliki `.iml`, `.ipr`, `.iws` są pomijane przy obserwowaniu zadania, budowie kontekstu AI, snapshotach i wejściu Run. Nie są usuwane ani przywracane do starszej wersji. Podpowiedzi semantyczne możesz wykorzystywać w IntelliJ; PairCoding pozostaje lekkim edytorem z lokalnymi podpowiedziami.
+
+## Bounded platform coverage / MCP Quality Guard
+
+After `npm ci` with Node >=22.22.0, run **`npm run coverage`** from the repository.
+This command measures an explicit bounded subset, **not the full test suite**. It
+uses c8/V8 plus tsx source maps, retains unexecuted production TS/TSX at zero,
+and checks that every production inventory entry has exactly one LCOV record.
+Expected output: `coverage/lcov.info`, `coverage-summary.json`, `coverage-final.json`,
+`inventory.json` (individual exclusions and reasons), `selection.json` (selected,
+NOT_RUN and SUPERSEDED), and `measurement.json`. A failed test, timeout or missing
+source is an error, not a PASS. The test phase is bounded at 180 s, measurement
+at 240 s; it starts no application server or Docker campaign. Reports and scratch
+fixtures are local ignored artifacts (`coverage/`, `target/`).
+
+Production boundary: all `src/`, all `scripts/`, `vite.config.ts` and the shipped
+`java-puzzlers/prepare-tasks.mjs` utility. Dormant language/LSP code under `src/`
+is retained. Exercises under `examples/`/`java-puzzlers/` (except that utility),
+historical QA/research in `docs/`/`investigations/`, test sources/support and
+`.d.ts` declarations are not platform runtime. No source is excluded for low
+coverage or high complexity. New unclassified source files fail inventory.
+The canonical `npm test` selector/retirement policy is unchanged.
+
+`.quality-policy.json` uses the same production roots. `.quality-runner.json`
+explicitly selects `npm run coverage` and **`npm run test:coverage`** for both
+JavaScript and TypeScript. The latter runs the same bounded test selection
+through canonical TS/native-MJS lanes and retirement filters, without c8. This
+bounded profile is intentional under the owner's no-long-suite constraint;
+any MCP gate applies only to that profile and is **not full-product acceptance**.
+Use `get_usage`, `audit_project(refresh_coverage=true, mode="sonar")`, selected
+`inspect_unit(mode="sonar")`, then `claim_quality_gate(mode="sonar")`; retain
+actual REJECTED/BLOCKED and all NOT_RUN evidence. No thresholds are relaxed.
+
+Coverage caveat: tsx emits compact JavaScript. V8 ranges remap to original TS/TSX,
+but a line may count as executed while a branch on that line is not. Read LCOV
+BRDA and branch metrics too; this measurement is not statement-level instrumentation.
