@@ -1,6 +1,7 @@
 /** Provider-only seam. Never substitutes CoachAdapter, transport, gate, or editor. */
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { require as tsRequire } from 'tsx/cjs/api';
 // Playwright's ESM transform does not load the product's JSON schema import.
@@ -52,7 +53,7 @@ export function deferred() {
   return { promise, resolve };
 }
 export async function fixture(provider: CoachProvider, consent = true, staticDir?: string) {
-  const runtime = path.resolve('tests/qa/.runtime/g2'); fs.mkdirSync(runtime, { recursive: true });
+  const runtime = path.join(os.tmpdir(), 'paircoach-g2'); fs.mkdirSync(runtime, { recursive: true, mode: 0o700 });
   const base = fs.mkdtempSync(path.join(runtime, 'case-'));
   const rootPath = path.join(base, 'project'), dataDir = path.join(rootPath, '.paircoach');
   fs.mkdirSync(rootPath); fs.mkdirSync(dataDir);

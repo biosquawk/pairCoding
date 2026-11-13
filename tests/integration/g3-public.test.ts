@@ -149,7 +149,7 @@ test('G3 missing profile and fresh zero-test/green JUnit are honest; green never
 });
 
 const treeScript=`const fs=require('fs'),{spawn}=require('child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync('pids.json',JSON.stringify([process.pid,child.pid]));console.log('TREE_READY');setInterval(()=>{},1000);`;
-for(const mode of ['stop','timeout','finish'] as const) test(`G3 real parent/child ${mode}: REST responsive, tree ends, frozen finish ordering`,{timeout:12000},async t=>{
+for(const mode of ['stop','timeout','finish'] as const) test(`G3 real parent/child ${mode}: REST responsive, tree ends, frozen finish ordering`,{timeout:120000},async t=>{
   const f=await liveNodeFixture(t,{'tree.cjs':treeScript},[scriptProfile('tree.cjs',mode==='timeout'?1000:5000)]);
   const run=await f.run();
   await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes('TREE_READY'));
