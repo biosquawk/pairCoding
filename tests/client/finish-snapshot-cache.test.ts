@@ -27,7 +27,7 @@ async function fixture(t: TestContext) {
     fs.writeFileSync(path.join(dir, 'main.py'), `print(${JSON.stringify(path.basename(dir))})\n`);
   }
   const token = 'fixture-' + crypto.randomUUID();
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(base, 'data'), token,
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), token,
     port: 0, enableCoach: false, enableExecution: true });
   const port = await app.listen(), baseUrl = `http://127.0.0.1:${port}`;
   const gates: Gate[] = [], allGates: Gate[] = [], requests: { path: string; method: string; body: any; status?: number; value?: any; done?: boolean }[] = [];

@@ -13,7 +13,7 @@ test('RENAME real REST/WS: partial failure is 409 + external sync; replay repeat
   const root = path.join(parent, 'project'); fs.mkdirSync(root);
   const source = path.join(root, 'main.ts'), target = path.join(root, 'target.ts');
   const bytes = Buffer.from('\ufeffconst n = 1;\r\n'); fs.writeFileSync(source, bytes);
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(parent, 'data'), port: 0, token: TOKEN });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, token: TOKEN });
   const port = await app.listen(), origin = `http://127.0.0.1:${port}`;
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/session`, { origin });
   const messages: any[] = [];

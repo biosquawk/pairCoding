@@ -90,7 +90,7 @@ test('Codex selection reaches real backend/WS consented chat via fakeCLI, not a 
   const selected=process.env.PAIRCOACH_COACH_PROVIDER,exe=process.env.PAIRCOACH_CODEX_EXE;
   process.env.PAIRCOACH_COACH_PROVIDER='codex';process.env.PAIRCOACH_CODEX_EXE=path.join(f.base,'fake codex.cjs');
   t.after(()=>{if(selected===undefined)delete process.env.PAIRCOACH_COACH_PROVIDER;else process.env.PAIRCOACH_COACH_PROVIDER=selected;if(exe===undefined)delete process.env.PAIRCOACH_CODEX_EXE;else process.env.PAIRCOACH_CODEX_EXE=exe;});
-  const token='backend-'+id(),app=createPairCoachServer({rootPath:f.rootPath,dataDir:f.dataDir,token,port:0,enableCoach:true});
+  const token='backend-'+id(),app=createPairCoachServer({rootPath:f.rootPath,dataDir:path.join(f.rootPath,'.paircoach'),token,port:0,enableCoach:true});
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,clientId=id(),sessionId=app.session.state.sessionId,peers=new Set<{close():void}>();
   t.after(async()=>{for(const peer of peers)peer.close();await app.close();});
   const peer=new Peer({port,baseURL,clientId,sessionId,token,peers} as any);await peer.connect();
@@ -99,7 +99,7 @@ test('Codex selection reaches real backend/WS consented chat via fakeCLI, not a 
   assert.equal((await http('POST','/api/session/start',{...command(),limitMs:null,pauseOnHidden:true})).status,200);
   await peer.ack(peer.send('CHAT_MESSAGE',{text:'Consent OFF must not run CLI',path:null,documentVersion:null,selection:null}));
   await delay(30);await assert.rejects(fs.stat(f.record),{code:'ENOENT'});
-  assert.equal((await http('PUT','/api/project/settings',{...command(),expectedWorkspaceVersion:app.workspace.workspaceVersion,settings:{...settings,aiConsent:true}})).status,200);
+  assert.equal((await http('PUT','/api/project/settings',{...command(),expectedWorkspaceVersion:app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:true}})).status,200);
   await peer.ack(peer.send('VIEW_CHANGED',{path:'main.py',documentVersion:1,cursor:{line:1,column:1},selection:null}));
   await peer.ack(peer.send('CHAT_MESSAGE',{text:'Dlaczego preview_sum odejmuje zamiast dodawać?',path:null,documentVersion:null,selection:null}));
   const reply=await peer.take(m=>m.type==='CHAT_REPLY'&&m.payload.text.includes('preview_sum'));
@@ -124,6 +124,7 @@ test('Codex report uses report schema/instruction and preserves bounded isolated
 
 test('public Finish selects Codex report without Gemini key and filters private context',async t=>{
   const {createPairCoachServer}=await import('../../src/server/http');
+  const {Peer,settings}=await import('../qa/helpers');
   const f=await fake(t,`emit({type:'turn.started'});emit({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({markdown:'# Raport AI Codex\\nZachowano kod próby.'})}});emit({type:'turn.completed'});`);
   await fs.writeFile(path.join(f.rootPath,'main.js'),'module.exports = 0;');
   await fs.writeFile(path.join(f.rootPath,'.env'),'NEVER_SEND_PRIVATE_FILE');
@@ -131,11 +132,15 @@ test('public Finish selects Codex report without Gemini key and filters private 
   process.env.PAIRCOACH_COACH_PROVIDER='codex';process.env.PAIRCOACH_CODEX_EXE=path.join(f.base,'fake codex.cjs');delete process.env.GEMINI_API_KEY;
   t.after(()=>{for(const [key,value] of Object.entries({PAIRCOACH_COACH_PROVIDER:old.provider,PAIRCOACH_CODEX_EXE:old.exe,GEMINI_API_KEY:old.key})){if(value===undefined)delete process.env[key];else process.env[key]=value;}});
   const token='PRIVATE_TEST_HTTP_TOKEN';
-  const app=createPairCoachServer({...f,port:0,token,enableCoach:false,enableExecution:true});
-  t.after(()=>app.close());
-  app.workspace.updateSettings({...app.workspace.settings,aiConsent:true,contextPatterns:['**/*']});
-  const state=app.session.getSession(),clientId='report-client';assert(app.session.claimLease(clientId));
+  const app=createPairCoachServer({...f,dataDir:path.join(f.rootPath,'.paircoach'),port:0,token,enableCoach:false,enableExecution:true});
+  const peers=new Set<{close():void}>();
+  t.after(async()=>{for(const peer of peers)peer.close();await app.close();});
   const port=await app.listen();
+  const state=app.session.getSession(),clientId='report-client';assert(app.session.claimLease(clientId));
+  const peer=new Peer({port,baseURL:`http://127.0.0.1:${port}`,clientId,sessionId:state.sessionId,token,peers} as any);await peer.connect();
+  // Consent/context is an explicit V2 SAVE by the authenticated, bound student.
+  const saved=await fetch(`http://127.0.0.1:${port}/api/project/settings`,{method:'PUT',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({requestId:'report-settings',clientId,sessionId:state.sessionId,expectedWorkspaceVersion:app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:true,contextPatterns:['**/*']}})});
+  assert.equal(saved.status,200);
   const response=await fetch(`http://127.0.0.1:${port}/api/session/finish`,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({requestId:'report-request',clientId,sessionId:state.sessionId,expectedWorkspaceVersion:app.workspace.workspaceVersion,reason:'COMPLETED'})});
   assert.equal(response.status,202);
   const deadline=Date.now()+5000;let report:any;

@@ -49,7 +49,7 @@ async function fixture(t: any) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'p2-presence-'));
   const root = path.join(dir, 'root'); fs.mkdirSync(root); fs.writeFileSync(path.join(root, 'challenge.md'), '# Presence\n');
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const value = 0;\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, devBootstrap: true });
   const port = await app.listen();
   const clients: LiveBackend[] = [];
   const create = (gate?: { entered: boolean; wait: Promise<void> }, badHello = false) => {

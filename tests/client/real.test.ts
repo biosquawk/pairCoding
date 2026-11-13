@@ -15,7 +15,7 @@ test('REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, exte
   const root = path.join(dir, 'workspace'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# Real client exercise\n');
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const value = 0;\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, devBootstrap: true });
   const port = await app.listen();
   const stored = new Map<string, string>();
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, storage: { getItem: k => stored.get(k) ?? null, setItem: (k,v) => { stored.set(k,v); }, removeItem: k => { stored.delete(k); } } });
@@ -73,7 +73,7 @@ test('REGRESSION: lost veto ACK then real reconnect snapshot proves cutoff and u
   const root = path.join(dir, 'workspace'); fs.mkdirSync(root);
   fs.writeFileSync(path.join(root, 'challenge.md'), '# Task\n');
   fs.writeFileSync(path.join(root, 'solution.ts'), 'const value = 0;\n');
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(dir, 'data'), port: 0, devBootstrap: true });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, devBootstrap: true });
   const port = await app.listen();
   const sockets: { block: boolean }[] = [];
   const client = new LiveBackend({ baseUrl: `http://127.0.0.1:${port}`, socket: url => {

@@ -132,7 +132,7 @@ for (const persistent of [false, true]) test(`RENAME cleanup ${persistent ? 'per
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'rename-cleanup-'));
   const root = path.join(parent, 'project'); fs.mkdirSync(root);
   const source = path.join(root, 'main.ts'), target = path.join(root, 'target.ts'); fs.writeFileSync(source, original);
-  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(parent, 'data'), port: 0, token });
+  const app = createPairCoachServer({ rootPath: root, dataDir: path.join(root, '.paircoach'), port: 0, token });
   const port = await app.listen(), base = `http://127.0.0.1:${port}`;
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws/session`, { origin: base }), messages: any[] = [];
   ws.on('message', raw => messages.push(JSON.parse(String(raw))));
