@@ -1,14 +1,13 @@
 {
   "javascript": {
     "test_command": [
-      "npm",
-      "run",
-      "test:coverage"
+      "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/tools/node-22.22.2/bin/node",
+      "scripts/coverage.mjs",
+      "--tests"
     ],
     "coverage_command": [
-      "npm",
-      "run",
-      "coverage"
+      "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/tools/node-22.22.2/bin/node",
+      "scripts/coverage.mjs"
     ],
     "coverage_reports": [
       "coverage/lcov.info"
@@ -16,14 +15,13 @@
   },
   "typescript": {
     "test_command": [
-      "npm",
-      "run",
-      "test:coverage"
+      "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/tools/node-22.22.2/bin/node",
+      "scripts/coverage.mjs",
+      "--tests"
     ],
     "coverage_command": [
-      "npm",
-      "run",
-      "coverage"
+      "/home/darulec/dev/codex_prjects/projects/software_dev_2/Desks/SharedDesk/tools/node-22.22.2/bin/node",
+      "scripts/coverage.mjs"
     ],
     "coverage_reports": [
       "coverage/lcov.info"

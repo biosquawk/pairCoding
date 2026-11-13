@@ -108,8 +108,11 @@ coverage or high complexity. New unclassified source files fail inventory.
 The canonical `npm test` selector/retirement policy is unchanged.
 
 `.quality-policy.json` uses the same production roots. `.quality-runner.json`
-explicitly selects `npm run coverage` and **`npm run test:coverage`** for both
-JavaScript and TypeScript. The latter runs the same bounded test selection
+runs the exact `coverage`/`test:coverage` script entrypoints using an explicit
+Node executable for both JavaScript and TypeScript (MCP does not inherit this
+shell's PATH). The recorded path is the supplied SharedDesk Node 22.22.2; update
+that executable path when relocating the QG workspace. Ordinary npm commands
+remain portable. The latter runs the same bounded test selection
 through canonical TS/native-MJS lanes and retirement filters, without c8. This
 bounded profile is intentional under the owner's no-long-suite constraint;
 any MCP gate applies only to that profile and is **not full-product acceptance**.

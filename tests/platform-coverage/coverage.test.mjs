@@ -35,8 +35,9 @@ test('QG and c8 cover identical production roots including tooling, no complexit
   assert.deepEqual(config.include, sourceRoots.map(r => ['src', 'scripts'].includes(r) ? r + '/**' : r));
   assert.deepEqual(config.exclude, ['**/*.d.ts', '**/*.d.mts', '**/*.d.cts', '**/*.test.*', '**/*.spec.*']);
   for (const lang of ['javascript', 'typescript']) {
-    assert.deepEqual(runner[lang].coverage_command, ['npm', 'run', 'coverage']);
-    assert.deepEqual(runner[lang].test_command, ['npm', 'run', 'test:coverage']);
+    assert.match(runner[lang].coverage_command[0], /[/\\]node(?:\.exe)?$/);
+    assert.deepEqual(runner[lang].coverage_command.slice(1), ['scripts/coverage.mjs']);
+    assert.deepEqual(runner[lang].test_command, [...runner[lang].coverage_command, '--tests']);
     assert.deepEqual(runner[lang].coverage_reports, ['coverage/lcov.info']);
   }
   const inventory = sourceInventory(root);
