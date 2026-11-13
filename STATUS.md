@@ -1,3 +1,58 @@
+# PairCoach — STOP / checkpoint 13.11.2026
+
+<!-- CURRENT_LIGHTWEIGHT_STATUS_BEGIN -->
+
+**Stan nadrzędny: STOP właściciela od 13.11.2026 08:51:06 Europe/Warsaw. Wszystkie 14 ról PAUSED, 0 tur RUNNING. Wydanie NO-GO.**
+
+Pełny raport nocy, odpowiedzialność operatora, drzewo ról, per-agent usage,
+81 powiązań kosztu z zadaniami i stan niewykonanych odbiorów:
+**[STATUS2.md](STATUS2.md)**. To aktualne źródło stanu po STOP.
+Nie wolno wznawiać implementacji na podstawie historycznych poleceń poniżej.
+
+| Element | Stan po zatrzymaniu |
+| --- | --- |
+| Projekt | PairCoach Lightweight / Thalamus `software_dev_2` |
+| Kod produktu | `257e90b838abec4e9b332385c71f1be8201fc013`, tree `72549aa8b933467426d448cf64df153f3b5297c0` |
+| Git źródła K | Tracked clean; 4 zachowane nieśledzone katalogi testowe. Cały status nie jest pusty |
+| Agenci | 14 ról PAUSED; 0 RUNNING; projektowe app-servery i pozostałe helpery zatrzymane |
+| Własne serwery testowe | Brak listenerów 18110/18120/18080; daemon Thalamusa 8768 pozostawiony |
+| Integracyjne testy celowane | 344 PASS; typecheck i build exit0. To nie jest pełny odbiór |
+| Końcowy npm test | Log 05:50:52–06:20:02 lokalnie, 16 pełnych podsumowań: 2775 tests / 2529 PASS / 244 FAIL / 2 skip |
+| Nadzór testu | Proces skończył się przed STOP. Kod wyjścia zewnętrznego supervisora UNKNOWN; nie twierdzić, że suite nadal działa albo że STOP go przerwał |
+| Java21 final GUI | FAIL: Main i JUnit FAILED prawdziwe; po poprawce/ACK drugi Tests zablokowany. Dalsze kontrole NOT_RUN |
+| Lokalny edytor / AI | Część TS i Java/AI PASS; JS-first FAIL; popup→CONTROL_PREPARE→Enter/Tab NOT_RUN |
+| Docker | Cztery fizyczne scoped LIVE potwierdzone. Nie zastępują pełnej macierzy produktu |
+| Windows / świeży ZIP | Poprawka native lease ma scoped dowody, ale aktualny końcowy ZIP / 7 checks / Edge Spring GUI NOT_RUN |
+| Zadania 1–8 | Istnieją wcześniejsze implementacje i scoped odbiory; końcowe regresje niezaliczone |
+| 9.1 / 9.2 / 9.3 | Lokalny edytor częściowy; prepare i timeouty zintegrowane |
+| 9.4 / 9.5 / 9.6 / 9.7 | Java21 FAIL; starsze Spring/profile/AI nie zamykają odbioru końcowej wersji; finał NO-GO |
+| Koszt 8 godzin przed STOP | Znane kanały Thalamus + ROOT: 690033448 input+output, z tego 321571584 cached input; brak przeliczenia na fakturę/tygodniowy limit |
+| Niescalone prace | P1 `158881b…`, P1_2 `8099dea…`, P4 `ef98df3…`; zachowane jako checkpointy, bez odbioru wydania |
+| Runtime Thalamusa | Wdrożone b235eea4; publikowane źródło 4f2fea7c to odrębny stan, bez nowego wdrożenia |
+| ETA / decyzja | Brak nowej ETA. Implementacja pozostaje zatrzymana |
+
+Obowiązujący zakres produktu nie przywraca LSP. Storage Ports & Adapters,
+Flat Files, Flight Board i sandbox/flow są osobnym [trwałym backlogiem](docs/next/BACKLOG_MVP_STORAGE_FLIGHT_BOARD_AND_RUNTIME.md),
+a nie ukończonym elementem Zadania 9.
+
+Publikacja kodu i raportu jest zabezpieczeniem checkpointu.
+Nie nadaje finalacceptedSHA, nie stanowi zgody na wydanie ani wznowienie ról.
+
+Poniżej pozostaje **historyczny zapis zakresu i kampanii**, zachowany bajtowo
+po znaczniku końca bieżącego statusu. Historyczne ACTIVE, następne kroki,
+FAIL/PASS oraz stare rewizje nie opisują obecnie pracujących procesów.
+
+<!-- CURRENT_LIGHTWEIGHT_STATUS_END -->
+
+---
+
+<details>
+<summary>Archiwum: checkpoint zatrzymanej kampanii 1–9 oraz historyczne GOAL/ANNEX sprzed korekty Lightweight</summary>
+
+**Poniższy zapis jest historyczny, zachowany bez zmiany treści.** Jego twierdzenia o STOP, aktywnym LSP, równości release/JDK, sztywnych licznikach ról/prób i dawnych bramkach nie zastępują sekcji A–J powyżej ani późniejszych decyzji właściciela. Historyczna macierz NOT_RUN/FAIL pozostaje historią, nie aktywnym żądaniem przywrócenia uchylonych funkcji.
+
+SHA256 oryginalnych bajtów archiwalnego `STATUS.md`: `59dcc674bd13c4a99839818a472d367aab01f891524fe95493cbd32706db121b`.
+
 # PairCoach — STATUS kampanii 1–9 i przekazanie do code review
 
 Stan zamrożony po poleceniu właściciela STOP, 12 listopada 2026. To jest **checkpoint nieukończonej implementacji**, a nie odebrane wydanie Polyglot. Nowym, wykonywanym poleceniem jest zachowanie całości pracy, commit, push i ten raport; wcześniejsza realizacja została zatrzymana. Nie uruchamiać automatycznie opisanych eksperymentów ani harnessów WIP.
@@ -824,3 +879,5 @@ Każdy status odnosi się do wspólnego finalnego wydania, nie do wszystkich his
 - **ANNEX-NATIVE-FAULTS — NOT_RUN**: Native Windows journal exclusive lock/live contention/process kill recovery, writable persistence/fsync policy/NTFS ownership guards, ledger spill ACL/privacy and bounded memory; unconfirmed states honest.
 
 - **RELEASE — NOT_RUN**: One coherent final accepted SHA, owner repo/mirror clean and agreed push, source/image/config manifests tied to actual package; safe deployment preserving previous workspace/data; owner instructions and measured performance report; normal roles P3–P6 and JUDGE restored before final campaign; Sound OK actual accepted receipt only after all requirements PASS.
+
+</details>

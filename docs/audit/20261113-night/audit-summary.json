@@ -1,0 +1,1114 @@
+{
+  "format": "paircoach.stopped-night-audit/1",
+  "created_utc": "2026-11-13T08:03:11.670261+00:00",
+  "window_start_utc": "2026-11-12T23:51:06.800000+00:00",
+  "window_end_utc": "2026-11-13T07:51:06.800507+00:00",
+  "timezone": "Europe/Warsaw",
+  "accounting": "Known observed provider usage, not invoice or ChatGPT weekly quota conversion",
+  "agents": [
+    {
+      "attempts": 1160,
+      "settled": 1128,
+      "unknown": 32,
+      "reserved": 0,
+      "input_tokens": 108336287,
+      "cached_input_tokens": 27336576,
+      "output_tokens": 440742,
+      "reasoning_tokens": 96872,
+      "role": "P2",
+      "name": "Frontend i UX",
+      "known_total_tokens": 108777029,
+      "uncached_input_tokens": 80999711,
+      "turns": 119
+    },
+    {
+      "attempts": 1114,
+      "settled": 1077,
+      "unknown": 37,
+      "reserved": 0,
+      "input_tokens": 95684087,
+      "cached_input_tokens": 24111616,
+      "output_tokens": 666080,
+      "reasoning_tokens": 105097,
+      "role": "K",
+      "name": "Tech Lead i integrator",
+      "known_total_tokens": 96350167,
+      "uncached_input_tokens": 71572471,
+      "turns": 135
+    },
+    {
+      "attempts": 830,
+      "settled": 796,
+      "unknown": 34,
+      "reserved": 0,
+      "input_tokens": 63974388,
+      "cached_input_tokens": 16798464,
+      "output_tokens": 329714,
+      "reasoning_tokens": 76369,
+      "role": "P3",
+      "name": "Tester QA i E2E",
+      "known_total_tokens": 64304102,
+      "uncached_input_tokens": 47175924,
+      "turns": 121
+    },
+    {
+      "attempts": 750,
+      "settled": 718,
+      "unknown": 32,
+      "reserved": 0,
+      "input_tokens": 43279206,
+      "cached_input_tokens": 8432000,
+      "output_tokens": 295340,
+      "reasoning_tokens": 55324,
+      "role": "P4",
+      "name": "DevOps, build i wdrożenia",
+      "known_total_tokens": 43574546,
+      "uncached_input_tokens": 34847206,
+      "turns": 136
+    },
+    {
+      "attempts": 513,
+      "settled": 480,
+      "unknown": 33,
+      "reserved": 0,
+      "input_tokens": 41323335,
+      "cached_input_tokens": 12821248,
+      "output_tokens": 226083,
+      "reasoning_tokens": 61973,
+      "role": "P1",
+      "name": "Backend, API i dane",
+      "known_total_tokens": 41549418,
+      "uncached_input_tokens": 28502087,
+      "turns": 80
+    },
+    {
+      "attempts": 527,
+      "settled": 495,
+      "unknown": 32,
+      "reserved": 0,
+      "input_tokens": 34978779,
+      "cached_input_tokens": 6958976,
+      "output_tokens": 134190,
+      "reasoning_tokens": 29057,
+      "role": "P5",
+      "name": "Bezpieczeństwo i code review",
+      "known_total_tokens": 35112969,
+      "uncached_input_tokens": 28019803,
+      "turns": 94
+    },
+    {
+      "attempts": 508,
+      "settled": 476,
+      "unknown": 32,
+      "reserved": 0,
+      "input_tokens": 33560406,
+      "cached_input_tokens": 8215808,
+      "output_tokens": 142968,
+      "reasoning_tokens": 36024,
+      "role": "P1_2",
+      "name": "Backend, API i dane — instancja 2/4",
+      "known_total_tokens": 33703374,
+      "uncached_input_tokens": 25344598,
+      "turns": 95
+    },
+    {
+      "attempts": 269,
+      "settled": 236,
+      "unknown": 33,
+      "reserved": 0,
+      "input_tokens": 19328460,
+      "cached_input_tokens": 3289472,
+      "output_tokens": 76379,
+      "reasoning_tokens": 16672,
+      "role": "P1_4",
+      "name": "Backend, API i dane — instancja 4/4",
+      "known_total_tokens": 19404839,
+      "uncached_input_tokens": 16038988,
+      "turns": 59
+    },
+    {
+      "attempts": 262,
+      "settled": 230,
+      "unknown": 32,
+      "reserved": 0,
+      "input_tokens": 17325122,
+      "cached_input_tokens": 3598592,
+      "output_tokens": 91333,
+      "reasoning_tokens": 22604,
+      "role": "P6",
+      "name": "Architektura, integracje i wydajność",
+      "known_total_tokens": 17416455,
+      "uncached_input_tokens": 13726530,
+      "turns": 68
+    },
+    {
+      "attempts": 139,
+      "settled": 139,
+      "unknown": 0,
+      "reserved": 0,
+      "input_tokens": 8931438,
+      "cached_input_tokens": 2251008,
+      "output_tokens": 44427,
+      "reasoning_tokens": 8448,
+      "role": "P2_2",
+      "name": "Frontend i UX — instancja 2/4",
+      "known_total_tokens": 8975865,
+      "uncached_input_tokens": 6680430,
+      "turns": 16
+    },
+    {
+      "attempts": 94,
+      "settled": 94,
+      "unknown": 0,
+      "reserved": 0,
+      "input_tokens": 6657582,
+      "cached_input_tokens": 1758848,
+      "output_tokens": 23133,
+      "reasoning_tokens": 4489,
+      "role": "P2_3",
+      "name": "Frontend i UX — instancja 3/4",
+      "known_total_tokens": 6680715,
+      "uncached_input_tokens": 4898734,
+      "turns": 17
+    },
+    {
+      "attempts": 90,
+      "settled": 90,
+      "unknown": 0,
+      "reserved": 0,
+      "input_tokens": 5601438,
+      "cached_input_tokens": 1143424,
+      "output_tokens": 43752,
+      "reasoning_tokens": 11649,
+      "role": "P1_3",
+      "name": "Backend, API i dane — instancja 3/4",
+      "known_total_tokens": 5645190,
+      "uncached_input_tokens": 4458014,
+      "turns": 10
+    },
+    {
+      "attempts": 0,
+      "settled": 0,
+      "unknown": 0,
+      "reserved": 0,
+      "input_tokens": 0,
+      "cached_input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "role": "JUDGE",
+      "name": "Niezależny nadzór incydentalny",
+      "known_total_tokens": 0,
+      "uncached_input_tokens": 0,
+      "turns": 0
+    },
+    {
+      "attempts": 0,
+      "settled": 0,
+      "unknown": 0,
+      "reserved": 0,
+      "input_tokens": 0,
+      "cached_input_tokens": 0,
+      "output_tokens": 0,
+      "reasoning_tokens": 0,
+      "role": "P2_4",
+      "name": "Frontend i UX — instancja 4/4",
+      "known_total_tokens": 0,
+      "uncached_input_tokens": 0,
+      "turns": 0
+    }
+  ],
+  "attribution": {
+    "single_work": {
+      "attempts": 244,
+      "settled": 244,
+      "unknown": 0,
+      "reserved": 0,
+      "input_tokens": 16819581,
+      "cached_input_tokens": 3571584,
+      "output_tokens": 58710,
+      "reasoning_tokens": 12044
+    },
+    "multi_work": {
+      "attempts": 4897,
+      "settled": 4637,
+      "unknown": 260,
+      "reserved": 0,
+      "input_tokens": 366358982,
+      "cached_input_tokens": 88947840,
+      "output_tokens": 1788633,
+      "reasoning_tokens": 407315
+    },
+    "no_work": {
+      "attempts": 1115,
+      "settled": 1078,
+      "unknown": 37,
+      "reserved": 0,
+      "input_tokens": 95801965,
+      "cached_input_tokens": 24196608,
+      "output_tokens": 666798,
+      "reasoning_tokens": 105219
+    }
+  },
+  "purpose": {
+    "WORK": {
+      "attempts": 5501,
+      "settled": 5485,
+      "unknown": 16,
+      "reserved": 0,
+      "input_tokens": 428590773,
+      "cached_input_tokens": 100308224,
+      "output_tokens": 2189375,
+      "reasoning_tokens": 476254
+    },
+    "SLEEP": {
+      "attempts": 277,
+      "settled": 276,
+      "unknown": 1,
+      "reserved": 0,
+      "input_tokens": 29078013,
+      "cached_input_tokens": 9345280,
+      "output_tokens": 230961,
+      "reasoning_tokens": 28224
+    },
+    "RECOVERY": {
+      "attempts": 478,
+      "settled": 198,
+      "unknown": 280,
+      "reserved": 0,
+      "input_tokens": 21311742,
+      "cached_input_tokens": 7062528,
+      "output_tokens": 93805,
+      "reasoning_tokens": 20100
+    }
+  },
+  "metrics": {
+    "human_inputs": 66,
+    "owner_source_updates": 1283,
+    "stale_execution_rejections": 19,
+    "event_counts": {
+      "CONSOLIDATION_COMPLETED": 276,
+      "ConsolidationStarted": 277,
+      "ExternalInputDelivered": 66,
+      "JudgeAnalysisFailed": 8,
+      "JudgeIncidentOpened": 8,
+      "LocalActionObserved": 1028,
+      "MessageStored": 625,
+      "NativeSessionRotated": 1,
+      "ProviderCapacityWait": 290,
+      "ProviderReserved": 6256,
+      "ProviderSettled": 5964,
+      "ProviderUsageUnknown": 297,
+      "PublicationQueued": 56,
+      "RecoveryCompleted": 12,
+      "RecoveryStarted": 297,
+      "SESSION_CONTEXT_REFRESHED": 276,
+      "ToolRejected": 52,
+      "TurnCompleted": 647,
+      "TurnInterrupted": 304,
+      "TurnStarted": 946,
+      "WorkAccepted": 52,
+      "WorkAssigned": 65,
+      "WorkCancelled": 1,
+      "WorkChangesRequested": 5,
+      "WorkResultReady": 67
+    }
+  },
+  "root": {
+    "usage": {
+      "input_tokens": 207995769,
+      "cached_input_tokens": 204855552,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 543010,
+      "reasoning_output_tokens": 275359,
+      "total_tokens": 208538779
+    },
+    "unique_usage_updates": 750,
+    "duplicate_updates_ignored": 10,
+    "baseline_at": "2026-11-12T23:51:05.234Z",
+    "last_at": "2026-11-13T07:50:28.434Z",
+    "method": "cumulative end minus last baseline before window, independently equal sum(last_token_usage) at unique cumulative increments; reason/cache subsets not added twice"
+  },
+  "task_rows": 81,
+  "exclusive_group_rows": 76,
+  "suite": {
+    "groups": [
+      {
+        "tests": 2392,
+        "pass": 2156,
+        "fail": 236,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 1,
+        "pass": 1,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 3,
+        "pass": 3,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      },
+      {
+        "tests": 353,
+        "pass": 343,
+        "fail": 8,
+        "cancelled": 0,
+        "skipped": 2,
+        "todo": 0
+      },
+      {
+        "tests": 15,
+        "pass": 15,
+        "fail": 0,
+        "cancelled": 0,
+        "skipped": 0,
+        "todo": 0
+      }
+    ],
+    "sum": {
+      "tests": 2775,
+      "pass": 2529,
+      "fail": 244,
+      "cancelled": 0,
+      "skipped": 2,
+      "todo": 0
+    },
+    "stdout_sha256": "43f0c544dfcb1bdb166dbc5d0610baae4ef05b5a88a65626ca224d05cb73fcb5",
+    "last_write_utc": "2026-11-13T05:20:02.091084+00:00",
+    "outer_process_exit": "UNKNOWN; original supervisor disappeared; no terminal.json. Logs complete16groups; process gone before STOP."
+  },
+  "source_methods": {
+    "calls": "SELECT ... FROM calls WHERE created_ms BETWEEN start AND end; token columns are per response.completed/failed/incomplete SSE, parsed by ProviderEvents.usage; CallLedger.finish settles each reservation once",
+    "work": "turn_work links by exact calls.turn; fallback native_turn_links parent only when no direct link. Multiple works are shared, never arbitrarily divided or summed twice",
+    "root": "Native local token_count counters only; transcript content/prompt/auth excluded",
+    "limits": "Provider attempts without usage remain UNKNOWN, not zero; task-level exact split unavailable for multi-work turns; no per-task ROOT time/cost tags; account quota ledger not available"
+  },
+  "message_count_rows": [
+    {
+      "sender": "HUMAN",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 66
+    },
+    {
+      "sender": "K",
+      "recipient": "HUMAN",
+      "kind": "NOTE",
+      "n": 25
+    },
+    {
+      "sender": "K",
+      "recipient": "HUMAN",
+      "kind": "PROGRESS",
+      "n": 4
+    },
+    {
+      "sender": "K",
+      "recipient": "HUMAN",
+      "kind": "QUESTION",
+      "n": 30
+    },
+    {
+      "sender": "K",
+      "recipient": "HUMAN",
+      "kind": "STATUS",
+      "n": 1
+    },
+    {
+      "sender": "K",
+      "recipient": "P1",
+      "kind": "NOTE",
+      "n": 6
+    },
+    {
+      "sender": "K",
+      "recipient": "P1",
+      "kind": "QUESTION",
+      "n": 1
+    },
+    {
+      "sender": "K",
+      "recipient": "P1",
+      "kind": "REVIEW_DECISION",
+      "n": 11
+    },
+    {
+      "sender": "K",
+      "recipient": "P1",
+      "kind": "STATUS",
+      "n": 1
+    },
+    {
+      "sender": "K",
+      "recipient": "P1",
+      "kind": "TASK",
+      "n": 15
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_2",
+      "kind": "NOTE",
+      "n": 2
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_2",
+      "kind": "REVIEW_DECISION",
+      "n": 4
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_2",
+      "kind": "TASK",
+      "n": 6
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_3",
+      "kind": "NOTE",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_3",
+      "kind": "REVIEW_DECISION",
+      "n": 2
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_3",
+      "kind": "TASK",
+      "n": 2
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_4",
+      "kind": "NOTE",
+      "n": 4
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_4",
+      "kind": "REVIEW_DECISION",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P1_4",
+      "kind": "TASK",
+      "n": 5
+    },
+    {
+      "sender": "K",
+      "recipient": "P2",
+      "kind": "NOTE",
+      "n": 11
+    },
+    {
+      "sender": "K",
+      "recipient": "P2",
+      "kind": "QUESTION",
+      "n": 5
+    },
+    {
+      "sender": "K",
+      "recipient": "P2",
+      "kind": "REVIEW_DECISION",
+      "n": 11
+    },
+    {
+      "sender": "K",
+      "recipient": "P2",
+      "kind": "TASK",
+      "n": 23
+    },
+    {
+      "sender": "K",
+      "recipient": "P2_2",
+      "kind": "REVIEW_DECISION",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P2_2",
+      "kind": "TASK",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P2_3",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "K",
+      "recipient": "P2_3",
+      "kind": "REVIEW_DECISION",
+      "n": 1
+    },
+    {
+      "sender": "K",
+      "recipient": "P2_3",
+      "kind": "TASK",
+      "n": 2
+    },
+    {
+      "sender": "K",
+      "recipient": "P3",
+      "kind": "NOTE",
+      "n": 4
+    },
+    {
+      "sender": "K",
+      "recipient": "P3",
+      "kind": "QUESTION",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P3",
+      "kind": "REVIEW_DECISION",
+      "n": 4
+    },
+    {
+      "sender": "K",
+      "recipient": "P3",
+      "kind": "TASK",
+      "n": 13
+    },
+    {
+      "sender": "K",
+      "recipient": "P4",
+      "kind": "NOTE",
+      "n": 11
+    },
+    {
+      "sender": "K",
+      "recipient": "P4",
+      "kind": "QUESTION",
+      "n": 4
+    },
+    {
+      "sender": "K",
+      "recipient": "P4",
+      "kind": "REVIEW_DECISION",
+      "n": 9
+    },
+    {
+      "sender": "K",
+      "recipient": "P4",
+      "kind": "TASK",
+      "n": 16
+    },
+    {
+      "sender": "K",
+      "recipient": "P5",
+      "kind": "NOTE",
+      "n": 6
+    },
+    {
+      "sender": "K",
+      "recipient": "P5",
+      "kind": "REVIEW_DECISION",
+      "n": 6
+    },
+    {
+      "sender": "K",
+      "recipient": "P5",
+      "kind": "TASK",
+      "n": 10
+    },
+    {
+      "sender": "K",
+      "recipient": "P6",
+      "kind": "NOTE",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P6",
+      "kind": "REVIEW_DECISION",
+      "n": 3
+    },
+    {
+      "sender": "K",
+      "recipient": "P6",
+      "kind": "TASK",
+      "n": 6
+    },
+    {
+      "sender": "P1",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "P1",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 7
+    },
+    {
+      "sender": "P1",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 12
+    },
+    {
+      "sender": "P1",
+      "recipient": "K",
+      "kind": "STATUS",
+      "n": 3
+    },
+    {
+      "sender": "P1",
+      "recipient": "P4",
+      "kind": "NOTE",
+      "n": 3
+    },
+    {
+      "sender": "P1",
+      "recipient": "P4",
+      "kind": "QUESTION",
+      "n": 1
+    },
+    {
+      "sender": "P1_2",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 5
+    },
+    {
+      "sender": "P1_2",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 6
+    },
+    {
+      "sender": "P1_2",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 6
+    },
+    {
+      "sender": "P1_3",
+      "recipient": "K",
+      "kind": "ACK",
+      "n": 1
+    },
+    {
+      "sender": "P1_3",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "P1_3",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 2
+    },
+    {
+      "sender": "P1_3",
+      "recipient": "P4",
+      "kind": "QUESTION",
+      "n": 1
+    },
+    {
+      "sender": "P1_3",
+      "recipient": "P4",
+      "kind": "RESULT_READY",
+      "n": 1
+    },
+    {
+      "sender": "P1_4",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 3
+    },
+    {
+      "sender": "P1_4",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 4
+    },
+    {
+      "sender": "P1_4",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 4
+    },
+    {
+      "sender": "P1_4",
+      "recipient": "P1_2",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "P2",
+      "recipient": "K",
+      "kind": "ACK",
+      "n": 5
+    },
+    {
+      "sender": "P2",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 26
+    },
+    {
+      "sender": "P2",
+      "recipient": "K",
+      "kind": "PROGRESS",
+      "n": 3
+    },
+    {
+      "sender": "P2",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 24
+    },
+    {
+      "sender": "P2",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 13
+    },
+    {
+      "sender": "P2",
+      "recipient": "K",
+      "kind": "STATUS",
+      "n": 4
+    },
+    {
+      "sender": "P2",
+      "recipient": "P3",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "P2_2",
+      "recipient": "K",
+      "kind": "ACK",
+      "n": 2
+    },
+    {
+      "sender": "P2_2",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 2
+    },
+    {
+      "sender": "P2_2",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 3
+    },
+    {
+      "sender": "P2_3",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 2
+    },
+    {
+      "sender": "P2_3",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 1
+    },
+    {
+      "sender": "P3",
+      "recipient": "K",
+      "kind": "ACK",
+      "n": 3
+    },
+    {
+      "sender": "P3",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 28
+    },
+    {
+      "sender": "P3",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 10
+    },
+    {
+      "sender": "P3",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 4
+    },
+    {
+      "sender": "P3",
+      "recipient": "P2",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "P3",
+      "recipient": "P2",
+      "kind": "QUESTION",
+      "n": 1
+    },
+    {
+      "sender": "P4",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 21
+    },
+    {
+      "sender": "P4",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 14
+    },
+    {
+      "sender": "P4",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 13
+    },
+    {
+      "sender": "P4",
+      "recipient": "P1",
+      "kind": "NOTE",
+      "n": 2
+    },
+    {
+      "sender": "P4",
+      "recipient": "P1",
+      "kind": "QUESTION",
+      "n": 1
+    },
+    {
+      "sender": "P4",
+      "recipient": "P1_3",
+      "kind": "NOTE",
+      "n": 2
+    },
+    {
+      "sender": "P4",
+      "recipient": "P1_3",
+      "kind": "QUESTION",
+      "n": 3
+    },
+    {
+      "sender": "P4",
+      "recipient": "P6",
+      "kind": "NOTE",
+      "n": 1
+    },
+    {
+      "sender": "P5",
+      "recipient": "K",
+      "kind": "NOTE",
+      "n": 5
+    },
+    {
+      "sender": "P5",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 2
+    },
+    {
+      "sender": "P5",
+      "recipient": "K",
+      "kind": "RESULT",
+      "n": 1
+    },
+    {
+      "sender": "P5",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 6
+    },
+    {
+      "sender": "P6",
+      "recipient": "K",
+      "kind": "QUESTION",
+      "n": 5
+    },
+    {
+      "sender": "P6",
+      "recipient": "K",
+      "kind": "RESULT_READY",
+      "n": 3
+    },
+    {
+      "sender": "P6",
+      "recipient": "K",
+      "kind": "STATUS",
+      "n": 2
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P1",
+      "kind": "QUESTION",
+      "n": 48
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P1_2",
+      "kind": "QUESTION",
+      "n": 97
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P1_3",
+      "kind": "QUESTION",
+      "n": 6
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P1_4",
+      "kind": "QUESTION",
+      "n": 81
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P2",
+      "kind": "QUESTION",
+      "n": 258
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P2_2",
+      "kind": "QUESTION",
+      "n": 9
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P2_3",
+      "kind": "QUESTION",
+      "n": 70
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P2_4",
+      "kind": "QUESTION",
+      "n": 66
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P3",
+      "kind": "QUESTION",
+      "n": 240
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P4",
+      "kind": "QUESTION",
+      "n": 164
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P5",
+      "kind": "QUESTION",
+      "n": 92
+    },
+    {
+      "sender": "SYSTEM",
+      "recipient": "P6",
+      "kind": "QUESTION",
+      "n": 152
+    }
+  ]
+}

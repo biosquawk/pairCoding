@@ -1,0 +1,128 @@
+{
+  "root": "/home/darulec/dev/codex_prjects/thalamus_2.0_runtime",
+  "directories": [
+    {
+      "name": "bundle-before-agent-access-20261109",
+      "files": 196,
+      "logical_bytes": 84506530,
+      "allocated_bytes": 84938752,
+      "hardlinked_files": 0,
+      "build_id": "0b99ca30bd344faf98161cb9e9218810",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    },
+    {
+      "name": "bundle-before-kontrakt-it-setup-20261109",
+      "files": 197,
+      "logical_bytes": 84531854,
+      "allocated_bytes": 84967424,
+      "hardlinked_files": 0,
+      "build_id": "d478d522ec28431584eee500efb65d9e",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    },
+    {
+      "name": "bundle-before-permissive-20261109",
+      "files": 197,
+      "logical_bytes": 84513812,
+      "allocated_bytes": 84946944,
+      "hardlinked_files": 0,
+      "build_id": "1c6752d7bb93411fa2d70ca0b296c073",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    },
+    {
+      "name": "bundle-before-permissive-final-20261109",
+      "files": 197,
+      "logical_bytes": 84532091,
+      "allocated_bytes": 84967424,
+      "hardlinked_files": 0,
+      "build_id": "e2a01da128d04405b95edf932a870064",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    },
+    {
+      "name": "bundle-before-slack-20261107",
+      "files": 195,
+      "logical_bytes": 84465714,
+      "allocated_bytes": 84893696,
+      "hardlinked_files": 0,
+      "build_id": "4d2d11dbe5254d708222004ea622575e",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    },
+    {
+      "name": "bundle-before-unslop3-publication-20261109",
+      "files": 197,
+      "logical_bytes": 84531534,
+      "allocated_bytes": 84967424,
+      "hardlinked_files": 0,
+      "build_id": "b8edd89d221b4ea2bc7bbcedc3978d05",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    },
+    {
+      "name": "bundle-before-watchdog-4c276998946545f890d7b149dc5b9460",
+      "files": 197,
+      "logical_bytes": 84532591,
+      "allocated_bytes": 84967424,
+      "hardlinked_files": 0,
+      "build_id": "4c276998946545f890d7b149dc5b9460",
+      "manifest_keys": [
+        "format",
+        "build_id",
+        "platform",
+        "paid_calls_during_build",
+        "external_dependencies",
+        "files"
+      ],
+      "jre_bytes": 64908344
+    }
+  ],
+  "total_logical_bytes": 591614126,
+  "total_allocated_bytes": 594649088,
+  "live_references_observed": [],
+  "scan_limits": "Read-only current-user /proc argv path arguments,cwd,exe,fd. Shell source text excluded. Inaccessible processes/future rollback not ruled out. No deletion."
+}

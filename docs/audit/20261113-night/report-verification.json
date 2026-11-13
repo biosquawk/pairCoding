@@ -1,0 +1,31 @@
+{
+  "checked_utc": "2026-11-13T08:23:41.849320+00:00",
+  "scope": "Read-only audit arithmetic, report completeness, current stop flags; not product tests",
+  "paused_roles": [
+    "JUDGE",
+    "K",
+    "P1",
+    "P1_2",
+    "P1_3",
+    "P1_4",
+    "P2",
+    "P2_2",
+    "P2_3",
+    "P2_4",
+    "P3",
+    "P4",
+    "P5",
+    "P6"
+  ],
+  "running_turns": 0,
+  "role_count": 14,
+  "task_rows": 81,
+  "exclusive_group_rows": 76,
+  "known_thalamus_tokens": 481494669,
+  "known_root_tokens": 208538779,
+  "known_combined_tokens": 690033448,
+  "suite_failures": 244,
+  "report_sha256": "f0255eb5cf538bb2503a90ada1e08e56eb252913a201bc749d7ed4f8f11881d6",
+  "historical_status_suffix_sha256": "d3ea665a0263ab9937a332739c8250dec2cdbe99dd48aab0e5b653079206e536",
+  "checks": "PASS: arithmetic and scope; product NO-GO"
+}
