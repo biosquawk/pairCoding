@@ -12,7 +12,7 @@ const command=(p:any)=>({requestId:randomUUID(),clientId:'tab',sessionId:p.sessi
 const finish=(p:any)=>({...command(p),expectedWorkspaceVersion:p.workspaceVersion,reason:'COMPLETED'});
 
 test('UNIT actual HTTP Run/results -> reconnect -> immutable Report/AI retains original identity and safe structural facts across restart',async t=>{
-  const f=await httpRunFixture(t),a=f.app(),port=await a.listen(),p=(await f.http(port,'GET','/api/project')).body;
+  const f=await httpRunFixture(t),a=f.app(),port=await a.listen(),p=(await f.http(port,'GET','/api/project?readiness=actual')).body;
   assert.equal(p.capabilities.execution.modes.RUN_TESTS.canRun,true,JSON.stringify(p));
   await f.connect(port,p.sessionId);
   const request=f.runRequest(p),accepted=await f.http(port,'POST','/api/run',request);
