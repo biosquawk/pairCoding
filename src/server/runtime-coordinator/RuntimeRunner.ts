@@ -189,6 +189,8 @@ export class RuntimeRunner {
     this.options.retainState?.(snapshot(job.plan!),snapshot(job.run),job.requested);
     job.unsubscribe=this.options.execution.subscribe(job.handle!,output=>this.output(job,output.stream,output.text));
     job.poll=setInterval(()=>this.checkVersion(job),20);job.poll.unref();
+    // Compatibility trigger for other ports; the executor's earlier deadline delegates
+    // to this SAME retained reason/stopAttempt, never an independent unclassified Stop.
     job.timer=setTimeout(()=>{ void this.stopReason(job,'TIMEOUT').catch(()=>{}); },job.plan!.timeoutMs);job.timer.unref();
     this.emitState(job);
     void this.options.execution.serviceReadiness(job.handle!).then(value=>{
@@ -200,7 +202,7 @@ export class RuntimeRunner {
     }).catch(()=>{
       if (this.unsettled.has(job) && !job.exit) { job.run.processProblem=problem('SERVICE_READINESS_UNAVAILABLE','Service readiness is unavailable, not process completion.');this.emitState(job); }
     });
-    void this.options.execution.wait(job.handle!,job.waitAbort.signal).then(async exit=>{
+    void this.options.execution.wait(job.handle!,job.waitAbort.signal,async()=>{await this.stopReason(job,'TIMEOUT');}).then(async exit=>{
       if (!this.unsettled.has(job)) return;
       this.acceptExit(job,exit);
       if (job.stopAttempt) await job.stopAttempt.catch(()=>{});

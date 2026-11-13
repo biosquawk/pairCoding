@@ -389,7 +389,7 @@ export class DockerExecutor implements ExecutionPort {
       if(this.outputs.get(key)===state&&!state.final)this.outputFailure(r,error);
     }finally{state.polling=false;}
   }
-  async wait(handle:ExecutionHandle,signal?:AbortSignal):Promise<ExecutionExit>{
+  async wait(handle:ExecutionHandle,signal?:AbortSignal,onTimeout?:()=>Promise<void>):Promise<ExecutionExit>{
     while(true){
       if(signal?.aborted)throw new Error('Wait cancelled; container ownership retained, call Stop');
       let r=await this.record(handle);
@@ -407,6 +407,15 @@ export class DockerExecutor implements ExecutionPort {
         return structuredClone(r.exit);
       });
       if(this.now()-r.createdAt>=r.plan.timeoutMs){
+        if(onTimeout){
+          // The coordinator retains the original reason BEFORE the physical Stop and
+          // joins any in-flight same-owner Stop. Do not hold the executor queue here:
+          // stopReason must be able to Stop/collect/persist/remove this very Run.
+          await onTimeout();
+          r=await this.record(handle);
+          requireThat(r.exit,'Timeout callback did not establish an exact retained exit');
+          return structuredClone(r.exit);
+        }
         const stopped=await this.stop(handle,'TIMEOUT');
         if(stopped.confirmed)return stopped.exit;
         throw new ExecutionUncertainError('PROCESS_STOP_UNCONFIRMED',handle);

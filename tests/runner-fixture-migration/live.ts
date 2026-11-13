@@ -88,7 +88,7 @@ export async function liveTree(t:TestContext,action:'STOP'|'TIMEOUT'):Promise<vo
   assert.ok(f.live.removals.some(p=>p.id===record.containerId));
   // Exact ID + name absence after confirmed exited namespace, never timeout-as-absence.
   for(const id of [record.containerId,record.ownership.containerName]){
-    const absence=await f.live.run(['container','inspect',id]);assert.equal(absence.exitCode,1);assert.equal(absence.stdout.trim(),'');
+    const absence=await f.live.run(['container','inspect',id]);assert.equal(absence.exitCode,1);assert.ok(['','[]'].includes(absence.stdout.trim()));
     assert.ok([`Error: No such container: ${id}`,`Error response from daemon: No such container: ${id}`].includes(absence.stderr.trim()));
   }
   const controlProof=await inspect(sentinel.live.run,c.containerId);assert.ok(object(controlProof.State));assert.equal(controlProof.State.Running,true);

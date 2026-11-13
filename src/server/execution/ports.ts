@@ -79,7 +79,10 @@ export interface ExecutionPort {
   subscribe(handle: ExecutionHandle, listener: (output: ExecutionOutput) => void): () => void;
   /** Actual loopback HTTP readiness, nonterminal and distinct from process RUNNING. Null if no service. */
   serviceReadiness(handle: ExecutionHandle): Promise<ExecutionServiceReadiness | null>;
-  wait(handle: ExecutionHandle, signal?: AbortSignal): Promise<ExecutionExit>;
+  /** Executor deadline delegates to the coordinator's same-owner Stop when supplied.
+   * Resolution is NOT exit proof: the executor must still return its exact retained exit.
+   * Standalone consumers omit the callback and retain direct executor deadline enforcement. */
+  wait(handle: ExecutionHandle, signal?: AbortSignal, onTimeout?: () => Promise<void>): Promise<ExecutionExit>;
   stop(handle: ExecutionHandle, reason: 'USER' | 'TIMEOUT' | 'RECOVERY'): Promise<StopConfirmation>;
   /** Trusted same-owner recovery only; no inferred exit, automatic replay, or legacy backfill. */
   recoverUnstarted?(handle: ExecutionHandle): Promise<UnstartedRecoveryConfirmation>;
