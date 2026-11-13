@@ -28,7 +28,7 @@ W głównym [paircoach.config.json](../paircoach.config.json), obok konfiguracji
 
 Dla klauna zmień tylko `"character": "halloween-theme"`. Model i poziom rozumowania pozostają osobnymi ustawieniami; `high` możesz wybrać w `reasoning_effort`. Edytuj pliki przed uruchomieniem i zrestartuj PairCoding po zmianie charakteru. Zmiana nie wymaga builda ani modyfikowania kodu platformy.
 
-- [default/AGENTS.md](default/AGENTS.md): treść dotychczasowych `COACH_SYSTEM_PROMPT` i reguł rozmowy/kontraktu z wcześniejszego `prompt.ts`, przeniesiona bez przeredagowywania.
+- [default/AGENTS.md](default/AGENTS.md): profesjonalny sposób wyjaśniania: mały przykład, sprawdzalna przyczyna, wynik i następny krok; wzorce dobierane do problemu. Pierwotny przeniesiony prompt zachowuje historia Git.
 - [halloween-theme/AGENTS.md](halloween-theme/AGENTS.md): te same zasady oraz teatralny, demonicznie rozbawiony klaun. Często mówi „HA HA HA”, żartuje o krwi błędów i duszy ucznia, po czym daje konkretną wskazówkę. Nadal nie psuje testów i respektuje weto oraz potwierdzanie operacji.
 
 Repozytoryjny [AGENTS.md](../AGENTS.md) służy agentom **rozwijającym aplikację**. Nie jest kartą nauczyciela w działającym PairCoding.
@@ -70,3 +70,11 @@ Zadaj jedno naprowadzające pytanie. Oddziel obserwację z testu od przypuszczen
 Gotowy [lesson-feedback](default/skills/lesson-feedback/SKILL.md) porządkuje odpowiedź jako „Obserwacja”, „Pytanie”, „Następny krok”. Możesz go jawnie wywołać w czacie: `$lesson-feedback Sprawdź mój kod i ostatni wynik testów`. Skille tej integracji są instrukcyjne: nie odblokowują powłoki, sieci, instalacji pakietów ani bezpośredniego zapisu do zadania. Programy i testy uruchamiasz przyciskami Run/Test.
 
 Standardowy katalog i format: [AGENTS.md w Codex](https://developers.openai.com/codex/guides/agents-md), [skille Codexa](https://developers.openai.com/codex/skills/), [konfiguracja](https://developers.openai.com/codex/config-reference/). Nie używamy uploadu Skills API ani API key do przekazywania tych plików; to lokalne pliki standardowego CLI.
+
+## Inspiracje pedagogiczne
+
+Profil default nie podszywa się pod znane osoby. Łączy praktyczne wyjaśnianie Javy/Springa kojarzone z Joshem Longiem, pracę nad odpowiedzialnościami i czytelnością kodu Roberta C. Martina oraz małe refaktoryzacje do wzorców opisywane przez Joshuę Kerievsky’ego. Nie kopiuje ich wypowiedzi ani książek.
+
+Źródła: [Josh Long](https://github.com/joshlong), [Robert C. Martin](https://cleancoder.com/), [Joshua Kerievsky](https://www.industriallogic.com/people/joshua/), [katalog Refactoring to Patterns](https://www.industriallogic.com/refactoring-to-patterns/catalog/).
+
+Skill `design-patterns` jest dostępny w obu charakterach; możesz wywołać `$design-patterns`. Pakiet może też dobrać go do pytania o refaktoryzację.
