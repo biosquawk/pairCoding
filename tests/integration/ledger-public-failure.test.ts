@@ -97,17 +97,20 @@ test('REAL WS known receipt missing after effect:503 replay never becomes a cach
   p.assertProtocol();
 });
 
-test('REAL REST oversize settings outcome → safe503 survives public projection and reaches LiveBackend',async t=>{
+test('REAL REST oversize file-operation outcome → safe503 survives public projection and reaches LiveBackend',async t=>{
+  // SAVE V2 uses its durable MutationJournal, not CommandLedger's outcome budget.
+  // File mutation still returns a real Project through CommandLedger: preserve the
+  // oversized post-effect receipt, same-ID replay and exactly-once guarantees there.
   const extra=Object.fromEntries(Array.from({length:50},(_,i)=>[`independent-file-${i}-${'a'.repeat(40)}.js`,'const n=1;\n']));
   const f=await fixture(t,false,extra),{c}=f.client();await c.connect();await until(()=>!c.getState().isOffline,'HELLO');
   assert(JSON.stringify((await f.http('GET','/api/project')).body).length>2048,'independently large real project result');
-  const before=f.app.workspace.workspaceVersion,patterns=['**/*.js','**/*.md'];
-  assert.equal(await c.updateProjectSettings({...c.getState().projectSettings,contextPatterns:patterns}),false);
-  const first=f.requests.find(r=>r.path==='/api/project/settings')!;assert.equal(first.status,503);publicFailure(first.value,'COMMAND_RESULT_UNAVAILABLE',first.body.requestId);
-  assertAmbiguousMessage(c.getState().connectionError!);assert.deepEqual(f.app.workspace.settings.contextPatterns,patterns);
+  const before=f.app.workspace.workspaceVersion;
+  await c.mutateFile('CREATE','created-once.js',null,'once\n');
+  const first=f.requests.find(r=>r.path==='/api/file'&&r.method==='POST')!;assert.equal(first.status,503);publicFailure(first.value,'COMMAND_RESULT_UNAVAILABLE',first.body.requestId);
+  assertAmbiguousMessage(c.getState().connectionError!);assert.equal(await fs.readFile(path.join(f.rootPath,'created-once.js'),'utf8'),'once\n');
   assert.equal(f.app.workspace.workspaceVersion,before+1,'effect happened once despite unavailable outcome');
-  const replay=await f.http('PUT','/api/project/settings',first.body);assert.equal(replay.status,503);assert.deepEqual(replay.body,first.value);
-  assert.equal(f.app.workspace.workspaceVersion,before+1,'known duplicate never applies settings twice');
+  const replay=await f.http('POST','/api/file',first.body);assert.equal(replay.status,503);assert.deepEqual(replay.body,first.value);
+  assert.equal(f.app.workspace.workspaceVersion,before+1,'known duplicate never applies file operation twice');
 });
 
 test('REAL REST finish oversize after effect → LiveBackend UNKNOWN then matching GET-only reconciliation, one snapshot/POST',async t=>{

@@ -1,4 +1,4 @@
-/** Independent HUMAN stage03 oracle. Real listener, WS, CoachAdapter, Runner child,
+/** Finish quiescence oracle. Real listener, WS, CoachAdapter and neutral Runner; controlled Docker transport,
  * snapshot and ReportService. Only local AI output, snapshot scheduling and observation
  * are injected through seams already present at base 24484a25. No external AI. */
 import test, { type TestContext } from 'node:test';
@@ -13,7 +13,8 @@ import { createPairCoachServer } from '../../src/server/http';
 import { CoachAdapter } from '../../src/server/CoachAdapter';
 import type { CoachContext } from '../../src/server/coach/context';
 import type { FrozenFacts } from '../../src/server/ReportService';
-import { workspaceFiles, Peer, id, settings } from '../qa/helpers';
+import { Peer, id } from '../qa/helpers';
+import { httpRunFixture } from '../backend-cutover/http-run-report-fixture';
 
 const silent = { kind: 'SILENT', reason: 'Local independent fixture' };
 const interventions = new Set(['CONTROL_PREPARE', 'COACH_STEP_EDIT', 'COACH_HINT_BUBBLE', 'ACTION_PROPOSAL']);
@@ -32,13 +33,12 @@ async function until(predicate: () => boolean, label: string) {
 }
 
 async function fixture(t: TestContext, limitMs: number | null = null) {
-  const dirs = await workspaceFiles(t, { 'main.py': 'value = 0\n' });
-  const token = id(), clientId = id();
+  const clientId = 'tab';
   const calls: { context: Readonly<CoachContext>; afterAcceptance: boolean }[] = [];
   const wire: { type: string; payload: any }[] = [];
   let armed = false, accepted = false;
   let releaseGate = () => {};
-  const app = createPairCoachServer({ ...dirs, port: 0, token, enableExecution: true, enableCoach: true,
+  const runtime=await httpRunFixture(t,{files:{'main.py':'value = 0\n'},settings:{contextPatterns:['**/*.py']},server:{reportGenerate:undefined,
     coachFactory(context) {
       const adapter = new CoachAdapter({ ...context, provider: { name: 'P3_LOCAL', mode: 'INJECTED',
         async decide(c) {
@@ -55,19 +55,14 @@ async function fixture(t: TestContext, limitMs: number | null = null) {
       adapter.abort = () => { if (armed) { accepted = true; armed = false; } abort(); };
       return adapter;
     },
-  });
+  }});
+  const app=runtime.app(),token=runtime.token;
   const peers = new Set<{ close(): void }>();
   t.after(async () => {
     releaseGate();
     for (const p of peers) p.close();
-    try { await app.close(); } finally { await dirs.cleanup(); }
+    await app.close();
   });
-  function profile(active: boolean) {
-    return { kind: 'RUN_MAIN' as const, executable: process.execPath,
-      args: ['-e', active ? "process.stdout.write('P3_CHILD_READY\\n');setInterval(()=>{},1000)" : "process.stdout.write('P3_NORMAL_DONE\\n')"],
-      cwd: '.', timeoutMs: 10000, testReportFormat: 'NONE' as const, testReportGlob: null };
-  }
-  app.workspace.updateSettings({ ...settings, aiConsent: true, runProfiles: [profile(true)] });
   const port = await app.listen(), baseURL = `http://127.0.0.1:${port}`;
   assert(![8081, 8765, 8766, 8767, 8768].includes(port));
   const sessionId = app.session.getSession().sessionId;
@@ -84,17 +79,15 @@ async function fixture(t: TestContext, limitMs: number | null = null) {
   assert.equal((await http('POST', '/api/session/start', { ...command(), limitMs, pauseOnHidden: true })).status, 200);
   await until(() => app.session.getSession().aiStatus !== 'THINKING', 'START provider settles');
   async function run(active = true) {
-    if (!active) {
-      assert.equal((await http('PUT', '/api/project/settings', { ...command(),
-        expectedWorkspaceVersion: app.workspace.workspaceVersion,
-        settings: { ...app.workspace.settings, runProfiles: [profile(false)] } })).status, 200);
-    }
-    const res = await http('POST', '/api/run', { ...command(), mode: 'RUN_MAIN', expectedWorkspaceVersion: app.workspace.workspaceVersion });
+    runtime.fake.logs={stdout:active?'P3_CHILD_READY\n':'P3_NORMAL_DONE\n',stderr:''};
+    const project=(await http('GET','/api/project?readiness=actual')).body;
+    const res=await http('POST','/api/run',runtime.runRequest(project,'RUN_MAIN'));
+    if(!active)runtime.fake.finish(0);
     assert.equal(res.status, 202);
     const runId = res.body.runId as string;
     if (active) {
       await peer.take(m => m.type === 'RUN_OUTPUT' && m.payload.runId === runId && m.payload.chunk.includes('P3_CHILD_READY'));
-      assert.equal((await http('GET', `/api/run/${runId}`)).body.status, 'RUNNING', 'actual live child before finish');
+      assert.equal((await http('GET', `/api/run/${runId}`)).body.status, 'RUNNING', 'actual neutral Runner remains active before finish');
     } else {
       await peer.take(m => m.type === 'RUN_STATE' && m.payload.runId === runId && !!m.payload.finishedAt);
     }
@@ -122,7 +115,7 @@ async function fixture(t: TestContext, limitMs: number | null = null) {
     const ack = await peer.ack(peer.send('CODE_CHANGED', { path: 'main.py', content,
       baseVersion: doc.version, controlEpoch: state.controlEpoch, editKind: 'TYPING' }));
     assert.equal(ack.payload.status, 'OK');
-    assert.equal(await readFile(path.join(dirs.rootPath, 'main.py'), 'utf8'), content);
+    assert.equal(await readFile(path.join(runtime.project, 'main.py'), 'utf8'), content);
   }
   async function frozen() {
     const file = path.join(app.workspace.dataDir, 'reports', digest(sessionId), 'facts.json');

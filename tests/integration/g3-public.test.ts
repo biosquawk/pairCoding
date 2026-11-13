@@ -10,11 +10,13 @@ import {REPORT_SYSTEM_PROMPT, type FrozenFacts} from '../../src/server/ReportSer
 import {WorkspaceService} from '../../src/server/WorkspaceService';
 import {SessionController} from '../../src/server/SessionController';
 import {Peer, workspaceFiles, id, settings} from '../qa/helpers';
+import {liveNodeFixture,scriptProfile} from '../qa/live-node-fixture';
+import {httpRunFixture} from '../backend-cutover/http-run-report-fixture';
 
 async function fixture(t:TestContext, options:Partial<ServerOptions>={}, files:Record<string,string>={}) {
   const dirs=await workspaceFiles(t, {'main.py':'ORIGINAL\r\n',...files});
   const token='g3-test-sensitive-'+id();
-  const app=createPairCoachServer({...dirs,port:0,token,enableExecution:true,...options});
+  const app=createPairCoachServer({rootPath:dirs.rootPath,port:0,token,enableExecution:true,...options});
   const peers=new Set<{close():void}>();
   t.after(async()=>{for(const p of peers)p.close();await app.close();await dirs.cleanup();});
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`;
@@ -113,51 +115,58 @@ test('G3 ambiguous failure after journal effect remains RECOVERY_REQUIRED, not s
   assert(fs.existsSync(path.join(f.rootPath,'.paircoach/snapshot-journal-v1')));
 });
 
-test('G3 missing profile and real zero-test/green JUnit are honest; green never auto-finishes',async t=>{
-  const f=await fixture(t);
-  const project=await f.http('GET','/api/project');assert.equal(project.status,200);
-  assert.deepEqual(project.body.capabilities,{docs:'NOT_INSTALLED',autocomplete:'NOT_INSTALLED',canRunMain:false,canRunTests:false});
-  const run=()=>f.http('POST','/api/run',{...f.command(),mode:'RUN_TESTS',expectedWorkspaceVersion:f.app.workspace.workspaceVersion});
-  assert.equal((await run()).body.code,'RUN_PROFILE_MISSING');
+test('G3 missing profile and fresh zero-test/green JUnit are honest; green never auto-finishes',async t=>{
+  // Real neutral Runner and parser, controlled Docker artifacts; not native execution proof.
+  const f=await httpRunFixture(t,{settings:{runProfiles:[]}}),app=f.app(),port=await app.listen();
+  const http=(method:string,url:string,body?:unknown)=>f.http(port,method,url,body);
+  let project=(await http('GET','/api/project?readiness=actual')).body;
+  const peer=await f.connect(port,project.sessionId);
+  assert.equal(project.capabilities.execution.modes.RUN_MAIN.canRun,false);
+  assert.equal(project.capabilities.execution.modes.RUN_TESTS.canRun,false);
+  const missing=f.runRequest(project),rejected=await http('POST','/api/run',missing);
+  assert.equal(rejected.status,503);assert.equal(rejected.body.code,'MUTATION_OUTCOME_UNKNOWN');
+  assert.equal(f.fake.calls.filter(a=>a[0]==='create').length,0,'Missing task cannot dispatch a container');
+  const settled=await http('POST','/api/runtime/mutation/reconcile',{mutation:{projectId:project.projectId,kind:'RUN',request:missing}});
+  assert.equal(settled.status,200);assert.equal(settled.body.state,'DEFINITIVELY_ABORTED');
+  const command=()=>({requestId:id(),clientId:'tab',sessionId:project.sessionId});
   for(const count of [0,1]) {
-    // Each prior run creates an external result.xml; consume its real watcher event before the next command version.
-    if(count) await f.peer.take(m=>m.type==='EXTERNAL_FILE_SYNC'&&m.payload.path==='result.xml');
-    const script=`require('fs').writeFileSync('result.xml','<testsuite tests="${count}" failures="0" errors="0" skipped="0">${count?'<testcase name="actual"/>':''}</testsuite>');console.log('RUN_REAL_${count}')`;
-    const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,runProfiles:[{
-      kind:'RUN_TESTS',executable:process.execPath,args:['-e',script],cwd:'.',timeoutMs:3000,testReportFormat:'JUNIT_XML',testReportGlob:'result.xml'}]}});assert.equal(update.status,200);
-    assert.deepEqual(update.body.capabilities,{docs:'NOT_INSTALLED',autocomplete:'NOT_INSTALLED',canRunMain:false,canRunTests:true});
-    const start=await run();assert.equal(start.status,202,JSON.stringify(start.body));
-    const end=await until(async()=>(await f.http('GET',`/api/run/${start.body.runId}`)).body,r=>r.finishedAt!==null);
-    assert.equal(end.testOutcome,count?'PASSED':'NO_TESTS');assert.equal(end.testCount,count);assert.equal(end.status,'SUCCEEDED');
-    assert.equal(f.app.session.state.lifecycle,'READY');
-    await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes(`RUN_REAL_${count}`));
+    const update=await http('PUT','/api/project/settings',{...command(),expectedWorkspaceVersion:app.workspace.workspaceVersion,
+      settings:{...f.settings,runProfiles:[{kind:'RUN_TESTS',timeoutMs:3000,task:{workingDirectory:'.',entry:{kind:'TESTS'},tests:{paths:['test.js'],names:[]}}}]}});
+    assert.equal(update.status,200,JSON.stringify(update));
+    project=(await http('GET','/api/project?readiness=actual')).body;
+    assert.equal(project.capabilities.execution.modes.RUN_TESTS.canRun,true);
+    f.fake.logs={stdout:`RUN_RESULT_${count}`,stderr:''};
+    const start=await http('POST','/api/run',f.runRequest(project));assert.equal(start.status,202,JSON.stringify(start));
+    const record=JSON.parse(fs.readFileSync(path.join(f.state,'journal',start.body.runId+'.json'),'utf8'));
+    fs.writeFileSync(path.join(record.plan.input.artifactsDirectory,'result.xml'),`<testsuite tests="${count}" failures="0" errors="0" skipped="0">${count?'<testcase name="actual"/>':''}</testsuite>`);
+    f.fake.finish(0);
+    const end=await until(async()=>(await http('GET',`/api/run/${start.body.runId}`)).body,r=>r.finishedAt!==null);
+    assert.equal(end.testOutcome,count?'PASSED':'NO_TESTS');assert.equal(end.testCount,count);assert.equal(end.status,count?'SUCCEEDED':'FAILED');assert.equal(end.exitCode,0);
+    assert.equal(app.session.state.lifecycle,'READY');
+    await until(()=>peer.frames.some(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes(`RUN_RESULT_${count}`)),Boolean);
   }
-  assert.equal((await f.http('POST','/api/snapshots',{...f.command()})).status,404,'no test-only create API');
+  assert.equal((await http('POST','/api/snapshots',command())).status,404,'no test-only create API');
 });
 
 const treeScript=`const fs=require('fs'),{spawn}=require('child_process');const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});fs.writeFileSync('pids.json',JSON.stringify([process.pid,child.pid]));console.log('TREE_READY');setInterval(()=>{},1000);`;
-function alive(pid:number) {
-  try {process.kill(pid,0);if(process.platform==='linux'&&fs.readFileSync('/proc/'+pid+'/stat','utf8').split(') ')[1].startsWith('Z'))return false;return true;}catch{return false;}
-}
-async function startTree(f:Awaited<ReturnType<typeof fixture>>, timeoutMs:number) {
-  const update=await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,runProfiles:[{
-    kind:'RUN_MAIN',executable:process.execPath,args:['-e',treeScript],cwd:'.',timeoutMs,testReportFormat:'NONE',testReportGlob:null}]}});assert.equal(update.status,200);
-  const start=await f.http('POST','/api/run',{...f.command(),mode:'RUN_MAIN',expectedWorkspaceVersion:f.app.workspace.workspaceVersion});assert.equal(start.status,202,JSON.stringify(start.body));
-  await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes('TREE_READY'));
-  const pids=JSON.parse(fs.readFileSync(path.join(f.rootPath,'pids.json'),'utf8')) as number[];assert(pids.every(alive));return {run:start.body,pids};
-}
 for(const mode of ['stop','timeout','finish'] as const) test(`G3 real parent/child ${mode}: REST responsive, tree ends, frozen finish ordering`,{timeout:12000},async t=>{
-  const f=await fixture(t),{run,pids}=await startTree(f,mode==='timeout'?1000:5000);
-  t.after(()=>{for(const pid of pids)if(alive(pid))try{process.kill(pid,'SIGKILL');}catch{}});
+  const f=await liveNodeFixture(t,{'tree.cjs':treeScript},[scriptProfile('tree.cjs',mode==='timeout'?1000:5000)]);
+  const run=await f.run();
+  await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes('TREE_READY'));
+  const physical=await f.processes(run.runId);
   assert.equal((await f.http('GET','/api/session')).status,200);
+  assert.equal(fs.existsSync(path.join(f.rootPath,'pids.json')),false,'Program writes stay in its container, never the pupil workspace');
   if(mode==='stop')assert.equal((await f.http('POST',`/api/run/${run.runId}/stop`,f.command())).status,202);
   if(mode==='finish') {
-    const response=await f.finish();assert.equal(response.status,202);assert.equal(response.body.status,'PENDING');
+    const response=await f.http('POST','/api/session/finish',{...f.command(),reason:'COMPLETED',expectedWorkspaceVersion:f.app.workspace.workspaceVersion});
+    assert.equal(response.status,202);assert.equal(response.body.status,'PENDING');
     const frozen=factsOnDisk(f.app);assert.equal(frozen.session.lifecycle,'FINISHED');assert.equal(frozen.runs[0].status,'CANCELLED');
     assert.equal(f.app.session.state.lifecycle,'FINISHED');assert.equal(frozen.snapshot.snapshotId,response.body.snapshotId);
   }
   const end=await until(async()=>(await f.http('GET',`/api/run/${run.runId}`)).body,r=>r.finishedAt!==null);
-  assert.equal(end.status,mode==='timeout'?'TIMED_OUT':'CANCELLED');await until(()=>pids.some(alive),v=>!v);
+  assert.equal(end.status,mode==='timeout'?'TIMED_OUT':'CANCELLED');
+  await f.absent(run.runId);
+  t.diagnostic(JSON.stringify({scope:'PHYSICAL_DOCKER_NOT_HOST_FALLBACK',mode,runId:run.runId,...physical,status:end.status,containerAbsent:true}));
 });
 
 test('G3 frozen report facts/consent/AI attribution and allowlisted AI projection survive later live edits + FAILED/retry',async t=>{
@@ -225,11 +234,16 @@ test('G3 pending-root gate refusal cleans startup/open resources and retains the
   t.mock.method(WorkspaceService.prototype,'updateSettings',function(this:WorkspaceService,s:Parameters<typeof us>[0]){settingsCalls++;return us.call(this,s);});
   const refused=createPairCoachServer({rootPath:blocked,port:0,enableExecution:false});
   await assert.rejects(refused.listen(),{code:'RECOVERY_REQUIRED'});await refused.close();
-  assert.equal(workspaceCloses,1);assert.equal(sessionCloses,1);
-  const response=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:blocked,settings:{...settings,schemaVersion:2}});
-  assert.equal(response.body.code,'RECOVERY_REQUIRED');assert.equal(workspaceCloses,2);assert.equal(sessionCloses,2);assert.equal(settingsCalls,0,'settings not touched before gate recovery');
+  assert.equal(workspaceCloses,0);assert.equal(sessionCloses,0);
+  const blockedOpen=path.join(f.base,'blocked-open'),openJournal=path.join(blockedOpen,'.paircoach','snapshot-journal-v1');
+  fs.mkdirSync(openJournal,{recursive:true});fs.writeFileSync(path.join(openJournal,'unknown-material'),'PRESERVE JOURNAL');
+  const response=await f.http('POST','/api/project/open',{requestId:id(),clientId:f.clientId,rootPath:blockedOpen,settings:{...settings,schemaVersion:2}});
+  assert.equal(response.body.code,'RECOVERY_REQUIRED');assert.equal(workspaceCloses,0);assert.equal(sessionCloses,0);assert.equal(settingsCalls,0,'settings not touched before gate recovery');
+  const again=createPairCoachServer({rootPath:blocked,port:0,enableExecution:false});
+  await assert.rejects(again.listen(),{message:'Missing prior workspace versions; retain state and recover'});await again.close();
   assert.equal(f.app.session.state.sessionId,f.sessionId);assert.equal(f.app.workspace.rootPath,f.rootPath);await f.write('Original session remains live');
   assert.equal(fs.readFileSync(path.join(journal,'unknown-material'),'utf8'),'PRESERVE JOURNAL');
+  assert.equal(fs.readFileSync(path.join(openJournal,'unknown-material'),'utf8'),'PRESERVE JOURNAL');
 });
 
 
@@ -244,19 +258,18 @@ test('G3 report facts storage failure also leaves lifecycle uncommitted and task
 
 test('G3 concurrent FINISH_EXERCISE acceptance deduplicates even while real Stop is pending',async t=>{
   let sendProposal=false;
-  const f=await fixture(t,{enableCoach:true,coachProvider:{name:'INJECTED',mode:'INJECTED',async decide(){return sendProposal?{
+  const f=await liveNodeFixture(t,{'tree.cjs':treeScript},[scriptProfile('tree.cjs',10000)],{enableCoach:true,coachProvider:{name:'INJECTED',mode:'INJECTED',async decide(){return sendProposal?{
     kind:'PROPOSE',proposalKind:'FINISH_EXERCISE',questionText:'Zakończyć?',snapshotId:null,paths:[],resetTimer:false
-  }:{kind:'SILENT',reason:'wait'};}}});
-  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...settings,schemaVersion:2,aiConsent:true}});
+  }:{kind:'SILENT',reason:'wait'};}}},{aiConsent:true});
   await f.http('POST','/api/session/start',{...f.command(),limitMs:null,pauseOnHidden:true});
-  // A real child keeps Stop asynchronous; wait for its external pids file before creating a current proposal.
-  const {pids}=await startTree(f,5000);t.after(()=>{for(const pid of pids)if(alive(pid))try{process.kill(pid,'SIGKILL');}catch{}});
-  await f.peer.take(m=>m.type==='EXTERNAL_FILE_SYNC'&&m.payload.path==='pids.json');
-  await f.http('PUT','/api/project/settings',{...f.command(),expectedWorkspaceVersion:f.app.workspace.workspaceVersion,settings:{...f.app.workspace.settings,aiConsent:true}});
+  const run=await f.run();
+  await f.peer.take(m=>m.type==='RUN_OUTPUT'&&m.payload.chunk.includes('TREE_READY'));
+  await f.processes(run.runId);
+  const respond=(p:any)=>f.peer.ack(f.peer.send('PROPOSAL_RESPONSE',{proposalId:p.proposalId,accepted:true,basedOnWorkspaceVersion:p.basedOnWorkspaceVersion}));
   sendProposal=true;await f.peer.ack(f.peer.send('CHAT_MESSAGE',{text:'Finish?',path:null,documentVersion:null,selection:null}));
   const p=(await f.peer.take(m=>m.type==='ACTION_PROPOSAL')).payload;
-  const [a,b]=await Promise.all([f.respond(p),f.respond(p)]);
+  const [a,b]=await Promise.all([respond(p),respond(p)]);
   assert.deepEqual([a.payload.status,b.payload.status].sort(),['DUPLICATE','OK']);
   assert.equal(f.app.session.state.lifecycle,'FINISHED');assert.equal(f.app.workspace.listSnapshots().length,1);
-  await until(()=>pids.some(alive),v=>!v);
+  await f.absent(run.runId);
 });

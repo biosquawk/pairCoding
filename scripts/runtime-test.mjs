@@ -35,7 +35,8 @@ export function testArguments(selection) {
     const cases=selection.supersededCases;
     const matched=files.filter(file=>cases.some(c=>c.file===file));
     const ordinary=files.filter(file=>!matched.includes(file));
-    const flags=[...(lane==='tsx'?['--import','tsx']:[]),'--test'];
+    // Bound simultaneous filesystem-heavy fixtures; keep the exact same active files/cases and deadlines.
+    const flags=[...(lane==='tsx'?['--import','tsx']:[]),'--test','--test-concurrency=2'];
     let batch=[...flags],length=batch.join(' ').length;
     for(const file of ordinary){
       if(length+file.length+3>22000 && batch.length>flags.length){groups.push({lane,args:batch});batch=[...flags];length=batch.join(' ').length;}

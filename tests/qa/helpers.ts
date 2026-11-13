@@ -4,6 +4,7 @@ import httpRequest from 'node:http';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import type { TestContext } from 'node:test';
 import WebSocket from 'ws';
 import type { Document, Session, Settings } from '../../src/shared/protocol';
@@ -23,8 +24,8 @@ export async function seedRuntimeSettings(rootPath: string, value: Settings) {
   await writeFile(path.join(dataDir,'settings.json'),JSON.stringify({...value,schemaVersion:2}),{mode:0o600});
 }
 
-export async function workspaceFiles(t: TestContext, files: Record<string, string | Buffer> = {}) {
-  const parent = path.resolve(process.env.PAIRCOACH_QA_TMP || 'tests/qa/.runtime');
+export async function workspaceFiles(t: TestContext, files: Record<string, string | Buffer> = {}, parentOverride?:string) {
+  const parent = path.resolve(parentOverride || process.env.PAIRCOACH_QA_TMP || path.join(os.tmpdir(),'paircoach-qa'));
   await mkdir(parent, { recursive: true });
   const base = await mkdtemp(path.join(parent, 'case-'));
   const rootPath = path.join(base, 'project');

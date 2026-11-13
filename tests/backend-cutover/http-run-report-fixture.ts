@@ -9,20 +9,21 @@ import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
 import type { TestContext } from 'node:test';
 import WebSocket from 'ws';
-import { createPairCoachServer, type ReportAIFacts } from '../../src/server/http';
+import { createPairCoachServer, type ReportAIFacts, type ServerOptions } from '../../src/server/http';
 import { readRunSourceInventory } from '../../src/server/execution/ImmutableInput';
 import { dependencyHash } from '../../src/server/runtime-adapters';
 import { resolvePreparedToolchainIdentity } from '../../scripts/runtime-prepare.mjs';
 import { FakeDocker } from '../runtime-executor/fixtures';
 import type { RuntimeProfile, SettingsV2, RunRequestV2 } from '../../src/shared/runtime-v2';
 export const sha=(b:string|Buffer)=>createHash('sha256').update(b).digest('hex');
-export async function httpRunFixture(t:TestContext) {
+export async function httpRunFixture(t:TestContext, overrides:{files?:Record<string,string>;settings?:Partial<SettingsV2>;server?:Partial<ServerOptions>}={}) {
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'http-neutral-run-report-')), project=path.join(root,'project'), prepared=path.join(root,'prepared');
   fs.mkdirSync(project);fs.mkdirSync(path.join(project,'.paircoach'),{mode:0o700});fs.mkdirSync(prepared,{mode:0o700});
   fs.writeFileSync(path.join(project,'main.js'),'console.log("ORIGINAL");\r\n');fs.writeFileSync(path.join(project,'test.js'),'// original test\r\n');fs.writeFileSync(path.join(project,'package.json'),'{}\r\n');
+  for(const [name,content] of Object.entries(overrides.files??{}))fs.writeFileSync(path.join(project,name),content);
   const settings:SettingsV2={schemaVersion:2,taskFilePath:null,taskMode:'IMPLEMENTATION',reviewNotesPath:'review.md',runProfiles:[
     {kind:'RUN_MAIN',task:{workingDirectory:'.',entry:{kind:'SCRIPT',path:'main.js'},tests:{paths:[],names:[]}},timeoutMs:300000},
-    {kind:'RUN_TESTS',task:{workingDirectory:'.',entry:{kind:'TESTS'},tests:{paths:['test.js'],names:[]}},timeoutMs:300000}],aiConsent:true,contextPatterns:['**/*.js']};
+    {kind:'RUN_TESTS',task:{workingDirectory:'.',entry:{kind:'TESTS'},tests:{paths:['test.js'],names:[]}},timeoutMs:300000}],aiConsent:true,contextPatterns:['**/*.js'],...overrides.settings};
   fs.writeFileSync(path.join(project,'.paircoach','settings.json'),JSON.stringify(settings));
   const catalog=JSON.parse(fs.readFileSync(new URL('../../runtimes/catalog.json',import.meta.url),'utf8'));
   const profile:RuntimeProfile=catalog.profiles.find((p:RuntimeProfile)=>p.adapterFamily==='node');
@@ -54,7 +55,7 @@ export async function httpRunFixture(t:TestContext) {
   const apps:ReturnType<typeof createPairCoachServer>[]=[], sockets:WebSocket[]=[];
   const app=()=>{const a=createPairCoachServer({port:0,rootPath:project,token,enableExecution:true,enableCoach:true,runtimeEnvironment:{},runtimeArguments:['--runtime-config',config,'--prepared-runtime',prepared],runtimeTransport:transport,
     coachProvider:{name:'UNIT',mode:'INJECTED',decide:async context=>{analyses.push(structuredClone(context));return {kind:'SILENT',reason:'UNIT controlled provider'};}},
-    reportGenerate:async facts=>{ai.push(structuredClone(facts));return '# UNIT structural facts\nControlled AI provider, not real AI.';}});apps.push(a);return a;};
+    reportGenerate:async facts=>{ai.push(structuredClone(facts));return '# UNIT structural facts\nControlled AI provider, not real AI.';},...overrides.server});apps.push(a);return a;};
   const http=async(port:number,method:string,url:string,body?:unknown,authorization=token)=>{
     const r=await fetch(`http://127.0.0.1:${port}${url}`,{method,headers:{Authorization:`Bearer ${authorization}`,'Content-Type':'application/json'},signal:AbortSignal.timeout(8000),body:body===undefined?undefined:JSON.stringify(body)});
     return {status:r.status,body:await r.json()};
