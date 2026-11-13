@@ -25,17 +25,17 @@ async function until<T>(read:()=>Promise<T>) {
   for(let i=0;i<100;i++){try{return await read();}catch{await delay(10);}}throw Error('fixture not ready');
 }
 
-test('Codex fakeCLI success: fixed argv, empty isolated cwd, filtered env and context only stdin; scratch removed',async t=>{
+test('Codex fakeCLI success: fixed argv, copied isolated character cwd, filtered env and context only stdin; scratch removed',async t=>{
   const f=await fake(t,success);
   const previous=process.env.PAIRCOACH_TOKEN,key=process.env.GEMINI_API_KEY;
   process.env.PAIRCOACH_TOKEN='PRIVATE_HTTP_TOKEN';process.env.GEMINI_API_KEY='PRIVATE_GEMINI_KEY';
   t.after(()=>{if(previous===undefined)delete process.env.PAIRCOACH_TOKEN;else process.env.PAIRCOACH_TOKEN=previous;if(key===undefined)delete process.env.GEMINI_API_KEY;else process.env.GEMINI_API_KEY=key;});
   const dirty={...context,rootPath:'PRIVATE_ROOT',future:'PRIVATE_FUTURE',lastRun:{runId:'run-1',mode:'RUN_MAIN',status:'SUCCEEDED',exitCode:0,workspaceVersionAtStart:4,workspaceChangedDuringRun:false,testOutcome:'NOT_APPLICABLE',testCount:null,startedAt:'s',finishedAt:'e',outputTail:'PRIVATE_STDOUT'}} as any;
   assert.deepEqual(await f.provider.decide(dirty,new AbortController().signal),{kind:'REPLY',text:'preview_sum odejmuje zamiast dodawać.'});
-  const r=await f.read();assert.deepEqual(r.entries,[]);assert.notEqual(r.cwd,process.cwd());assert.equal(r.cwd.startsWith(f.rootPath+path.sep),false);
+  const r=await f.read();assert.deepEqual(r.entries.sort(),['.agents','AGENTS.md']);assert.notEqual(r.cwd,process.cwd());assert.equal(r.cwd.startsWith(f.rootPath+path.sep),false);
   assert.equal(r.argv[0],'exec');for(const a of ['--ephemeral','--ignore-user-config','--ignore-rules','--skip-git-repo-check','--json'])assert(r.argv.includes(a));
   assert.equal(r.argv[r.argv.indexOf('--sandbox')+1],'read-only');assert.equal(r.argv.at(-1),'-');
-  for(const c of ['mcp_servers={}','web_search="disabled"','project_doc_max_bytes=0','skills.include_instructions=false','features.shell_tool=false','features.apps=false','features.plugins=false','features.hooks=false'])assert(r.argv.includes(c));
+  for(const c of ['mcp_servers={}','web_search="disabled"','project_doc_max_bytes=32768','skills.include_instructions=true','features.shell_tool=false','features.apps=false','features.plugins=false','features.hooks=false'])assert(r.argv.includes(c));
   const sent=JSON.parse(r.input);assert.equal(sent.documents[0].content,context.documents[0].content);assert.equal(sent.messages[0].text,context.messages[0].text);assert.equal(sent.lastRun.runId,'run-1');
   for(const privateValue of ['PRIVATE_HTTP_TOKEN','PRIVATE_GEMINI_KEY','PRIVATE_ROOT','PRIVATE_FUTURE','PRIVATE_STDOUT'])assert.equal(JSON.stringify(r.argv).includes(privateValue)||r.input.includes(privateValue)||JSON.stringify(r.env).includes(privateValue),false);
   assert.deepEqual(r.schema,CODEX_COACH_SCHEMA);await assert.rejects(fs.stat(path.dirname(r.cwd)),{code:'ENOENT'});
@@ -119,7 +119,7 @@ test('Codex report uses report schema/instruction and preserves bounded isolated
   assert(r.argv.some((a:string)=>a.includes('developer_instructions=')&&a.includes('REPORT_INSTRUCTION')));
   assert.equal(JSON.parse(r.input).runs[0].testCount,3);
   assert.equal(r.env.GEMINI_API_KEY,undefined);
-  assert.deepEqual(r.entries,[]);
+  assert.deepEqual(r.entries.sort(),['.agents','AGENTS.md']);
   await assert.rejects(fs.stat(r.cwd));
 });
 

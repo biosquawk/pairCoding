@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ChatEntry, Document, Run, Session, Settings } from '../../shared/protocol';
+import type { ChatEntry, Document, Run, Session, Settings, Snapshot } from '../../shared/protocol';
 import {projectRunFacts, type RunFacts} from './runFacts';
 import { viewOffsets, type VersionedEditorView } from '../EditorView';
 
@@ -9,9 +9,11 @@ export interface ContextWorkspace {
   settings: Settings;
   listFiles(): { path: string; kind: string }[];
   getDocument(path: string): Document;
+  listSnapshots?(): Snapshot[];
 }
 export const ALLOWED_PROPOSAL_KINDS = ['RETRY_FROM_SNAPSHOT', 'RESTORE_SNAPSHOT', 'FINISH_EXERCISE'] as const;
 export interface CoachContext {
+  availableSnapshots?: {snapshotId:string;label:string;workspaceVersion:number;paths:string[]}[];
   capabilities?: { canGenerateTests: false };
   allowedProposalKinds?: (typeof ALLOWED_PROPOSAL_KINDS)[number][];
   allowedEvidenceIds?: string[];
@@ -125,7 +127,8 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
   const rawDocuments = new Map<string, Document>();
   const omittedPaths: string[] = [];
   let bytes = 0;
-  const entries = workspace.listFiles().filter(entry => entry.kind === 'FILE' && isContextPathAllowed(entry.path) &&
+  const files=workspace.listFiles();
+  const entries = files.filter(entry => entry.kind === 'FILE' && isContextPathAllowed(entry.path) &&
     settings.contextPatterns.some(pattern => matchesContextPattern(entry.path, pattern)));
   entries.sort((a, b) => Number(b.path === session.activeFilePath) - Number(a.path === session.activeFilePath) ||
     Number(b.path.toLowerCase() === settings.taskFilePath?.toLowerCase()) - Number(a.path.toLowerCase() === settings.taskFilePath?.toLowerCase()) || a.path.localeCompare(b.path));
@@ -144,6 +147,10 @@ export function buildContext(workspace: ContextWorkspace, session: Session, mess
   const allowed = (path: string | null) => path && entries.some(entry => entry.path === path) ? path : null;
   const redact = (value: string) => redactSecrets(value, sensitiveValues);
   const context: CoachContext = {
+    availableSnapshots:(workspace.listSnapshots?.()??[]).slice(0,20).map(snapshot=>({
+      snapshotId:snapshot.snapshotId,label:snapshot.label,workspaceVersion:snapshot.workspaceVersion,
+      paths:snapshot.paths.filter(isContextPathAllowed),
+    })).filter(snapshot=>snapshot.paths.length>0),
     workspaceVersion: workspace.workspaceVersion, controlEpoch: session.controlEpoch,
     taskMode: settings.taskMode, taskFilePath: allowed(settings.taskFilePath),
     reviewNotesPath: isContextPathAllowed(settings.reviewNotesPath) ? settings.reviewNotesPath : '[EXCLUDED]',

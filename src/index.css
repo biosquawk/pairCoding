@@ -40,5 +40,62 @@
   --color-red-950: #402c2e;
   --color-rose-400: #cb766d;
 }
-:root { color-scheme: dark; background: #002b36; color: #93a1a1; }
-::selection { background: #285460; color: #eee8d5; }
+:root { color-scheme: dark; --pc-menu-background: #001b22; --pc-selection: #285460; --pc-pointer-background: rgb(181 137 0 / 12%); --pc-pointer-border: rgb(181 137 0 / 55%); background: #002b36; color: #93a1a1; }
+:root[data-theme="light"] {
+  color-scheme: light;
+  --pc-menu-background: #e4dcc4;
+  --pc-selection: #d8dfd4;
+  --pc-pointer-background: rgb(181 137 0 / 10%);
+  --pc-pointer-border: rgb(155 119 0 / 55%);
+  --color-zinc-950: #fdf6e3;
+  --color-zinc-900: #eee8d5;
+  --color-zinc-800: #ddd6c1;
+  --color-zinc-700: #c9c2b0;
+  --color-zinc-600: #839496;
+  --color-zinc-500: #657b83;
+  --color-zinc-400: #586e75;
+  --color-zinc-300: #586e75;
+  --color-zinc-200: #073642;
+  --color-zinc-100: #002b36;
+  --color-zinc-50: #002b36;
+  --color-blue-300: #1b5875;
+  --color-blue-400: #1e6e9a;
+  --color-blue-700: #39758c;
+  --color-blue-800: #b3cbd0;
+  --color-blue-900: #e2ece6;
+  --color-blue-950: #eef1df;
+  --color-purple-300: #245b56;
+  --color-purple-400: #287c76;
+  --color-purple-700: #82a8a1;
+  --color-purple-900: #d9e6d9;
+  --color-purple-950: #e7eddf;
+  --color-emerald-100: #364a16;
+  --color-emerald-200: #465916;
+  --color-emerald-400: #65730f;
+  --color-emerald-700: #8d9d57;
+  --color-emerald-900: #e3e8c8;
+  --color-emerald-950: #edf0da;
+  --color-amber-300: #825e12;
+  --color-amber-400: #9b7700;
+  --color-amber-700: #947322;
+  --color-amber-800: #bba15e;
+  --color-amber-900: #eddebc;
+  --color-amber-950: #f8edd2;
+  --color-red-300: #923e35;
+  --color-red-400: #a84942;
+  --color-red-700: #c39a8e;
+  --color-red-950: #f8e0d6;
+  --color-rose-100: #7b302c;
+  --color-rose-300: #8e4239;
+  --color-rose-400: #a84942;
+  --color-rose-700: #b77d70;
+  --color-rose-950: #f9e5dc;
+  --color-yellow-100: #6b5200;
+  --color-yellow-950: #f7edcf;
+  background: #fdf6e3;
+  color: #657b83;
+}
+.app-menu { background: var(--pc-menu-background); }
+.monaco-editor .coach-pointer-line { background-color: var(--pc-pointer-background); border-left: 2px solid var(--pc-pointer-border); }
+.monaco-editor .coach-pointer-glyph { background-color: var(--pc-pointer-border); }
+::selection { background: var(--pc-selection); color: var(--color-zinc-100); }

@@ -7,6 +7,12 @@
 
 Lokalny trener programowania: edytor Monaco, czat z AI, uruchamianie programu i testów, snapshoty oraz raport końcowy. Interfejs i backend znajdują się w tym repozytorium.
 
+## Charakter nauczyciela: AGENTS.md i skille
+
+Edytuj [characters/default/AGENTS.md](characters/default/AGENTS.md) oraz [characters/default/skills](characters/default/skills/). To globalny profil nauczyciela, wspólny dla Javy, Pythona i innych zadań. W [paircoach.config.json](paircoach.config.json) ustaw `"character": "default"` albo `"character": "halloween-theme"`; w tym samym pliku wybierasz model i poziom rozumowania. Przy starcie trenera wybrany pakiet jest kopiowany do prywatnej instancji Codexa jako `AGENTS.md` i `.agents/skills`. Edytuj przed uruchomieniem; po zmianie zrestartuj aplikację, bez przebudowy.
+
+[Instrukcja edycji, struktura i dodawanie własnych charakterów](characters/README.md). Repozytoryjny [AGENTS.md](AGENTS.md) jest instrukcją dla programistów aplikacji, nie dla nauczyciela.
+
 ## Uruchomienie
 
 Wymagany Node.js **22.22.0 lub nowszy** i npm. Z katalogu sklonowanego repozytorium:
@@ -24,6 +30,8 @@ Backend nasłuchuje lokalnie. Standardowy start developerski korzysta z lokalneg
 ## Trener AI i folder zadania
 
 Dostęp do AI wymaga konfiguracji dostawcy oraz zaznaczenia zgody w ustawieniach projektu w interfejsie.
+
+Przed rozpoczęciem pracy skonfigurowany trener ma status „Gotowy”. Pierwsza potwierdzona edycja kodu albo pytanie na czacie uruchamia sesję i obserwowanie przez trenera — nie wymaga wcześniejszego kliknięcia Start. Ręczna pauza, wyciszenie i brak zgody AI nadal obowiązują.
 
 Przycisk **Otwórz folder…** nad drzewem plików pozwala wyklikać inne ćwiczenie bez restartu. Wybór zaczyna się w katalogu nadrzędnym obecnego zadania; dostępne są podfoldery, **Poziom wyżej**, **Otwórz ten folder** i **Anuluj**. Są to rzeczywiste katalogi backendu (przy backendzie w WSL — ścieżki WSL), bez importowania ani kopiowania plików. Zapis musi uzyskać ACK; aktywny program należy zatrzymać, a pisanie trenera przerwać przed przełączeniem. Profil języka/JDK pozostaje ten sam; jego zmiana nadal wymaga konfiguracji i restartu.
 
@@ -45,7 +53,8 @@ Plik [paircoach.config.json](paircoach.config.json) w katalogu aplikacji:
   "codex": {
     "model": "gpt-6.1-sol",
     "reasoning_effort": "medium"
-  }
+  },
+  "character": "default"
 }
 ```
 

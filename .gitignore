@@ -13,6 +13,7 @@ artifacts/
 playwright-report/
 test-results/
 .paircoach/
+.paircoach-runtime/
 .env
 .env.*
 !.env.example

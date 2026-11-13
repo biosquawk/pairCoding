@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 
 export interface EditorPanelProps {
+  theme?: 'dark'|'light';
   /** Optional wave1 injection; transport owner must provide the synchronous pre-CONTROL_PREPARE hook. */
   languageBinding?: EditorLanguageBinding;
   projectId: string;
@@ -57,6 +58,7 @@ export interface EditorPanelProps {
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
+  theme='dark',
   projectId,
   languageBinding,
   files,
@@ -157,9 +159,36 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       },
     });
 
-    monaco.editor.setTheme('paircoach-solarized-dark');
+    monaco.editor.defineTheme('paircoach-solarized-light', {
+      base:'vs',inherit:true,
+      rules:[
+        {token:'',foreground:'657b83',background:'fdf6e3'},
+        {token:'comment',foreground:'93a1a1',fontStyle:'italic'},
+        {token:'keyword',foreground:'859900'},
+        {token:'string',foreground:'2aa198'},
+        {token:'number',foreground:'d33682'},
+        {token:'type',foreground:'b58900'},
+        {token:'delimiter',foreground:'657b83'},
+        {token:'operator',foreground:'859900'},
+        {token:'identifier',foreground:'657b83'},
+      ],
+      colors:{
+        'editor.background':'#fdf6e3','editor.foreground':'#657b83',
+        'editorLineNumber.foreground':'#93a1a1','editorLineNumber.activeForeground':'#586e75',
+        'editor.selectionBackground':'#d8dfd4','editor.inactiveSelectionBackground':'#eee8d5',
+        'editor.lineHighlightBackground':'#eee8d5','editorCursor.foreground':'#586e75',
+        'editorWidget.background':'#eee8d5','editorSuggestWidget.background':'#eee8d5',
+        'editorSuggestWidget.foreground':'#586e75','editorSuggestWidget.border':'#c9c2b0',
+        'editorGutter.background':'#fdf6e3',
+      },
+    });
+    monaco.editor.setTheme('paircoach-solarized-'+theme);
     setEditorGeneration(generation => generation + 1);
   };
+
+  useLayoutEffect(()=>{
+    monacoRef.current?.editor.setTheme('paircoach-solarized-'+theme);
+  },[theme,editorGeneration]);
 
   // Switch before paint: never reveal an old project's model in a new workspace.
   // Switch models cleanly between tabs, preserving viewState & undo stack
@@ -435,8 +464,8 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           ),
           options: {
             isWholeLine: true,
-            className: 'bg-blue-500/20 border-l-4 border-blue-500',
-            glyphMarginClassName: 'bg-blue-500 rounded-full',
+            className: 'coach-pointer-line',
+            glyphMarginClassName: 'coach-pointer-glyph rounded-full',
             hoverMessage: { value: '**Wskaźnik Trenera AI**' },
           },
         },
@@ -599,7 +628,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             height="100%"
             defaultLanguage={activeFile ? languageForPath(activeFile.path) : 'plaintext'}
             defaultValue={activeFile?.content ?? ''}
-            theme="paircoach-solarized-dark"
+            theme={'paircoach-solarized-'+theme}
             onMount={handleEditorMount}
             onChange={(newVal) => {
               if (!isApplyingCoachStepRef.current && newVal !== undefined) {

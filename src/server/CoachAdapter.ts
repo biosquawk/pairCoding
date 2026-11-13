@@ -219,7 +219,9 @@ export class CoachAdapter {
         if (decision.evidenceIds.some(id => !evidence.has(id))) throw new CoachResponseRejected('EVIDENCE');
         const id = randomUUID();
         this.clearPointer();
-        if (decision.showPointer && decision.path !== null && decision.documentVersion !== null) {
+        // A warning tied to code always points at that code; its visibility must
+        // not depend on the model's independent showPointer preference.
+        if ((decision.showPointer || decision.severity === 'WARNING') && decision.range !== null && decision.path !== null && decision.documentVersion !== null) {
           this.pointer = { id, path: decision.path, version: decision.documentVersion };
           this.options.emit('COACH_POINTER', { id, path: decision.path, documentVersion: decision.documentVersion, range: decision.range, clear: false });
         }

@@ -30,10 +30,12 @@ import {
   Square,
   Wrench,
   XCircle,
+  Sun,
+  Moon,
 } from 'lucide-react';
 
 interface HeaderBarProps {
-  runtimeLabel?: string; languageStatus?: string; onOpenRuntimeSettings?:()=>void;
+  theme?: 'dark'|'light'; onToggleTheme?:()=>void;
   writeOwner: WriteOwner;
   coachMode: CoachMode;
   aiStatus: AiStatus;
@@ -58,7 +60,7 @@ interface HeaderBarProps {
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
-  runtimeLabel,languageStatus,onOpenRuntimeSettings,
+  theme='dark',onToggleTheme,
   writeOwner,
   coachMode,
   aiStatus,
@@ -107,6 +109,8 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
       case 'MUTED_MANUAL':
         return { label: 'Wyciszony ręcznie', color: 'bg-zinc-800 text-zinc-400 border-zinc-700' };
       case 'UNAVAILABLE':
+        if (aiStatus === 'READY' && sessionStatus === 'STOPPED')
+          return { label: 'Gotowy', color: 'bg-emerald-950 text-emerald-400 border-emerald-800' };
         return { label: 'Niedostępny', color: 'bg-zinc-900 text-zinc-500 border-zinc-800' };
     }
   };
@@ -114,20 +118,16 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
   const coachBadge = getCoachModeBadge();
 
   return (
-    <header className="bg-zinc-950 border-b border-zinc-800 select-none text-zinc-200">
-      {onOpenRuntimeSettings && <button type="button" onClick={onOpenRuntimeSettings} className="text-xs underline px-2 py-1" aria-label="Profil i ustawienia wykonania">Profil: {runtimeLabel || 'nieustalony'} · AutoComp {languageStatus || 'OFF'} · Docs N/A</button>}
+    <header aria-label="Pasek menu" className="app-menu shrink-0 border-b border-zinc-800 select-none text-zinc-200 overflow-x-auto [scrollbar-width:thin]">
       {/* Main Top Row */}
-      <div className="flex flex-wrap items-center justify-between px-3 py-2 gap-2">
+      <div className="flex min-w-max items-center whitespace-nowrap px-3 py-1.5 gap-2">
         {/* Left Section: Brand & Write Owner Status */}
-        <div className="flex flex-wrap min-w-0 items-center gap-3">
+        <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 via-rose-600 to-blue-600 flex items-center justify-center font-bold text-white shadow-md text-sm tracking-wider">
               PC
             </div>
-            <div className="hidden sm:block">
-              <span className="font-bold text-sm tracking-tight text-zinc-100">PairCoach</span>
-              <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">v3.0</span>
-            </div>
+
           </div>
 
           <div className="h-5 w-px bg-zinc-800 hidden md:block" />
@@ -148,7 +148,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-blue-950 text-blue-200 border border-blue-500 shadow-md animate-pulse"
               >
                 <Bot className="w-3.5 h-3.5 text-blue-400" />
-                <span>Pisze trener — 2× Esc przerywa</span>
+                <span>Pisze trener</span>
               </div>
             ) : (
               <div
@@ -187,84 +187,19 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             title="Przerwij pisanie trenerowi natychmiast (działa identycznie jak 2× Escape)"
           >
             <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-            <span>Przerwij trenerowi (2× Esc)</span>
+            <span>Przerwij trenerowi</span>
           </button>
         </div>
 
-        {/* Center: Session Timer */}
-        <div className="flex items-center gap-2 bg-zinc-900/90 px-3 py-1 rounded-md border border-zinc-800">
-          <Clock className={`w-4 h-4 ${isOvertime ? 'text-rose-400 animate-pulse' : 'text-zinc-400'}`} />
-          <div className="flex flex-col">
-            <span
-              className={`font-mono text-sm font-bold tracking-wider ${
-                isOvertime ? 'text-rose-400 animate-pulse' : sessionStatus === 'RUNNING' ? 'text-zinc-100' : 'text-zinc-400'
-              }`}
-            >
-              {formatTime(elapsedMs)}
-              <span className="text-[10px] text-zinc-500 font-normal ml-1">/ {formatTime(limitMs)}</span>
-            </span>
-            {isOvertime && (
-              <span className="text-[9px] text-rose-400 font-semibold tracking-wide uppercase leading-none">
-                Overtime (+{formatTime(elapsedMs - limitMs)})
-              </span>
-            )}
-          </div>
-
-          <div className="flex items-center gap-1 ml-2">
-            {sessionStatus === 'RUNNING' || sessionStatus === 'OVERTIME' ? (
-              <button
-                onClick={onPauseTimer}
-                className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
-                title="Pauza czasu"
-              >
-                <Pause className="w-3 h-3" />
-              </button>
-            ) : (
-              <button
-                onClick={sessionStatus === 'STOPPED' ? onStartTimer : onResumeTimer}
-                className="p-1 rounded bg-blue-900/80 hover:bg-blue-800 text-blue-200"
-                title={sessionStatus === 'PAUSED' ? 'Wznów czas' : 'Start sesji'}
-              >
-                <Play className="w-3 h-3" />
-              </button>
-            )}
-          </div>
-
-          {/* Pause on Hidden Checkbox */}
-          <label
-            className="hidden md:flex items-center gap-1.5 text-[11px] text-zinc-400 ml-2 pl-2 border-l border-zinc-800 cursor-pointer hover:text-zinc-300"
-            title="Automatycznie wstrzymaj naliczanie czasu, gdy zminimalizujesz okno lub przejdziesz do innej karty"
-          >
-            <input
-              type="checkbox"
-              checked={pauseOnHidden}
-              onChange={(e) => onTogglePauseOnHidden(e.target.checked)}
-              className="rounded bg-zinc-950 border-zinc-700 text-blue-600 focus:ring-0 text-xs"
-            />
-            <span>Pauzuj przy ukryciu</span>
-          </label>
-        </div>
-
         {/* Right Section: Task Mode, Capabilities, Execution & Finish */}
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {/* Task Mode Badge */}
           <div
             title={`Tryb zadania: ${taskMode}`}
-            className="hidden xl:flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-300"
+            className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-300"
           >
             {taskMode === 'IMPLEMENTATION' ? <Code2 className="w-3 h-3 text-cyan-400" /> : <FileCheck className="w-3 h-3 text-amber-400" />}
             <span className="font-medium">{taskMode}</span>
-          </div>
-
-          {/* Plugins indicator */}
-          <div className="hidden 2xl:flex items-center gap-1.5 text-[10px] text-zinc-500 border border-zinc-800/80 px-2 py-0.5 rounded bg-zinc-950">
-            <span title="Moduł dokumentacji F1 — niezainstalowany w MVP" className="opacity-60 cursor-not-allowed">
-              Docs: <strong className="text-zinc-600">N/A</strong>
-            </span>
-            <span className="text-zinc-700">|</span>
-            <span title="Moduł autouzupełniania — niezainstalowany w MVP" className="opacity-60 cursor-not-allowed">
-              AutoComp: <strong className="text-zinc-600">N/A</strong>
-            </span>
           </div>
 
           {/* Run Main Button */}
@@ -341,6 +276,67 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             <Wrench className="w-3.5 h-3.5" />
           </button>
         </div>
+
+        {onToggleTheme && <button type="button" role="switch" aria-label="Jasny motyw" aria-checked={theme==='light'}
+          title={theme==='dark'?'Włącz Solarized Light':'Włącz Solarized Dark'} onClick={onToggleTheme}
+          className="shrink-0 flex items-center gap-1 p-1 rounded-full border border-zinc-700 bg-zinc-900">
+          <Sun className={`w-5 h-5 rounded-full p-0.5 ${theme==='light'?'bg-amber-400 text-zinc-950':'text-zinc-500'}`} />
+          <Moon className={`w-5 h-5 rounded-full p-0.5 ${theme==='dark'?'bg-zinc-700 text-zinc-100':'text-zinc-500'}`} />
+        </button>}
+        {/* Center: Session Timer */}
+        <div className="ml-auto flex shrink-0 items-center gap-2 bg-zinc-900/90 px-2 py-1 rounded-md border border-zinc-800">
+          <Clock className={`w-4 h-4 ${isOvertime ? 'text-rose-400 animate-pulse' : 'text-zinc-400'}`} />
+          <div className="flex flex-col">
+            <span
+              className={`font-mono text-sm font-bold tracking-wider ${
+                isOvertime ? 'text-rose-400 animate-pulse' : sessionStatus === 'RUNNING' ? 'text-zinc-100' : 'text-zinc-400'
+              }`}
+            >
+              {formatTime(elapsedMs)}
+              <span className="text-[10px] text-zinc-500 font-normal ml-1">/ {formatTime(limitMs)}</span>
+            </span>
+            {isOvertime && (
+              <span className="text-[9px] text-rose-400 font-semibold tracking-wide uppercase leading-none">
+                Overtime (+{formatTime(elapsedMs - limitMs)})
+              </span>
+            )}
+          </div>
+
+          <div className="flex items-center gap-1 ml-2">
+            {sessionStatus === 'RUNNING' || sessionStatus === 'OVERTIME' ? (
+              <button
+                onClick={onPauseTimer}
+                className="p-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300"
+                title="Pauza czasu"
+              >
+                <Pause className="w-3 h-3" />
+              </button>
+            ) : (
+              <button
+                onClick={sessionStatus === 'STOPPED' ? onStartTimer : onResumeTimer}
+                className="p-1 rounded bg-blue-900/80 hover:bg-blue-800 text-blue-200"
+                title={sessionStatus === 'PAUSED' ? 'Wznów czas' : 'Start sesji'}
+              >
+                <Play className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+
+          {/* Pause on Hidden Checkbox */}
+          <label
+            className="hidden md:flex items-center gap-1.5 text-[11px] text-zinc-400 ml-2 pl-2 border-l border-zinc-800 cursor-pointer hover:text-zinc-300"
+            title="Automatycznie wstrzymaj naliczanie czasu, gdy zminimalizujesz okno lub przejdziesz do innej karty"
+          >
+            <input
+              type="checkbox"
+              checked={pauseOnHidden}
+              onChange={(e) => onTogglePauseOnHidden(e.target.checked)}
+              className="rounded bg-zinc-950 border-zinc-700 text-blue-600 focus:ring-0 text-xs"
+            />
+            <span>Pauzuj przy ukryciu</span>
+          </label>
+        </div>
+
       </div>
     </header>
   );

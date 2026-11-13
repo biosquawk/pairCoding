@@ -88,7 +88,7 @@ const runtimeAssets = [
   'examples/spring-counter/src/test/java/demo/CounterApplicationTest.java',
 ];
 const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
-const sourceRequired = [...new Set([...top, ...runtimeRequired, 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
+const sourceRequired = [...new Set([...top, ...runtimeRequired, 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
 const runtimeScriptSet = new Set(runtimeScripts);
 // Finite source formats within the three product source roots, not arbitrary binary/runtime data.
 const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||
@@ -100,7 +100,7 @@ function allowed(name) {
   if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
   if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || name === runtimeTestSupport || runtimeSource(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
+  return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || name === runtimeTestSupport || runtimeSource(name) || /^characters\/[A-Za-z0-9._/-]+\.(?:md|txt|json|ya?ml|py|mjs|js|sh)$/.test(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 // Deliberately finite contract, not a shell parser. Unknown/changed scripts require

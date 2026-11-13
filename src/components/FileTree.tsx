@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 
 interface FileTreeProps {
+  footer?: React.ReactNode;
+  details?: React.ReactNode;
   files: ProjectFile[];
   activePath: string;
   taskFilePath: string;
@@ -46,6 +48,8 @@ interface TreeNode {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  footer,
+  details,
   files,
   activePath,
   taskFilePath,
@@ -166,7 +170,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleDir(node.fullPath); } }}
             onClick={() => toggleDir(node.fullPath)}
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
-            className="flex items-center gap-1.5 py-1 px-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 cursor-pointer select-none rounded"
+            className="h-7 flex items-center gap-1.5 py-1 px-2 text-xs font-medium text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 cursor-pointer select-none rounded"
           >
             {isCollapsed ? <ChevronRight className="w-3 h-3 text-zinc-500" /> : <ChevronDown className="w-3 h-3 text-zinc-500" />}
             {isCollapsed ? <Folder className="w-3.5 h-3.5 text-amber-400/80" /> : <FolderOpen className="w-3.5 h-3.5 text-amber-400" />}
@@ -190,7 +194,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         role="button" tabIndex={0} aria-label={`Otwórz plik ${node.fullPath}`} aria-pressed={isActive}
         onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); if (!isEditing) onSelectFile(node.fullPath); } }}
         style={{ paddingLeft: `${depth * 12 + 10}px` }}
-        className={`group flex items-center justify-between py-1 px-2 text-xs cursor-pointer select-none rounded transition-colors ${
+        className={`group h-7 flex items-center justify-between py-1 px-2 text-xs cursor-pointer select-none rounded transition-colors ${
           isActive
             ? 'bg-zinc-800 text-zinc-100 font-semibold border-l-2 border-blue-500'
             : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900/70'
@@ -233,7 +237,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
           {/* Quick Actions (Rename / Delete) */}
           {!isSpecialTask && !isSpecialNotes && !isEditing && (
-            <div className="hidden group-hover:flex group-focus-within:flex items-center gap-0.5">
+            <div className="flex shrink-0 invisible group-hover:visible group-focus-within:visible items-center gap-0.5">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -263,7 +267,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col bg-zinc-950 border-r border-zinc-800 text-zinc-300 select-none">
+    <div aria-label="Pliki projektu i stan" className="h-full min-h-0 min-w-0 flex flex-col bg-zinc-950 border-r border-zinc-800 text-zinc-300 select-none">
       {/* File Tree Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
         <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Pliki Projektu</span>
@@ -318,9 +322,10 @@ export const FileTree: React.FC<FileTreeProps> = ({
       )}
 
       {/* Tree Content */}
-      <div className="flex-1 overflow-y-auto py-1 px-1">
+      <div className={`min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] py-1 px-1 ${details ? 'hidden' : ''}`}>
         {treeRoot.children.map((child) => renderNode(child, 0))}
       </div>
+      {details && <div role="region" aria-label="Szczegóły środowiska" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [overflow-wrap:anywhere]">{details}</div>}
 
       {/* Delete Confirmation Modal */}
       {deletingPath && (
@@ -344,6 +349,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
         </div>
       )}
 
+      {footer && <div className="shrink-0 min-w-0 max-h-[45%] overflow-y-auto overflow-x-hidden border-t border-zinc-800 bg-zinc-900/60 p-2 [overflow-wrap:anywhere]">{footer}</div>}
       {/* Footer Info */}
       <div className="p-2 border-t border-zinc-900 bg-zinc-950/80 text-[10px] text-zinc-500 flex justify-between items-center">
         <span>{files.length} plików</span>

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { client } from './services/PairCoachClient';
 import { observeWindowPresence } from './services/windowPresence';
 import {
@@ -31,6 +31,14 @@ import { MOCK_SCENARIOS } from './data/mockScenarios';
 
 export default function App() {
   const [state, setState] = useState(client.getState());
+  const [theme,setTheme]=useState<'dark'|'light'>(()=>{
+    try {return window.localStorage.getItem('paircoach:theme')==='light'?'light':'dark';}
+    catch {return 'dark';}
+  });
+  useLayoutEffect(()=>{
+    document.documentElement.dataset.theme=theme;
+    try {window.localStorage.setItem('paircoach:theme',theme);} catch { /* Appearance remains usable without storage. */ }
+  },[theme]);
   const [openTabs, setOpenTabs] = useState<string[]>([state.activePath]);
   const [isDevSimulatorOpen, setIsDevSimulatorOpen] = useState(client.transportMode === 'MOCK_SIMULATOR');
 
@@ -48,6 +56,7 @@ export default function App() {
   const [isReconcilingRuntime,setIsReconcilingRuntime]=useState(false);
   const [runtimeReconcileResult,setRuntimeReconcileResult]=useState<{scope:string|null;message:string}|null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isEnvironmentOpen,setIsEnvironmentOpen]=useState(false);
   const [isFolderPickerOpen,setIsFolderPickerOpen]=useState(false);
   const projectSettings = state.projectSettings;
 
@@ -172,10 +181,49 @@ export default function App() {
   const taskFile = state.files.find((f) => f.path === state.scenario.taskFilePath);
   const taskMarkdownContent = taskFile?.loaded === false && !state.taskReadError ? '# Wczytywanie zadania…' : taskFile?.content ?? '# Treść zadania nie została znaleziona.';
 
+  const connectionStatus = (
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] leading-relaxed min-w-0 [overflow-wrap:anywhere]" role="status">
+        <strong>{state.transportMode === 'LIVE_BACKEND' ? 'LIVE — lokalny backend' : 'MOCK — jawna symulacja, bez zapisu na dysk'}</strong>
+        {state.transportMode === 'LIVE_BACKEND' && <>
+          <span>{state.isOffline ? 'Synchronizacja / Offline — niepotwierdzone zmiany pozostają lokalne.' : state.pendingPaths.length ? 'Zapis oczekuje na ACK.' : 'Połączono z backendem.'}</span>
+          <button className="underline" disabled={state.isOffline} onClick={() => setIsFolderPickerOpen(true)}>Otwórz folder…</button>
+          <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
+        </>}
+        {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
+        {state.runtime?.reconciliationRequired && <button type="button" disabled={state.isOffline || isReconcilingRuntime} onClick={async()=>{const scope=client.getReportHistoryScope();setIsReconcilingRuntime(true);setRuntimeReconcileResult(null);try {const ok=await client.reconcileRuntimeMutation();if(scope===client.getReportHistoryScope())setRuntimeReconcileResult({scope,message:ok?'Potwierdzono rozstrzygnięcie operacji. Sprawdź bieżący stan w sekcji środowiska.':client.getState().runtime?.error ?? 'Nie potwierdzono wyniku. Blokada zachowana.'});} finally {setIsReconcilingRuntime(false);}}} className="underline px-2 py-1">{isReconcilingRuntime ? 'Sprawdzanie wyniku…' : 'Sprawdź wynik operacji'}</button>}
+        {(isReconcilingRuntime || (runtimeReconcileResult && runtimeReconcileResult.scope===client.getReportHistoryScope())) && <span role="status" aria-live="polite">{isReconcilingRuntime ? 'Sprawdzanie autoryzowanego wyniku…' : runtimeReconcileResult?.message}</span>}
+        {state.runtime?.reconciliationRequired && <span role="alert" className="text-amber-300">Wynik Run lub zapisu jest nieznany. Nowy Run i zapis zablokowane do autoryzowanego rozstrzygnięcia dokładnego żądania. Ponowne połączenie nie usuwa blokady; nie odświeżaj strony, zachowaj draft. Ręczna edycja i Stop znanego wykonania pozostają dostępne.</span>}
+        {state.storageError && <span role="alert" className="text-rose-300">{state.storageError}</span>}
+      </div>
+  );
+  const environmentDetails = state.transportMode==='LIVE_BACKEND' && isEnvironmentOpen ? (
+    <div id="project-environment-panel" className="min-w-0 text-xs [overflow-wrap:anywhere]">
+        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ?? null} diagnostics={state.languageDiagnostics}
+          run={state.runtime?.run ?? null} connected={!state.isOffline} canExecute={!state.isOffline}
+          preparation={state.runtime?.maintenance} onPrepare={state.transportMode==='LIVE_BACKEND'?reconcile=>{void client.prepareRuntimeEnvironment(reconcile);}:undefined}
+          pending={!!state.runtime?.pending}
+          error={state.runtime?.reconciliationRequired ? 'Wynik Run lub zapisu nieznany. Wymagany autoryzowany odczyt dokładnego requestId; ponowne połączenie nie usuwa blokady. Ręczna edycja dostępna.' : state.runtime?.error}
+          onRun={mode=>mode==='RUN_TESTS'?client.runTests():client.runMain()} onStop={()=>client.stopExecution()} onSettings={()=>setIsRuntimeSettingsOpen(true)} />
+        {state.languageProblem && <p role="status">{state.languageProblem}</p>}
+    </div>
+  ) : undefined;
+  const projectFooter = <div className="space-y-2">
+    {connectionStatus}
+    {state.transportMode==='LIVE_BACKEND' && <button type="button"
+      className="w-full flex items-start gap-1 text-left text-[11px] leading-relaxed [overflow-wrap:anywhere] hover:text-zinc-100"
+      aria-expanded={isEnvironmentOpen} aria-controls="project-environment-panel"
+      onClick={()=>setIsEnvironmentOpen(open=>!open)}>
+      <span aria-hidden="true" className="shrink-0">{isEnvironmentOpen?'▾':'▸'}</span>
+      <span>Profil / środowisko: {state.runtime?.execution?.runtime.label || 'nieustalony'} · {state.runtime?.execution?.runtime.state || 'Ładowanie'} · AutoComp {state.language?.autocomplete ?? 'OFF'} · Docs N/A</span>
+    </button>}
+  </div>;
+
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100">
       {/* Top Header Bar */}
       <HeaderBar
+        theme={theme}
+        onToggleTheme={()=>setTheme(value=>value==='dark'?'light':'dark')}
         writeOwner={state.writeOwner}
         coachMode={state.coachMode}
         aiStatus={state.aiStatus}
@@ -187,9 +235,6 @@ export default function App() {
         capabilities={state.transportMode==='LIVE_BACKEND' ? {...state.capabilities,
           canRunMain:state.capabilities.canRunMain && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked,
           canRunTests:state.capabilities.canRunTests && !state.isOffline && state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked} : state.capabilities}
-        runtimeLabel={state.runtime?.execution?.runtime.label}
-        languageStatus={state.transportMode==='LIVE_BACKEND' ? state.language?.autocomplete ?? 'OFF' : undefined}
-        onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>setIsRuntimeSettingsOpen(true) : undefined}
         executionStatus={state.activeRun?.status || 'IDLE'}
         isDevSimulatorOpen={isDevSimulatorOpen}
         onEmergencyVeto={() => client.triggerVeto('EMERGENCY_BUTTON')}
@@ -212,29 +257,6 @@ export default function App() {
         onToggleDevSimulator={() => setIsDevSimulatorOpen(!isDevSimulatorOpen)}
       />
 
-      <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-xs border-b border-zinc-800 bg-zinc-900" role="status">
-        <strong>{state.transportMode === 'LIVE_BACKEND' ? 'LIVE — lokalny backend' : 'MOCK — jawna symulacja, bez zapisu na dysk'}</strong>
-        {state.transportMode === 'LIVE_BACKEND' && <>
-          <span>{state.isOffline ? 'Synchronizacja / Offline — niepotwierdzone zmiany pozostają lokalne.' : state.pendingPaths.length ? 'Zapis oczekuje na ACK.' : 'Połączono z backendem.'}</span>
-          <button className="underline" disabled={state.isOffline} onClick={() => setIsFolderPickerOpen(true)}>Otwórz folder…</button>
-          <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
-        </>}
-        {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
-        {state.runtime?.reconciliationRequired && <button type="button" disabled={state.isOffline || isReconcilingRuntime} onClick={async()=>{const scope=client.getReportHistoryScope();setIsReconcilingRuntime(true);setRuntimeReconcileResult(null);try {const ok=await client.reconcileRuntimeMutation();if(scope===client.getReportHistoryScope())setRuntimeReconcileResult({scope,message:ok?'Potwierdzono rozstrzygnięcie operacji. Sprawdź bieżący stan w sekcji środowiska.':client.getState().runtime?.error ?? 'Nie potwierdzono wyniku. Blokada zachowana.'});} finally {setIsReconcilingRuntime(false);}}} className="underline px-2 py-1">{isReconcilingRuntime ? 'Sprawdzanie wyniku…' : 'Sprawdź wynik operacji'}</button>}
-        {(isReconcilingRuntime || (runtimeReconcileResult && runtimeReconcileResult.scope===client.getReportHistoryScope())) && <span role="status" aria-live="polite">{isReconcilingRuntime ? 'Sprawdzanie autoryzowanego wyniku…' : runtimeReconcileResult?.message}</span>}
-        {state.runtime?.reconciliationRequired && <span role="alert" className="text-amber-300">Wynik Run lub zapisu jest nieznany. Nowy Run i zapis zablokowane do autoryzowanego rozstrzygnięcia dokładnego żądania. Ponowne połączenie nie usuwa blokady; nie odświeżaj strony, zachowaj draft. Ręczna edycja i Stop znanego wykonania pozostają dostępne.</span>}
-        {state.storageError && <span role="alert" className="text-rose-300">{state.storageError}</span>}
-      </div>
-      {state.transportMode==='LIVE_BACKEND' && <details className="shrink-0 max-h-[35dvh] overflow-auto border-b border-zinc-800 px-3 text-xs">
-        <summary className="cursor-pointer py-1">Środowisko: {state.runtime?.execution?.runtime.label || 'profil nieustalony'} · Autouzupełnianie {state.language?.autocomplete ?? 'OFF'} · Docs N/A</summary>
-        <RuntimeStatusV2 execution={state.runtime?.execution && (state.runtime.reconciliationRequired || state.writeOwner!=='STUDENT' || !!state.fileConflict) ? {...state.runtime.execution,modes:{RUN_MAIN:{...state.runtime.execution.modes.RUN_MAIN,canRun:false},RUN_TESTS:{...state.runtime.execution.modes.RUN_TESTS,canRun:false}}} : state.runtime?.execution ?? null} language={state.language ?? null} diagnostics={state.languageDiagnostics}
-          run={state.runtime?.run ?? null} connected={!state.isOffline} canExecute={!state.isOffline}
-          preparation={state.runtime?.maintenance} onPrepare={state.transportMode==='LIVE_BACKEND'?reconcile=>{void client.prepareRuntimeEnvironment(reconcile);}:undefined}
-          pending={!!state.runtime?.pending}
-          error={state.runtime?.reconciliationRequired ? 'Wynik Run lub zapisu nieznany. Wymagany autoryzowany odczyt dokładnego requestId; ponowne połączenie nie usuwa blokady. Ręczna edycja dostępna.' : state.runtime?.error}
-          onRun={mode=>mode==='RUN_TESTS'?client.runTests():client.runMain()} onStop={()=>client.stopExecution()} onSettings={()=>setIsRuntimeSettingsOpen(true)} />
-        {state.languageProblem && <p role="status">{state.languageProblem}</p>}
-      </details>}
       {/* Dev Simulator Bar (Togglable) */}
       {isDevSimulatorOpen && (
         <DevSimulatorBar
@@ -258,6 +280,8 @@ export default function App() {
         {/* Left Panel: File Tree */}
         <div style={{ width: `min(${fileTreeWidth}px, 36vw)` }} className="shrink-0 h-full overflow-hidden">
           <FileTree
+            footer={projectFooter}
+            details={environmentDetails}
             files={state.files}
             activePath={state.activePath}
             taskFilePath={state.scenario.taskFilePath}
@@ -287,6 +311,7 @@ export default function App() {
           {/* Middle: Shared Monaco Editor */}
           <div className="flex-1 min-h-0 overflow-hidden relative">
             <EditorPanel
+              theme={theme}
               projectId={state.scenario.id}
               languageBinding={client.getEditorLanguageBinding()}
               files={state.files}
@@ -377,7 +402,6 @@ export default function App() {
         settingsVersion={state.workspaceVersion}
         connected={!state.isOffline}
         canSave={state.transportMode!=='LIVE_BACKEND' || (state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked)}
-        onOpenRuntimeSettings={state.transportMode==='LIVE_BACKEND' ? ()=>{setIsSettingsModalOpen(false);setIsRuntimeSettingsOpen(true);} : undefined}
         rootPath={state.transportMode === 'LIVE_BACKEND' ? state.scenario.title : undefined}
         onOpenProject={state.transportMode === 'LIVE_BACKEND' ? (root) => client.openProject(root) : undefined}
         snapshots={state.snapshots}

@@ -936,7 +936,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           // A coach observer cannot retroactively turn the already committed/published save
           // into REJECTED or replace its retained transaction receipt.
           if(startup===admitted&&!closing&&!transitioning&&peer.authenticated&&peers.get(ws)===peer&&session.state.controlEpoch===input.controlEpoch) {
-            try {coach?.trigger('EDIT');} catch(error) {emit('ERROR',apiError(error,command.messageId));}
+            try {
+              // The first confirmed edit starts observation just like an explicit
+              // chat message; no extra START analysis or bypass of a manual pause.
+              if(coach && workspace.settings.aiConsent && session.state.aiStatus === 'READY' && session.state.lifecycle === 'READY')
+                session.start(session.state.timer.limitMs,session.state.timer.pauseOnHidden);
+              coach?.trigger('EDIT');
+            } catch(error) {emit('ERROR',apiError(error,command.messageId));}
           }
           return receipt;
         });
@@ -959,6 +965,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           case 'WINDOW_STATE': session.setPresence(p.presence);if(p.presence!=='FOCUSED') coach?.abort();return null;
           case 'TIMER_ACTION': session.timerAction(p.action,p.pauseOnHidden);if(p.action==='PAUSE') coach?.abort();return null;
           case 'CHAT_MESSAGE': {
+            // An explicit chat question starts a consented READY session. Do not
+            // also trigger START: that would launch and immediately abort a
+            // second model call before answering the actual question.
+            if(workspace.settings.aiConsent && session.state.lifecycle==='READY')
+              session.start(session.state.timer.limitMs,session.state.timer.pauseOnHidden);
             const entry:ChatEntry={messageId:command.messageId,author:'STUDENT',text:p.text,createdAt:new Date().toISOString()};chat.push(entry);chat=chat.slice(-100);session.noteNewFact('CHAT');coach?.trigger('CHAT',entry);return null;
           }
           case 'PROPOSAL_REQUEST': {
