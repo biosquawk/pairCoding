@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "taskFilePath": "challenge.md",
+  "taskMode": "IMPLEMENTATION",
+  "reviewNotesPath": "review.md",
+  "aiConsent": false,
+  "contextPatterns": [
+    "src/**/*.java",
+    "challenge.md"
+  ],
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.Puzzler"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.PuzzlerTest"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.Puzzler"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.PuzzlerTest"
+          ]
+        }
+      }
+    }
+  ]
+}

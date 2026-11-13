@@ -33,3 +33,9 @@ Rozwinięto default o uczenie na małym przykładzie, wyjaśnienie przyczyny i s
 ## 6. AI_unslop — instrukcje
 
 Przeczytano instrukcję MCP i oceniono wszystkie jednostki sześciu plików: dwie karty AGENTS, dwa skille lesson-feedback i dwa design-patterns. Próg naprawy 3, maksymalna dopuszczalna ocena 2. Poprawiono po dwie niezręczności w kartach i po jednej w skillach wzorców; pozostałe zdania zachowano. `verify_workspace`: completed=true dla 6/6, brak unresolved_cells, zgodne Markdown/JSON/PNG. Oceny języka pochodzą od operatora; MCP nie ma własnego modelu oceniającego. Historie, oryginały i obrazy: [teacher-unslop](qa/teacher-unslop/). Zapisano osobny commit audytu przed poprawkami.
+
+## 7. Java Puzzlers
+
+Dodano 10 niezależnych zadań w [java-puzzlers](../java-puzzlers/README.md), polecenia po polsku, Maven/JUnit, konfigurację Run Main/Tests oraz jawny inicjalizator ustawień. Pierwsze osiem wymaga przewidywania wyniku, dziewiąte deklaracji, a dziesiąte sprawdza kompilowalność wariantu Object/String na współczesnym JDK. Pierwsza próba wykazała, że początkowe założenie nowego testu 10 było błędne: obie formy się kompilują. Zachowano dowód i opisano adaptację; nie wymusza się nieistniejącego błędu.
+
+Rzeczywisty Docker, przypięty JDK21, cache zależności read-only, sieć wyłączona, nieuprzywilejowany użytkownik i izolowane kopie: 10/10 projektów czerwonych na początku i 10/10 zielonych po kontrolowanym uzupełnieniu odpowiedzi (22 testy). Run Main wykonano dla wszystkich zielonych kopii. Rozwiązania nie nadpisały zadań repozytorium. Test pakowania i ustawień: 71/71 PASS. Dowody i hashe: [java-puzzlers-verification-20261113.json](java-puzzlers-verification-20261113.json). To nie jest dowód GUI dla całej dziesiątki.

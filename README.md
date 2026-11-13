@@ -44,6 +44,8 @@ Szczegółowe polecenia PowerShell, konfiguracja Codexa i przebieg pierwszego za
 
 Gotowe wzorce nowych ćwiczeń Java, Spring Boot, JavaScript, TypeScript i Python: [szablony zadań](docs/templates/README.md).
 
+Dziesięć zagadek z rozdziału Expressive Puzzlers: [java-puzzlers](java-puzzlers/README.md).
+
 ## Konfiguracja modelu Codex
 
 Plik [paircoach.config.json](paircoach.config.json) w katalogu aplikacji:

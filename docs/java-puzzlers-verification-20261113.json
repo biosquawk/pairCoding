@@ -1,0 +1,32 @@
+{
+  "status": "PASS",
+  "scope": "10 tasks, Docker pinned JDK21, not native Windows or full PairCoding suite",
+  "first_nine_proof": "paircoach-live-20261113/puzzlers-verification/proof.json",
+  "puzzle10_proof": "paircoach-live-20261113/puzzlers-verification/proof10-current-jdk.json",
+  "red_projects": 10,
+  "green_projects": 10,
+  "green_tests": 22,
+  "initial_failure": "Initial new puzzle10 oracle expected Object/String += to fail; actual JDK21 accepted it. The exercise was corrected to investigate this behavior, not claim the historical candidate still separates assignments.",
+  "source_hashes": {
+    "java-puzzlers/01-oddity/src/main/java/demo/Puzzler.java": "b931e913cdb2568d33bb14f789ab8338aa11901a648653d669640da8599f813a",
+    "java-puzzlers/01-oddity/src/test/java/demo/PuzzlerTest.java": "1471f223c3c9d6b27adf8ed1bdc3b46f5735bce4682b7972f95f958ec2b9f5f7",
+    "java-puzzlers/02-time-for-a-change/src/main/java/demo/Puzzler.java": "e72b11fc76364af37f16820ea363152a063e0d1ae00fd76900947ee254a2c69f",
+    "java-puzzlers/02-time-for-a-change/src/test/java/demo/PuzzlerTest.java": "81dc0baf2a82533c23ff40ebb0950818aa12160d5c6f403ef89eb015e57a47af",
+    "java-puzzlers/03-long-division/src/main/java/demo/Puzzler.java": "baf8deb7016691fde0736f6aaba4563471287d52f9a5779a45c25e46643125c1",
+    "java-puzzlers/03-long-division/src/test/java/demo/PuzzlerTest.java": "99ab5cd5f8489a9b1c31f7ee47dc3c78b9f087cefe096a91997c39f8710a7059",
+    "java-puzzlers/04-its-elementary/src/main/java/demo/Puzzler.java": "bbcf20759e02e0fdf61e16eee7ba21c8b44101eca88a7cc187f8a95f1ed6c148",
+    "java-puzzlers/04-its-elementary/src/test/java/demo/PuzzlerTest.java": "8a9b64aa7a70cee46995e5850498f06f8379a419b41b5af22eeda9654941c762",
+    "java-puzzlers/05-the-joy-of-hex/src/main/java/demo/Puzzler.java": "8c283013b5779f88349ba774babb73985861b330c11a2d1bcd54a4495278156e",
+    "java-puzzlers/05-the-joy-of-hex/src/test/java/demo/PuzzlerTest.java": "616355cc04e95856ad5a2a83b7fe31d3a8f83425f2fc84bc843d70633b141845",
+    "java-puzzlers/06-multicast/src/main/java/demo/Puzzler.java": "4c363214dab4e0d77bc760f9560497a67c274d84e776c38c007e934c8ff45fc3",
+    "java-puzzlers/06-multicast/src/test/java/demo/PuzzlerTest.java": "43a2530ba8b63508bf78b1a1d6b0b380e29adbba3bc7d3b2af4eb4128c5c5fd9",
+    "java-puzzlers/07-swap-meat/src/main/java/demo/Puzzler.java": "feb925fd804cfb9a7bf0373a759fcaf80225a0acf597ad0180fceb41e373a2f9",
+    "java-puzzlers/07-swap-meat/src/test/java/demo/PuzzlerTest.java": "d2fa50c9f1631e88ebf4075b34563b66326a4cc9a785ae892490c0bffdea26dc",
+    "java-puzzlers/08-dos-equis/src/main/java/demo/Puzzler.java": "393c642815f05ec4fc3c3844bc7b6bc472490f73600b9157622aa20a09be4fb9",
+    "java-puzzlers/08-dos-equis/src/test/java/demo/PuzzlerTest.java": "d3c653fe6583c2410824b86cd7af30a54358ab4eb204cb66fba45992e32bf40b",
+    "java-puzzlers/09-tweedledum/src/main/java/demo/Puzzler.java": "c23247ac1806332333ab75b60768fbf7f9a7f2bd2746bb5632fa2d3ec6a26572",
+    "java-puzzlers/09-tweedledum/src/test/java/demo/PuzzlerTest.java": "3b80ec2489da03ef37686bea8b97991cbf64678e7f83de2ec86cb821e0897090",
+    "java-puzzlers/10-tweedledee/src/main/java/demo/Puzzler.java": "0a9a7166729e8044f33b99f580e3442bd72ff5d6578c4753473e89057867cb67",
+    "java-puzzlers/10-tweedledee/src/test/java/demo/PuzzlerTest.java": "dcbae361e16b623d0beef7e5299f72e80cb04cd20291a734b4954751d67d4b9c"
+  }
+}

@@ -1,0 +1,121 @@
+{
+  "source_url": "http://www.javapuzzlers.com/java-puzzlers.zip",
+  "contents_url": "http://www.javapuzzlers.com/contents.html",
+  "archive_sha256": "84a9604073cc6acd44ad07843a29e8437ae7a4879351e44cddd7f2fd25fb370c",
+  "archive_bytes": 61564,
+  "chapter": "Expressive Puzzlers",
+  "attribution": "Joshua Bloch i Neal Gafter, Java Puzzlers. Własne polecenia, szkielet Maven i testy PairCoding; użyto krótkich wyrażeń ilustrujących wskazane zagadnienia. Archiwum i tekst książki nie są redystrybuowane.",
+  "exercises": [
+    {
+      "id": 1,
+      "title": "Oddity",
+      "folder": "01-oddity",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-1/Oddity.java",
+          "sha256": "b110dfc0ac665c610bc862df70d3815608d141a3a1032a3a9e4bd589e7dd6fbb"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Time for a Change",
+      "folder": "02-time-for-a-change",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-2/Change.java",
+          "sha256": "21183e47f6110e7bd1160d910039dec7827ff973feb1d064c89e260d216d9fb5"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Long Division",
+      "folder": "03-long-division",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-3/LongDivision.java",
+          "sha256": "c596fe3b9ce40c035d33492ec1f0ec20c9d8da172099e83f3b69cd5306370e90"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "It’s Elementary",
+      "folder": "04-its-elementary",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-4/Elementary.java",
+          "sha256": "8b72a866092d5e01fb2bf116690ac9a5c05184885debfdaf1ee1ab0e58ba5bdb"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "The Joy of Hex",
+      "folder": "05-the-joy-of-hex",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-5/JoyOfHex.java",
+          "sha256": "65870144332e5f3a7363005c8872921142147ecac08014a78f0f0cd66ea9d295"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Multicast",
+      "folder": "06-multicast",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-6/Multicast.java",
+          "sha256": "e29dd6e201501e205002f6922db7b5dd76e3f7fa9b15771c0d856f5f99a4d930"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Swap Meat",
+      "folder": "07-swap-meat",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-7/CleverSwap.java",
+          "sha256": "6b48b1d4695a68b0e91bed6297ec9a17872a3078e0aa1b6e5e9b9c1b847ec1ed"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Dos Equis",
+      "folder": "08-dos-equis",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-8/DosEquis.java",
+          "sha256": "355ed412b70a517877c8395bee569314c11e2ddfce8135843728c3d0df1987fb"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "Tweedledum",
+      "folder": "09-tweedledum",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-9/Tweedledum.java",
+          "sha256": "7b559802d6910fb6593867bb1c303e19828dfb9a34856dfd68005f35d407e22a"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Tweedledee",
+      "folder": "10-tweedledee",
+      "originals": [
+        {
+          "path": "java-puzzlers/2-expressive-puzzlers/puzzle-10/Tweedledee.java",
+          "sha256": "8b73224f68f3ca62612443fb0252e78d3f2524c68a9cacbe1e45ff0d9db83ca9"
+        }
+      ],
+      "adaptation": "Original declaration-search puzzle retained as context; executable exercise checks Object/String concatenation against the current compiler. Both forms compile on the tested JDK21; no claim that this exhausts all original declarations."
+    }
+  ]
+}
