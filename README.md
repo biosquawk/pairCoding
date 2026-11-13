@@ -25,6 +25,8 @@ Backend nasłuchuje lokalnie. Standardowy start developerski korzysta z lokalneg
 
 Dostęp do AI wymaga konfiguracji dostawcy oraz zaznaczenia zgody w ustawieniach projektu w interfejsie.
 
+Przycisk **Otwórz folder…** nad drzewem plików pozwala wyklikać inne ćwiczenie bez restartu. Wybór zaczyna się w katalogu nadrzędnym obecnego zadania; dostępne są podfoldery, **Poziom wyżej**, **Otwórz ten folder** i **Anuluj**. Są to rzeczywiste katalogi backendu (przy backendzie w WSL — ścieżki WSL), bez importowania ani kopiowania plików. Zapis musi uzyskać ACK; aktywny program należy zatrzymać, a pisanie trenera przerwać przed przełączeniem. Profil języka/JDK pozostaje ten sam; jego zmiana nadal wymaga konfiguracji i restartu.
+
 - **Codex:** ustaw `PAIRCOACH_COACH_PROVIDER=codex` i `PAIRCOACH_CODEX_EXE` na pełną ścieżkę do lokalnego, zalogowanego programu Codex. W Windows wymagany jest natywny `codex.exe`, nie plik `.cmd`. Raport końcowy korzysta z tego samego dostawcy. Nie dodawaj plików logowania do repozytorium.
 - **Gemini:** ustaw `GEMINI_API_KEY` w środowisku serwera. Bez skonfigurowanego dostawcy aplikacja działa z wyłączonym trenerem.
 - `PAIRCOACH_WORKSPACE_DIR` wskazuje folder ćwiczenia, a `PAIRCOACH_DATA_DIR` osobny folder danych sesji. Bez wskazanego workspace serwer tworzy tymczasowy przykład.

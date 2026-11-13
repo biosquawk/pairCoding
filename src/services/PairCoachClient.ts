@@ -270,6 +270,8 @@ export class PairCoachClient {
   }
 
   public async openProject(rootPath: string) { return this.transportMode === 'LIVE_BACKEND' ? this.live.openProject(rootPath) : false; }
+  public folderOpenProblem() { return this.transportMode==='LIVE_BACKEND' ? this.live.folderOpenProblem() : 'Wybór folderu wymaga lokalnego backendu.'; }
+  public listFolders(path?:string,signal?:AbortSignal) { return this.live.listFolders(path,signal); }
   public connect() { return this.live.connect(); }
   public reconnect() { return this.live.reconnect(); }
   public close() { this.live.close(); }

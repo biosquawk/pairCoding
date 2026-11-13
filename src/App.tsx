@@ -26,6 +26,7 @@ import { EditorPanel } from './components/EditorPanel';
 import { BottomPanel } from './components/BottomPanel';
 import { FinishModal } from './components/FinishModal';
 import { ProjectSettingsModal } from './components/ProjectSettingsModal';
+import { FolderPicker } from './components/FolderPicker';
 import { MOCK_SCENARIOS } from './data/mockScenarios';
 
 export default function App() {
@@ -47,6 +48,7 @@ export default function App() {
   const [isReconcilingRuntime,setIsReconcilingRuntime]=useState(false);
   const [runtimeReconcileResult,setRuntimeReconcileResult]=useState<{scope:string|null;message:string}|null>(null);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [isFolderPickerOpen,setIsFolderPickerOpen]=useState(false);
   const projectSettings = state.projectSettings;
 
   // Splitter dragging refs
@@ -214,7 +216,7 @@ export default function App() {
         <strong>{state.transportMode === 'LIVE_BACKEND' ? 'LIVE — lokalny backend' : 'MOCK — jawna symulacja, bez zapisu na dysk'}</strong>
         {state.transportMode === 'LIVE_BACKEND' && <>
           <span>{state.isOffline ? 'Synchronizacja / Offline — niepotwierdzone zmiany pozostają lokalne.' : state.pendingPaths.length ? 'Zapis oczekuje na ACK.' : 'Połączono z backendem.'}</span>
-          <button className="underline" disabled={state.isOffline} onClick={() => setIsSettingsModalOpen(true)}>Otwórz folder</button>
+          <button className="underline" disabled={state.isOffline} onClick={() => setIsFolderPickerOpen(true)}>Otwórz folder…</button>
           <button className="underline" onClick={() => client.reconnect()}>Połącz ponownie</button>
         </>}
         {state.connectionError && <span role="alert" className="text-amber-300 break-words">{state.connectionError}</span>}
@@ -364,6 +366,11 @@ export default function App() {
         connected={!state.isOffline} canSave={state.writeOwner==='STUDENT' && !state.runtime?.pending && !state.runtime?.reconciliationRequired && !state.runtime?.maintenance?.blocked}
         onSave={(settings,version)=>client.saveRuntimeSettings(settings,version)} onClose={()=>setIsRuntimeSettingsOpen(false)} />
       {/* Project Settings Modal */}
+      {isFolderPickerOpen && <FolderPicker key={state.scenario.id}
+        list={(path,signal)=>client.listFolders(path,signal)} open={async path=>{
+          const opened=await client.openProject(path);if(opened)setIsFolderPickerOpen(false);return opened;
+        }}
+        blocked={client.folderOpenProblem()} onClose={()=>setIsFolderPickerOpen(false)} />}
       <ProjectSettingsModal
         isOpen={isSettingsModalOpen}
         settings={projectSettings}

@@ -11,6 +11,7 @@ import { EditorViewThrottleP2, sameEditorViewP2, type EditorViewObservationP2 } 
 import type { ReportSummary } from './reportHistory';
 import type { CoachEditStep, EndReason, ProjectSettings, WindowPresence } from '../types/paircoach';
 import type { ClientState, ServerMessage, ServerPayloads, UpdatedFile, ProjectSnapshot, BundleSnapshot } from './liveTypes';
+import type {FolderListing} from '../shared/folders';
 import { emptyLiveState, mapDocument, mapProposal, mapReport, mapRun, mapSettings } from './liveMapper';
 
 type Socket = Pick<WebSocket, 'readyState' | 'send' | 'close' | 'onopen' | 'onmessage' | 'onerror' | 'onclose'>;
@@ -88,6 +89,7 @@ export class LiveBackend {
   private synced = false;
   private latestPresence: WindowPresence | null = null;
   private connecting = false;
+  private openingProject = false;
   private stopped = false;
   private retries = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -1063,9 +1065,33 @@ export class LiveBackend {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   }
+  folderOpenProblem(): string|null {
+    if(!this.synced || this.stopped)return 'Połącz się z backendem przed zmianą folderu.';
+    if(this.preparing || this.session?.writeOwner!=='STUDENT')return 'Przerwij pisanie trenera przed zmianą folderu.';
+    const runtime=this.wiring.runtime.snapshot();
+    if(runtime.pending || runtime.reconciliationRequired || this.servicePreparation.snapshot().blocked)
+      return 'Najpierw rozstrzygnij bieżącą operację środowiska; zachowaj draft.';
+    if((runtime.run&&['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(runtime.run.status)) ||
+      this.state.activeRun?.status==='RUNNING')return 'Zatrzymaj bieżące wykonanie przed zmianą folderu.';
+    return null;
+  }
+  async listFolders(path?:string,signal?:AbortSignal):Promise<FolderListing> {
+    const project=this.project,session=this.session;
+    const result=await this.http<FolderListing>('/api/folders'+(path===undefined?'':'?path='+encodeURIComponent(path)),'GET',undefined,true,signal);
+    if(this.project?.projectId!==project?.projectId || this.session?.sessionId!==session?.sessionId)
+      throw Error('Projekt zmienił się podczas wyboru folderu. Otwórz wybór ponownie.');
+    return result;
+  }
   async openProject(rootPath: string) {
+    if(this.openingProject){this.fail(Error('Trwa otwieranie folderu. Poczekaj na wynik.'));return false;}
+    this.openingProject=true;
     try {
-      await this.flushAll();
+      const problem=this.folderOpenProblem();if(problem)throw Error(problem);
+      const projectId=this.project?.projectId,sessionId=this.session?.sessionId;
+      const current=()=>this.project?.projectId===projectId&&this.session?.sessionId===sessionId;
+      await this.flushAll(current);
+      if(!current())throw Error('Projekt zmienił się podczas zapisu. Nie otwarto innego folderu.');
+      const afterSave=this.folderOpenProblem();if(afterSave)throw Error(afterSave);
       // New folder means new consent and no inherited executable approval.
       const settings: SettingsV2 = { schemaVersion:2, taskFilePath: 'challenge.md', taskMode: 'IMPLEMENTATION', reviewNotesPath: 'review.md', aiConsent: false, contextPatterns: ['**/*.java', '**/*.py', '**/*.js', '**/*.ts', '**/*.md'], runProfiles: [] };
       const project = await this.http<ProjectSnapshot>('/api/project/open', 'POST', { requestId: id(), clientId: this.clientId, rootPath, settings });
@@ -1074,6 +1100,7 @@ export class LiveBackend {
       this.generation++; this.lastSeq = 0; this.documents.clear(); this.loadErrors.clear(); this.state.fileConflict = null; this.state.activePath = '';
       this.projectState(project); this.reconnect(); return true;
     } catch (error) { this.fail(error); return false; }
+    finally {this.openingProject=false;}
   }
   async mutateFile(operation: 'CREATE' | 'RENAME' | 'DELETE', path: string, newPath: string | null = null, content: string | null = null) {
     const projectId = this.project?.projectId, sessionId = this.session?.sessionId, selection = this.selectionRequest;

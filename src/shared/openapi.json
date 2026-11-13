@@ -583,6 +583,85 @@
           }
         }
       }
+    },
+    "/folders": {
+      "get": {
+        "summary": "List immediate folders on the backend host",
+        "description": "Authenticated, read-only folder selection. Omit path to start in the parent of the current workspace. Does not import files, recurse or open a project. Use the existing POST /project/open to confirm selection.",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 4096
+            },
+            "description": "Absolute native path accessible to the backend; symbolic-link directories are rejected."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The selected folder, its parent and immediate real subdirectories.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "path",
+                    "parent",
+                    "directories"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "type": "string"
+                    },
+                    "parent": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "directories": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "name",
+                          "path"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": "string"
+                          },
+                          "path": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or inaccessible folder."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "A file or symbolic link was selected."
+          },
+          "409": {
+            "description": "Folder identity changed during the read."
+          }
+        }
+      }
     }
   },
   "components": {

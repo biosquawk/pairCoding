@@ -3,6 +3,7 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import {listFolders} from './FolderBrowser';
 import { WebSocketServer, WebSocket } from 'ws';
 import { WorkspaceService } from './WorkspaceService';
 import { SessionController } from './SessionController';
@@ -664,6 +665,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             fail(400,'VALIDATION_ERROR','Use no query for editor state or readiness=actual for a measured runtime read.');
           value=await getProject(url.searchParams.get('readiness')==='actual');
         }
+        else if(url.pathname==='/api/folders') {
+          if(url.searchParams.size>1 || (url.searchParams.size===1&&!url.searchParams.has('path')))
+            fail(400,'VALIDATION_ERROR','Użyj wyłącznie parametru path albo katalogu startowego.');
+          value=await listFolders(url.searchParams.get('path')??path.dirname(workspace.rootPath));
+        }
         else if(url.pathname==='/api/session') value=session.getSession();
         else if(url.pathname==='/api/file') value=workspace.getDocument(url.searchParams.get('path')||'');
         else if(url.pathname==='/api/snapshots') value=workspace.listSnapshots();
@@ -730,6 +736,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(url.pathname==='/api/project/open') {
           if(startup.core?.session.leaseClientId && startup.core.session.leaseClientId!==body.clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
           if(transitioning) fail(409,'SESSION_TRANSITION','Project transition is already in progress.');
+          if(startup.core) {
+            binding!.mutations.assertNoPendingRuns();
+            if(controlPreparing || session.state.writeOwner!=='STUDENT')fail(409,'CONTROL_UNAVAILABLE','Przerwij pisanie trenera przed zmianą folderu.');
+            if([...(execution?.runner.list()??[]),...(runtimeExecution?.runner.list()??[])].some(run=>
+              ['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(run.status)))
+              fail(409,'RUN_IN_PROGRESS','Zatrzymaj bieżące wykonanie przed zmianą folderu.');
+          }
           transitioning=true;
           let next:RuntimeStartup|undefined, prepared:Awaited<ReturnType<typeof prepareBinding>>|undefined, adopted=false;
           try {
