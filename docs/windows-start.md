@@ -17,11 +17,13 @@ PASS/FAIL/NOT_RUN oraz ograniczenia są w raporcie dostawy K.
 Wymagane: Windows, PowerShell, Node.js **>=22.22.0** z npm, Edge/Chrome,
 internet do instalacji i AI oraz natywny `codex.exe` zalogowany na **Twoim**
 koncie. Nie kopiuj node_modules z WSL ani auth.json. Nie potrzebujesz dodatkowego
-klucza API dla wariantu Codex z logowaniem ChatGPT. Dla obecnej ścieżki Node nie instaluj dodatkowych usług Thalamusa ani toolchainów.
-Dla Lightweight Docker/polyglot po instalacji wykonaj aktualny
-[przewodnik](windows-polyglot.md#2-nowa-prywatna-kopia-przykładu-i-pełne-ustawienia):
-prywatna kopia przykładu → publiczny `runtime:prepare` → publiczny start z config.
-Poniższe syntetyczne zadanie nie zastępuje tego przepływu ani jego odbioru.
+klucza API dla wariantu Codex z logowaniem ChatGPT. Do Run/Test wymagany jest
+Docker Desktop z engine Linux amd64/x86_64; JDK/Maven,
+Node zadania i Python działają w kontenerach, bez hostowego fallbacku. Nie instaluj
+dodatkowych usług Thalamusa ani hostowych toolchainów zadania. Poniżej jest jeden
+bieżący przepływ Lightweight: prywatna kopia → pełne settings → publiczny prepare
+→ publiczny start. Inne profile i topologię WSL opisuje
+[przewodnik](windows-polyglot.md#1-platforma-i-profil).
 
 Z katalogu dostawy K skopiuj **razem** ZIP, `manifest.json` i `SHA256SUMS` do
 nowego folderu w Eksploratorze. Otwórz w nim PowerShell. Porównaj zaufany hash
@@ -73,7 +75,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Build FAIL — zachowaj błąd' }
 `build` tworzy UI w `dist/`, nie samodzielny EXE. `npm start` używa TS/tsx;
 nie stosuj `--omit=dev`. Instalacja, build i start to osobne wyniki.
 
-## 2. Ustaw Codex i nowe zadanie, uruchom
+## 2. Ustaw Codex, przygotuj prywatne zadanie i uruchom Lightweight
 
 W **tym samym oknie** odszukaj natywny EXE, nie `codex.cmd` ani WSL:
 
@@ -94,30 +96,73 @@ Przy braku logowania uruchom lokalnie `& $codex login` i wybierz własne konto
 ChatGPT, potem powtórz `login status`. Nie przesyłaj plików logowania ani tokenów.
 Samo poprawne logowanie **nie dowodzi**, że trener odpowiedział.
 
-Utwórz raz syntetyczny workspace (nie katalog aplikacji):
+W tym samym oknie, w zweryfikowanym `$app` z §1, utwórz **nową prywatną**
+kopię przykładu Java21. Nie pracuj w źródłowym `examples/` ani na jedynym
+prywatnym zadaniu. `$template` zawiera TaskRunConfig, nie pełne SettingsV2:
+prepare czyta `.paircoach/settings.json`, dlatego zapisujemy wszystkie pola.
+Dla Spring21 zmień tylko `$example` na `spring-counter`; jego template zawiera
+SPRING_BOOT i Main/Tests900000ms zamiast JAVA_MAIN120000ms.
 
 ```powershell
-$workspace = Join-Path $homeDir 'workspaces\pierwsze-zadanie'
-$data = Join-Path $homeDir 'data\pierwsze-zadanie'
-if ((Test-Path $workspace) -or (Test-Path $data)) { throw 'Zadanie lub dane już istnieją — nie nadpisuj ich; ponowny start opisano niżej' }
-New-Item -ItemType Directory -Path $workspace | Out-Null
-New-Item -ItemType Directory -Path $data | Out-Null
+$base = Join-Path $env:LOCALAPPDATA ('PairCoachLightweight\' + [guid]::NewGuid().ToString('N'))
+if (Test-Path -LiteralPath $base) { throw 'Katalog istnieje: zachowaj dane, nie nadpisuj ich' }
+New-Item -ItemType Directory -Path $base | Out-Null
+$base = (Resolve-Path -LiteralPath $base).Path
+$example = 'java-pattern'
+$profile = 'java-maven-21'
+$project = Join-Path $base $example
+Copy-Item -LiteralPath (Join-Path $app ('examples\' + $example)) -Destination $project -Recurse
+$settingsDir = Join-Path $project '.paircoach'
+if (Test-Path -LiteralPath $settingsDir) { throw 'Istniejace ustawienia: nie nadpisuj ich' }
+New-Item -ItemType Directory -Path $settingsDir | Out-Null
+$template = Get-Content -LiteralPath (Join-Path $project 'task.v2.json') -Raw | ConvertFrom-Json
+$settings = [ordered]@{
+    schemaVersion = 2
+    taskFilePath = $null
+    taskMode = 'IMPLEMENTATION'
+    reviewNotesPath = 'review.md'
+    aiConsent = $false
+    contextPatterns = @()
+    runProfiles = @($template.runProfiles)
+}
 $utf8 = New-Object Text.UTF8Encoding($false)
-[IO.File]::WriteAllText((Join-Path $workspace 'challenge.md'), '# Zadanie: napisz funkcję sum(a, b), zwracającą sumę dwóch liczb.', $utf8)
-[IO.File]::WriteAllText((Join-Path $workspace 'solution.js'), "function sum(a, b) {`n  // Tu wpisz swoje rozwiązanie.`n}`n", $utf8)
-$env:PAIRCOACH_WORKSPACE_DIR = $workspace
-$env:PAIRCOACH_DATA_DIR = $data
+[IO.File]::WriteAllText((Join-Path $settingsDir 'settings.json'), ($settings | ConvertTo-Json -Depth 20), $utf8)
+# Usun tylko niezamierzone nadpisania tej sesji; nie ustawiaj alternatywnego dataDir.
+Remove-Item Env:PAIRCOACH_RUNTIME_PROFILE -ErrorAction SilentlyContinue
+Remove-Item Env:PAIRCOACH_WORKSPACE_DIR -ErrorAction SilentlyContinue
+Remove-Item Env:PAIRCOACH_DATA_DIR -ErrorAction SilentlyContinue
+$executeOut = Join-Path $base 'prepared'
+$prepareLog = Join-Path $base 'prepare.log'
+npm.cmd run runtime:prepare -- --project $project --profile $profile --output $executeOut --prepare-timeout-ms 3600000 --execute 2> $prepareLog
+if ($LASTEXITCODE -ne 0) { throw 'Prepare nieukonczone: zachowaj output i odczytaj prepare.log' }
+$runtimeConfig = (Resolve-Path -LiteralPath (Join-Path $executeOut 'runtime-config.json')).Path
+$preparedRoot = (Resolve-Path -LiteralPath (Join-Path (Join-Path $executeOut 'jobs') $profile)).Path
 $env:PAIRCOACH_COACH_PROVIDER = 'codex'
 $env:PAIRCOACH_CODEX_EXE = $codex
 $env:NODE_ENV = 'development'
-# Tylko ta sesja PowerShell; nie zatrzymuj uslug na 8080/8081.
-$env:PAIRCOACH_HTTP_PORT = '18080'
-if (Get-NetTCPConnection -State Listen -LocalPort 18080 -ErrorAction SilentlyContinue) { throw 'Port 18080 zajety: nie zatrzymuj obcego procesu' }
-npm.cmd start
+$env:PAIRCOACH_HTTP_PORT = '18120'
+if (Get-NetTCPConnection -State Listen -LocalPort 18120 -ErrorAction SilentlyContinue) { throw 'Port 18120 zajety: nie zatrzymuj obcego procesu' }
+npm.cmd start -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot
 ```
 
+Prepare korzysta z publicznego klienta Docker; na Windows wymagany jest lokalny
+`npipe:////./pipe/docker_engine` i dostęp konta do Linux engine/bind mountów.
+Nie przełączaj produktu przez `DOCKER_HOST`, TCP/proxy ani hostowy JDK/Maven.
+Postęp jest w `$prepareLog`; w drugim oknie użyj `Get-Content -LiteralPath`
+z pełną ścieżką tego logu i opcją `-Wait`.
+Budżet3600000ms dotyczy prepare, nie Run. Sukces
+`PREPARED_CONFIG_GENERATED_NOT_ACCEPTANCE` nie oznacza odbioru ani gotowości obu
+trybów. Przy błędzie/przerwaniu zachowaj output/log; najpierw uzgodnij wynik,
+nie ponawiaj w tym samym katalogu i nie dopisuj receiptów/pinów.
+
+Wygenerowany config wybiera RuntimeProfile `java-maven-21`, prywatny workspace,
+katalog/piny i `execution: { "backend": "docker", "pullPolicy": "never" }`.
+`--prepared-runtime` wskazuje **jobs/<profile>**, nie cały output. Nie zmieniaj
+POM dla nowszego JDK: target release projektu i JDK kontenera to różne rzeczy.
+Inne profile, budżety i szczegóły prepare: [przewodnik §1–4](windows-polyglot.md).
+
 Pozostaw okno otwarte. Otwórz dokładny URL wypisany przez serwer
-(tu **http://127.0.0.1:18080/**) w jednej karcie Edge. Bez `PAIRCOACH_HTTP_PORT`
+(tu **http://127.0.0.1:18120/**) w jednej karcie Edge. Bez `PAIRCOACH_HTTP_PORT`
 domyślny port nadal wynosi8080. Nie ma flagi `--port`; dozwolone wartości
 i odmowy opisuje [przewodnik §4](windows-polyglot.md#4-start-i-zmiana-profilu).
 To normalny LIVE, bez `?mock=1`, DevSimulatorBar i bez DevTools. UI pochodzi
@@ -132,18 +177,19 @@ W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-s
 
 ## 3. Start → zgoda AI → edytuj/czat
 
-1. Zobacz `challenge.md` w zakładce zadania i otwórz `solution.js` w drzewie.
+1. Otwórz `src/main/java/demo/StrategyDemo.java` w drzewie prywatnego projektu z §2.
    Poczekaj na LIVE i prawo pisania; szary/offline nie jest gotowością.
 2. **Ustawienia Projektu i Trenera AI → Zgoda na asystę Trenera AI → Zapisz
    Ustawienia**. To zgoda na wysłanie do dostawcy dozwolonego kontekstu zadania
    i wiadomości. Nie używaj sekretów ani prywatnego kodu w próbie. Domyślnie
    zgoda jest wyłączona; bez niej trener nie wysyła kontekstu.
 3. Naciśnij przycisk z tytułem **Start sesji** (trójkąt przy zegarze).
-   Wpisz `return a + b;` w funkcji; poczekaj na zapis/ACK. Sprawdź też plik
-   `solution.js` w folderze zadania — sam widok edytora nie dowodzi zapisu.
-4. Otwórz **Czat**, napisz: „Jak nazywa się funkcja w aktualnym pliku i co ma
-   zwracać według zadania? Odpowiedz krótko, bez zmieniania kodu.” Wyślij.
-   Oczekuj rzeczywistej odpowiedzi o **sum**, jej kodzie i zadaniu, nie samego
+   W przykładzie Java zmień `(a, b) -> a - b` na `(a, b) -> a + b`; poczekaj
+   na zapis/ACK. Sprawdź też ten plik w prywatnym folderze zadania — sam widok
+   edytora nie dowodzi zapisu. Przed poprawką test z przykładu celowo nie przechodzi.
+4. Otwórz **Czat**, napisz: „Co oblicza calculate(2, 3) w aktualnym pliku?
+   Odpowiedz krótko, bez zmieniania kodu.” Wyślij.
+   Oczekuj rzeczywistej odpowiedzi o **calculate** i bieżącym kodzie, nie samego
    READY, zalogowania CLI, lokalnego fallbacku ani statycznego potwierdzenia.
    Jeśli AI zwróci błąd, zachowaj komunikat/status i zgłoś go bez sekretów.
 5. **Przerwij trenerowi (2× Esc)** oddaje turę Tobie; nie cofa już zapisanych
@@ -155,10 +201,23 @@ Provider Codex jest wybierany przy starcie serwera; Gemini pozostaje alternatyw�
 w kodzie, nie wymaga go ta ścieżka. Wybór Gemini, klucz i jego realny wynik są
 osobnym scenariuszem. Nie ustawiaj sekretów przez `VITE_*`, nie dodawaj `.env`
 do paczki ani nie loguj całego środowiska. Surowe logi Run nie są kontekstem AI.
-Ustawienia **Profile uruchamiania** zatwierdzają lokalny kod z prawami Twojego
-konta, nie sandbox — do pierwszego kodowania/czatu nie są potrzebne.
-Snapshot/restore, Run/Test i raport opisano poniżej. Docs/autocomplete
-pozostają NOT_INSTALLED. Nie twierdzimy, że opcjonalne narzędzia językowe są zainstalowane.
+Run/Test wykonuje kod zadania w Dockerze na izolowanym wejściu potwierdzonego
+zapisu, nie jako hostowe polecenie. Nie wymaga to uruchamiania ciężkiego LSP.
+Lokalne możliwości edytora są niezależne od gotowości Docker:
+
+- Java/Python: kolorowanie Monaco i Ctrl+Space — słowa **bieżącego bufora** po
+  prefiksie, bez czekania na ACK. Bez metod po kropce, analizy innych plików,
+  auto-importów czy obietnicy pełnego IDE. Diagnostyka podczas pisania jest
+  **N/A**, również przy `languageFeatures.diagnostics: true`; błędy są po Run/Test.
+- JS/TS: lokalny worker completion i diagnostyki; rzeczywisty `tsc` uruchamia
+  się w kontenerze dopiero przy Run/Test. Błąd workera nie daje ON i nie blokuje
+  ręcznego pisania.
+- Docs mają stan **N/A**; nie wymagają instalowania LSP dla żadnego z tych profili.
+- `languageFeatures.completion: false` wyłącza podpowiedzi, `diagnostics: false`
+  lokalną diagnostykę JS/TS. `builtin` określa provider, nie automatyczne ON.
+- Akceptacja podpowiedzi podlega WriteGate, CODE_CHANGED, autosave/ACK i Undo/Redo.
+  CONTROL_PREPARE zamyka listę; Enter/Tab nie może wtedy zmienić bufora. Weto2×Esc
+  pozostaje aktywne. Ręczna edycja i zapis nie czekają na Docker ani wiadomości LANGUAGE.
 
 ## 4. Zatrzymaj, wróć do zadania, zabezpiecz pracę
 
@@ -167,13 +226,18 @@ naciśnij Ctrl+C i potwierdź zakończenie, jeśli pyta PowerShell. Nie zabijaj
 wszystkich node.exe. Przed aktualizacją zachowaj poprzedni ZIP/instalację oraz
 kopię **całego workspace i data** po zatrzymaniu. Nie aktualizuj w miejscu.
 
-Przy ponownym starcie otwórz PowerShell w istniejącym `$app`, ustaw ponownie
-PAIRCOACH_WORKSPACE_DIR, PAIRCOACH_DATA_DIR, PAIRCOACH_COACH_PROVIDER=codex,
-PAIRCOACH_CODEX_EXE, NODE_ENV i lokalny PAIRCOACH_HTTP_PORT=18080 tak jak
-powyżej, potem `npm.cmd start`. Po zakończeniu usuń nadpisanie tylko z tej sesji:
+Przy ponownym starcie otwórz PowerShell w **tej samej** zweryfikowanej instalacji
+`$app`. Odtwórz `$runtimeConfig` i `$preparedRoot` jako pełne istniejące ścieżki
+z §2 oraz własny `$codex`; usuń niezamierzone nadpisania workspace/profilu/dataDir.
+Ustaw ponownie PAIRCOACH_COACH_PROVIDER=codex, PAIRCOACH_CODEX_EXE, NODE_ENV=development
+i PAIRCOACH_HTTP_PORT=18120 jak wyżej, sprawdź wolny port, a następnie wykonaj
+`npm.cmd start -- --runtime-config $runtimeConfig --prepared-runtime $preparedRoot`.
+Dane są w `<projekt>/.paircoach`; zachowaj też wygenerowany config, cache/receipty
+i `.paircoach-runtime` obok config. Nie kopiuj ich między instalacjami/projektami.
+**Nie wykonuj ponownie tworzenia plików/settings ani prepare tylko dla restartu.**
+Po restarcie sprawdź zgodę AI; nie zakładaj trwałości sesji/timera lub ustawień.
+Po zakończeniu usuń tylko lokalne nadpisanie:
 `Remove-Item Env:PAIRCOACH_HTTP_PORT -ErrorAction SilentlyContinue`.
-**Nie wykonuj ponownie tworzenia plików zadania**. Po restarcie sprawdź zgodę AI
-w ustawieniach; nie zakładaj trwałości sesji/timera lub ustawień.
 
 Jeżeli nowa wersja zawiedzie, zatrzymaj tylko własny proces, zachowaj nowe dane
 i drafty, wróć do starej instalacji z jej odpowiednią kopią danych. Nie nadpisuj
@@ -187,40 +251,71 @@ Dokumentacja OpenAI: [logowanie](https://developers.openai.com/codex/auth),
 [modele](https://learn.chatgpt.com/docs/models).
 Procedura odbioru odrębnej instalacji MVP2 z ZIP: `windows-zip-smoke.md`.
 
-## 5. Zatwierdź RunProfile w GUI → Run Main / Run Tests / Stop
+## 5. Docker RuntimeProfile + TaskRunConfig → Run Main / Run Tests / Stop
 
-W **Ustawienia Projektu i Trenera AI** rozwiń **Konfiguracja Run/Test i kontekstu AI**.
-Pole **Profile uruchamiania (JSON, [] = brak)** przyjmuje najwyżej dwa profile,
-po jednym RUN_MAIN i RUN_TESTS. Wpisanie nie wystarcza: wybierz **Zapisz Ustawienia**
-i poczekaj na potwierdzenie/zamknięcie formularza. Błąd pozostawia formularz otwarty.
-Nowy folder nie dziedziczy zatwierdzenia poleceń z poprzedniego zadania.
+RuntimeProfile wybiera toolchain/obraz (tu `java-maven-21` w config z prepare).
+TaskRunConfig w `runProfiles[].task` określa klasę/skrypt, katalog i wybór testów.
+Stare profile z `executable`, hostowym Node, `args` i `testReportGlob` są dla
+Lightweight **wycofane** — nie wklejaj ich ani nie uruchamiaj hostowego fallbacku.
 
-Przykład dla utworzonego wyżej solution.js (dostosuj ścieżkę EXE do swojego Node):
+Nowa kopia z §2 ma pełne SettingsV2 z oryginalnego template. W istniejącym projekcie
+wybierz **Ustawienia Projektu i Trenera AI → Ustawienia wykonania V2** (także
+przycisk **Profil i ustawienia wykonania** w nagłówku). Nie szukaj dawnego pola
+JSON profili: w LIVE formularz V2 ma oddzielne sekcje **Program** i **Testy**.
+Dla Java z §2 włącz oba tryby; w każdej sekcji ustaw:
+
+| Pole formularza | Wartość |
+|---|---|
+| Run timeout (ms) | `120000` |
+| Task directory | `.` |
+| Entry | `JAVA_MAIN` |
+| Main class | `demo.StrategyDemo` |
+| Test sources | puste |
+| Test names | `demo.StrategyDemoTest` |
+
+Odpowiada to poniższemu `runProfiles` z `examples/java-pattern/task.v2.json`
+(nie całemu settings ani tekstowi do wklejenia w pole GUI):
 
 ```json
-[{"kind":"RUN_MAIN","executable":"C:/Program Files/nodejs/node.exe","args":["solution.js"],"cwd":".","timeoutMs":10000,"testReportFormat":"NONE","testReportGlob":null}]
+[{"kind":"RUN_MAIN","timeoutMs":120000,"task":{"workingDirectory":".","entry":{"kind":"JAVA_MAIN","className":"demo.StrategyDemo"},"tests":{"paths":[],"names":["demo.StrategyDemoTest"]}}},{"kind":"RUN_TESTS","timeoutMs":120000,"task":{"workingDirectory":".","entry":{"kind":"JAVA_MAIN","className":"demo.StrategyDemo"},"tests":{"paths":[],"names":["demo.StrategyDemoTest"]}}}]
 ```
 
-To zwykłe uruchomienie pliku funkcji, może zakończyć się bez wydruku.
-Nie jest dowodem poprawności sum. Dla własnych testów dopisz drugi profil
-RUN_TESTS z **rzeczywistym** skryptem testowym. Przykładowo dla Node:
-`executable` jak wyżej, `args:["tests.cjs"]`, `cwd:"."`, `timeoutMs:10000`,
-`testReportFormat:"JUNIT_XML"`, `testReportGlob:"target/run-{runId}.xml"`.
-Plik tests.cjs musi istnieć w folderze zadania, wykonywać asercje i zapisywać
-świeży JUnit z dodatnią liczbą testów. `PAIRCOACH_RUN_ID` jest przekazywany do
-procesu; `{runId}` rozwija się w args i globie. Nie tworzymy testów automatycznie
-po samym dodaniu profilu. Nie zatwierdzaj komendy z nieznanego źródła.
+Wybierz **Zapisz ustawienia** w formularzu V2 i czekaj na potwierdzenie/zamknięcie.
+Błąd pozostawia wpisane pola; nie wymuszaj Run przy konflikcie lub offline.
+Oba wyłączone tryby zapisują `runProfiles: []`, co wyłącza Run/Test. Przy starych
+ustawieniach wykonaj jawną migrację V2 zgodnie z komunikatem, zachowując kopię;
+nie zastępuj istniejących settings samym fragmentem `runProfiles`.
+Inny projekt wymaga własnej klasy/modułu i testów, nie zmiany kodu aplikacji.
+Dla Spring/JS/TS/Python użyj odpowiadającego `examples/<przykład>/task.v2.json`
+i właściwego publicznego prepare według [tabeli profili](windows-polyglot.md#1-platforma-i-profil).
+Zmiana profilu wymaga własnego Stop, nowego prepare/outputu i restartu z nowym
+config/jobs; nie przepisuj POM ani image pinów. Brak gotowości blokuje Run,
+nie jest powodem obchodzenia guardów lub zatrzymywania obcego procesu.
 
-Każdy argument to osobny element tablicy; nie wpisuj `&&`, przekierowań ani
-całego polecenia do executable. Bez cmd.exe/PowerShell. Program działa z prawami
-Twojego konta, **nie w sandboxie**. Profil uruchamia tylko lokalny kod, który znasz.
-Po zapisaniu wybierz **Run Main** albo **Run Tests**, obserwuj **Konsola**.
-Brak profilu/narzędzia to jawny brak konfiguracji/EXECUTABLE_NOT_FOUND.
-Exit0 bez świeżego JUnit daje UNKNOWN; raport z 0 testów daje NO_TESTS, nie PASSED.
-PASSED dotyczy tylko wykazanych testów tego Run. Edycja w trakcie uruchomienia
-może oznaczyć wynik jako dotyczący starszego workspace (workspaceChangedDuringRun).
-**Stop** kończy własny Run; weto trenera i Ctrl+C serwera to inne operacje.
-Nie zabijaj globalnie node.exe. Końcowy odbiór drzewa procesów wymaga native Windows.
+W GUI czekaj na świeżą gotowość właściwego trybu, potem wybierz **Run Main** albo
+**Run Tests** i obserwuj **Konsola**. Dla Java celowy błąd `a - b` daje FAILED;
+po poprawce `a + b` i ACK oczekuj nowego JUnit z dodatnią liczbą testów i PASSED,
+a Main wypisuje `5`. To oczekiwany przebieg, nie deklaracja wykonanego odbioru.
+Exit0 bez świeżego JUnit daje UNKNOWN; raport z0testów daje NO_TESTS, nie PASSED.
+Wynik jest przypisany do runId i wersji wejścia; edycja w trakcie może oznaczyć
+workspaceChangedDuringRun. Run używa przypiętego obrazu/cache bez pobierania;
+błędne środowisko lub brak obrazu nie przełącza wykonania na hosta.
+
+Spring21 z §2: użyj jego template (Entry `SPRING_BOOT`, Service port `8080`,
+Health path `/sum`, Test names `demo.CounterApplicationTest`, Test sources puste,
+Run timeout900000ms w obu trybach). Otwórz `src/main/java/demo/CounterApplication.java`:
+Tests na celowym `2 - 3` → FAILED, zmień tylko na `2 + 3` → ACK → nowe Tests
+PASSED z testCount>0. Przed Main wybierz **Środowisko → Środowisko wykonania →
+Przygotuj środowisko** i czekaj na potwierdzenie własnej sieci HTTP/NAT oraz świeżą gotowość.
+To inne działanie niż publiczny prepare obrazu; bez ręcznego `docker network create`.
+Main pozostaje RUNNING po HTTP200 `/sum` z wartością5 pod adresem pokazanym w GUI.
+**Stop** ma zatrzymać właściwy kontener i zamknąć endpoint, nie tylko zmienić UI.
+Wynik nieznany wymaga uzgodnienia tej samej operacji: **Dokończ przygotowanie**
+dla sieci, **Sprawdź wynik operacji** dla Run/zapisu; nie czyść storage ani receiptów.
+Weto trenera i Ctrl+C serwera nie zastępują potwierdzonego Stop Run.
+Budżety i dokładne zachowanie Spring/nieznanego Stop: [przewodnik §3–5](windows-polyglot.md).
+Nie zabijaj globalnie node.exe ani kontenerów. Native Windows, rzeczywisty endpoint,
+Stop i świeży ZIP nadal wymagają osobnych dowodów na finalnym SHA.
 
 ## 6. Kopie odzyskiwania → Przywróć → jawne Tak/Nie
 
@@ -278,9 +373,10 @@ Dostępność modelu zależy od konta; samo logowanie nie jest odpowiedzią AI.
 
 Zabezpiecz niezapisane drafty. Nie uruchamiaj dwóch serwerów na tych samych danych.
 Po potwierdzeniu, że poprzedni proces się zakończył, zachowaj kopię **całego**
-workspace i `$data` do nowych nazw. Użyj tej samej ścieżki workspace/data,
-instalacji, konta i konfiguracji z §2/4; nie twórz ponownie plików zadania.
-Dane kopii są w `$data` w podkatalogu zależnym od pełnej ścieżki workspace.
+prywatnego projektu z `.paircoach` oraz wygenerowanego prepare/config i stanu
+`.paircoach-runtime` do nowych nazw. Użyj tej samej ścieżki projektu, instalacji,
+konta i konfiguracji z §2/4; nie twórz ponownie plików ani ustawień.
+Dane kopii są w magazynie tej instalacji, związanym z pełną ścieżką projektu.
 Przeniesienie/zmiana nazwy workspace nie jest równoważne wznowieniu tego samego stanu.
 
 Startup odczytuje dziennik przerwanego restore i próbuje bezpiecznego recovery
@@ -290,8 +386,8 @@ starej sesji lub stanu Run po każdym rodzaju awarii. Nie ma obietnicy pełnej
 transakcyjności po utracie zasilania ani naprawiania obcych zmian kosztem ich utraty.
 
 Jeśli startup odmawia/RECOVERY_REQUIRED utrzymuje się, zachowaj publiczne pliki,
-cały `$data` i draft. Nie usuwaj journal, HMAC/sekretu magazynu ani prywatnych
-slotów i nie kopiuj snapshotów w miejsce bieżącej pracy. Zgłoś komunikat oraz
+cały prywatny projekt z `.paircoach`, stan runtime i draft. Nie usuwaj journal,
+HMAC/sekretu magazynu ani prywatnych slotów i nie kopiuj snapshotów w miejsce bieżącej pracy. Zgłoś komunikat oraz
 SHA z manifestu do K; ręczne rozstrzygnięcie wymaga odczytu obu materiałów i kopii
 do **nowych nazw**, nie nadpisania. Nie powtarzaj awarii na jedynym egzemplarzu zadania.
 

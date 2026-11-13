@@ -69,6 +69,14 @@ try {
   $Tests = @(Get-ChildItem -LiteralPath 'tests/execution' -Filter '*.test.ts' -File | Sort-Object Name | ForEach-Object { $_.FullName })
   if ($Tests.Count -eq 0) { throw 'No execution tests; cannot claim Windows run/stop evidence.' }
   Invoke-NodeCheck 'execution' (@('--import','tsx','--test') + $Tests)
+  # Required native lease regression; source preflight also requires its child witness.
+  $LeaseTests = @('tests/journal-lease-native/lease.test.ts')
+  $Lease = @($LeaseTests | ForEach-Object {
+    $File = Join-Path $Repo $_
+    if (-not (Test-Path -LiteralPath $File -PathType Leaf)) { throw 'Missing required native lease test; cannot claim Windows PASS.' }
+    $File
+  })
+  Invoke-NodeCheck 'journal-lease-native' (@('--import','tsx','--test') + $Lease)
   # Mandatory existing crash/restart suite; its child/helpers are required preflight inputs.
   $RecoveryTests = @('tests/snapshots/snapshot-crash.test.ts')
   $Recovery = @($RecoveryTests | ForEach-Object {

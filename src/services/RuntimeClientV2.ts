@@ -96,7 +96,7 @@ export class RuntimeClientV2 {
     this.revision++;
     const pending = this.pendingRun;
     if (pending && pending.operation === this.operation) {
-      const own = equal(value, pending.project) && equal(a, pending.authority) && run !== null &&
+      const own = this.matchesPendingRunProject(value, pending) && equal(a, pending.authority) && run !== null &&
         this.matchesPendingRun(run as RunV2, pending);
       // A later matching event cannot erase an intervening unrelated observation.
       pending.valid &&= own;
@@ -123,11 +123,24 @@ export class RuntimeClientV2 {
       run.profileId === pending.project.capabilities.execution.runtime.profileId &&
       run.workspaceVersionAtStart === pending.request.expectedWorkspaceVersion;
   }
+  private matchesPendingRunProject(value: ProjectV2 | null, pending: NonNullable<RuntimeClientV2['pendingRun']>): boolean {
+    if (!value) return false;
+    // Only TESTS canRun/problem are neutral presentation metadata for pending MAIN.
+    // Pending TESTS retains its original strict equality. Every other field (even
+    // future readiness fields) stays exact; this never settles or correlates a Run.
+    if (pending.request.mode !== 'RUN_MAIN') return equal(value, pending.project);
+    const tests = pending.project.capabilities.execution.modes.RUN_TESTS;
+    const observed: ProjectV2 = { ...value, capabilities: { ...value.capabilities,
+      execution: { ...value.capabilities.execution, modes: { ...value.capabilities.execution.modes,
+        RUN_TESTS: { ...value.capabilities.execution.modes.RUN_TESTS,
+          canRun: tests.canRun, problem: tests.problem } } } } };
+    return equal(observed, pending.project);
+  }
   private ownsPendingRunObservation(operation: AbortController): boolean {
     const pending = this.pendingRun;
     return !!pending && pending.operation === operation && pending.valid && pending.runId !== null &&
       pending.observedRevision === this.revision && equal(this.dependencies.current(), pending.authority) &&
-      equal(this.state.project, pending.project) && !!this.state.run && this.matchesPendingRun(this.state.run, pending);
+      this.matchesPendingRunProject(this.state.project, pending) && !!this.state.run && this.matchesPendingRun(this.state.run, pending);
   }
   private saveAuthorityCurrent(pending: NonNullable<RuntimeClientV2['pendingSave']>, current: RuntimeAuthorityV2): boolean {
     return Object.keys(pending.authority).every(key => key === 'workspaceVersion' ||

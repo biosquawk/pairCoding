@@ -167,6 +167,57 @@ export function inspectArchitecture(sources: Sources, roots = [...sources.keys()
       if (ts.isElementAccessExpression(node)) return strings(node.argumentExpression).some(s => selectors.test(s));
       return false;
     }
+    // REQ-LIGHT-001 / ARCHITECTURE §3 / HUMAN358b0048: this designated editor
+    // adapter owns local JS/TS worker configuration, NOT runtime/tool selection.
+    // Recognize only the existing direct getter ternary, with real parameter and
+    // namespace-import bindings. No resolve()/alias expansion or file-wide bypass.
+    function localWorkerPredicate(file: string, node: ts.Node): boolean {
+      if (file !== 'src/services/builtinLanguageRegistry.ts' || !ts.isBinaryExpression(node) ||
+        node.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken ||
+        !ts.isIdentifier(node.left) || !ts.isStringLiteral(node.right) || node.right.text !== 'javascript') return false;
+      const choice = node.parent;
+      if (!ts.isConditionalExpression(choice) || choice.condition !== node) return false;
+      const language = declaration(node.left);
+      if (!language || !ts.isParameterDeclaration(language) || language.initializer || language.dotDotDotToken || language.questionToken ||
+        !language.type || !ts.isUnionTypeNode(language.type) || language.type.types.length !== 2) return false;
+      const languages = language.type.types.map(t => ts.isLiteralTypeNode(t) && ts.isStringLiteral(t.literal) ? t.literal.text : '');
+      if (!languages.includes('javascript') || !languages.includes('typescript')) return false;
+      const factory = language.parent;
+      // Exactly the workerFor => async model => { const getter = ... } shape.
+      // A helper/alias or a second language predicate does not inherit permission.
+      if (!ts.isArrowFunction(factory) || factory.parameters.length !== 1 || !ts.isArrowFunction(factory.body) ||
+        !factory.body.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) || !ts.isBlock(factory.body.body)) return false;
+      const getter = choice.parent;
+      if (!ts.isVariableDeclaration(getter) || getter.initializer !== choice ||
+        !ts.isVariableDeclarationList(getter.parent) || !(getter.parent.flags & ts.NodeFlags.Const) ||
+        !ts.isVariableStatement(getter.parent.parent) || getter.parent.parent.parent !== factory.body.body) return false;
+      const binding = factory.parent;
+      if (!ts.isVariableDeclaration(binding) || binding.initializer !== factory || !ts.isIdentifier(binding.name) || binding.name.text !== 'workerFor' ||
+        !ts.isVariableDeclarationList(binding.parent) || !(binding.parent.flags & ts.NodeFlags.Const) ||
+        !ts.isVariableStatement(binding.parent.parent) || !ts.isBlock(binding.parent.parent.parent)) return false;
+      const registry = binding.parent.parent.parent.parent;
+      if (!ts.isFunctionDeclaration(registry) || registry.name?.text !== 'createBuiltinLanguageRegistry' ||
+        registry.parent !== sourceFile(file) || !registry.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)) return false;
+      const receiver = (branch: ts.Node, name: string): ts.Node | undefined => {
+        if (!ts.isPropertyAccessExpression(branch) || branch.questionDotToken || branch.name.text !== name) return undefined;
+        const group = branch.expression;
+        if (!ts.isPropertyAccessExpression(group) || group.questionDotToken || group.name.text !== 'typescript' || !ts.isIdentifier(group.expression)) return undefined;
+        return declaration(group.expression);
+      };
+      const monaco = receiver(choice.whenTrue, 'getJavaScriptWorker');
+      if (!monaco || monaco !== receiver(choice.whenFalse, 'getTypeScriptWorker') || !ts.isParameterDeclaration(monaco) ||
+        monaco.parent !== registry || monaco.initializer || monaco.dotDotDotToken || monaco.questionToken ||
+        !monaco.type || !ts.isTypeQueryNode(monaco.type) || !ts.isIdentifier(monaco.type.exprName)) return false;
+      // Follow the *raw* type namespace symbol, not an arbitrary value alias with
+      // the spelling monaco/typescript. External package internals are not executed.
+      const namespaces = checker.getSymbolAtLocation(monaco.type.exprName)?.declarations ?? [];
+      return namespaces.some(ref => {
+        const ns = ref.resolve();
+        if (!ns || !ts.isNamespaceImport(ns) || !ts.isImportClause(ns.parent) || ns.parent.phaseModifier !== ts.SyntaxKind.TypeKeyword) return false;
+        const imported = ns.parent.parent;
+        return ts.isImportDeclaration(imported) && ts.isStringLiteral(imported.moduleSpecifier) && imported.moduleSpecifier.text === 'monaco-editor';
+      });
+    }
     const edges = new Map<string, Edge[]>();
     function requireCall(node: ts.Node, seen = new Set<ts.Node>()): boolean {
       node = unwrap(node); if (seen.has(node)) return false; seen.add(node);
@@ -238,7 +289,7 @@ export function inspectArchitecture(sources: Sources, roots = [...sources.keys()
           return false;
         };
         const visit = (node: ts.Node) => {
-          if (!dataValidator && languagePredicate(node)) emit(file, node, 'language-condition', 'Language/tool-specific predicate at neutral boundary', chain);
+          if (!dataValidator && languagePredicate(node) && !localWorkerPredicate(file, node)) emit(file, node, 'language-condition', 'Language/tool-specific predicate at neutral boundary', chain);
           if (!dataValidator && ts.isCaseClause(node) && ts.isSwitchStatement(node.parent.parent) && selector(node.parent.parent.expression) && strings(node.expression).some(s => families.test(s))) emit(file, node.expression, 'language-condition', 'Language/tool-specific switch dispatch', chain);
           if (ts.isCallExpression(node) || ts.isNewExpression(node)) {
             const callee = resolve(node.expression);

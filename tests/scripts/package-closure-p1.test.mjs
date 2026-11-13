@@ -151,3 +151,30 @@ for (const name of recoveryFiles) test(`packager refuses missing mandatory recov
   const output = path.join(f.base, 'rejected'); pack(f, ['--output', output], 1);
   assert.equal(fs.existsSync(output), false);
 });
+
+const nativeLeaseFiles = ['tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'];
+test('Windows native lease regression is mandatory with exact suite and child closure (static wiring only)', () => {
+  const ps = fs.readFileSync(path.join(repo, 'scripts/windows-verify.ps1'), 'utf8');
+  const selected = /\$LeaseTests = @\(([^)]+)\)/.exec(ps);
+  assert.ok(selected, 'explicit mandatory native lease selection');
+  assert.deepEqual([...selected[1].matchAll(/'([^']+)'/g)].map(m => m[1]), [nativeLeaseFiles[0]]);
+  assert.match(ps, /if \(-not \(Test-Path -LiteralPath \$File -PathType Leaf\)\) \{ throw 'Missing required native lease test; cannot claim Windows PASS\.'/);
+  assert.match(ps, /Invoke-NodeCheck 'journal-lease-native' \(@\('--import','tsx','--test'\) \+ \$Lease\)/);
+  for (const name of nativeLeaseFiles) {
+    assert.ok(fs.statSync(path.join(repo, name)).isFile(), name);
+    assert.ok(requiredFiles.includes(name), `mandatory verifier input: ${name}`);
+    assert.ok(allowedSource(name), `finite allowlist: ${name}`);
+  }
+  const suite = fs.readFileSync(path.join(repo, nativeLeaseFiles[0]), 'utf8');
+  assert.match(suite, /new URL\('\.\/lease-child\.ts'/);
+  // The original six checks stay required; this is an additive seventh check.
+  for (const name of ['node-version', 'npm-ci', 'tsc', 'build', 'execution', 'snapshot-recovery']) {
+    assert.ok(ps.includes(`Invoke-NodeCheck '${name}'`), name);
+  }
+});
+for (const name of nativeLeaseFiles) test(`packager refuses missing mandatory native lease input ${name}`, t => {
+  assert.ok(requiredFiles.includes(name), name);
+  const f = fixture(t); fs.unlinkSync(path.join(f.root, name)); f.revision = f.commit();
+  const output = path.join(f.base, 'rejected'); pack(f, ['--output', output], 1);
+  assert.equal(fs.existsSync(output), false);
+});

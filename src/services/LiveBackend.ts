@@ -590,7 +590,44 @@ export class LiveBackend {
     if (existing && existing.version > doc.version) return;
     this.installDocument(doc, external); this.publish();
   }
+  /** A broadcast of the same confirmed source is not a reconnect/cache replacement.
+   * Keep original save flights and local intent; only their own verified ACK may renew it.
+   * Any real scope/source/control drift still takes the full fail-closed snapshot path.
+   */
+  private neutralEditorSnapshot(bundle: BundleSnapshot): boolean {
+    const p=this.project,s=this.session,scope=this.currentLanguageScope(),d=bundle.activeDocument;
+    const prior=d&&this.documents.get(d.path);
+    return !!p&&!!s&&!!scope&&scope.provider==='builtin'&&this.synced&&!this.stopped&&this.ws?.readyState===1&&!this.helloSnapshot&&
+      !this.preparing&&!this.vetoPending&&!this.vetoCutoff&&!this.pendingSteps.size&&!this.savesHasConflict()&&
+      !this.state.fileConflict&&!this.proposalDecision&&!this.finishAttempt&&!this.finishStarting&&
+      p.projectId===bundle.project.projectId&&p.sessionId===bundle.project.sessionId&&p.rootPath===bundle.project.rootPath&&
+      p.workspaceVersion===bundle.project.workspaceVersion&&this.state.workspaceVersion===bundle.session.workspaceVersion&&
+      sameJSON(p.settings,bundle.project.settings)&&sameJSON(p.files,bundle.project.files)&&
+      'language' in p.capabilities&&'language' in bundle.project.capabilities&&
+      sameJSON(p.capabilities.language,bundle.project.capabilities.language)&&
+      'execution' in p.capabilities&&'execution' in bundle.project.capabilities&&
+      p.capabilities.execution.runtime.profileId===bundle.project.capabilities.execution.runtime.profileId&&
+      p.capabilities.execution.runtime.configurationGeneration===bundle.project.capabilities.execution.runtime.configurationGeneration&&
+      'languageBootstrap' in bundle&&sameJSON(bundle.languageBootstrap,{connectionGeneration:scope.connectionGeneration,shadowGeneration:scope.shadowGeneration,provider:scope.provider,features:scope.features})&&
+      s.projectId===bundle.session.projectId&&s.sessionId===bundle.session.sessionId&&
+      s.lifecycle===bundle.session.lifecycle&&s.writeOwner===bundle.session.writeOwner&&s.controlEpoch===bundle.session.controlEpoch&&
+      s.interventionId===bundle.session.interventionId&&s.cooldownAfterVeto===bundle.session.cooldownAfterVeto&&
+      s.coachMode===bundle.session.coachMode&&s.activeFilePath===bundle.session.activeFilePath&&
+      !!d&&!!prior&&d.path===this.state.activePath&&d.version===prior.version&&d.content===prior.content&&
+      d.readOnly===prior.readOnly&&d.languageId===prior.languageId&&d.eol===prior.eol&&d.utf8Bom===prior.utf8Bom;
+  }
   private async snapshot(bundle: BundleSnapshot, seq: number) {
+    if(this.neutralEditorSnapshot(bundle)) {
+      // No document install/clear, generation change, save replay, or authority event.
+      // The public session/runtime/chat projections may still change independently.
+      this.lastSeq=seq;this.projectState(bundle.project);this.sessionState(bundle.session);
+      this.proposals=new Map(bundle.proposals.map(p=>[p.proposalId,p]));
+      this.state.activeProposal=bundle.proposals[0]?mapProposal(bundle.proposals[0]):null;
+      this.state.chatEntries=bundle.chat.map(c=>({id:c.messageId,sender:c.author,message:c.text,timestamp:Date.parse(c.createdAt)}));
+      this.state.activeRun=bundle.lastRun?mapRun(bundle.lastRun,null):null;
+      this.state.report=bundle.report?mapReport(bundle.report):null;
+      this.applyRuntimeProject(bundle.lastRun);this.publish();return;
+    }
     // Never let synchronous cache replacement erase an observed PREPARE/Veto/write
     // or operation guard before maintenance has recorded its invalidation.
     this.maintenanceStamp();
@@ -715,10 +752,14 @@ export class LiveBackend {
         break;
       case 'CONTROL_STATE': {
         if (!this.session || message.payload.controlEpoch < this.session.controlEpoch) break;
-        this.wiring.sourceChanged();
+        const changed=this.preparing!==null||this.vetoPending!==null||this.vetoCutoff!==null||this.pendingSteps.size>0||
+          this.session.controlEpoch!==message.payload.controlEpoch||this.session.writeOwner!==message.payload.writeOwner||
+          this.session.coachMode!==message.payload.coachMode||this.session.interventionId!==message.payload.interventionId||
+          this.session.cooldownAfterVeto!==message.payload.cooldownAfterVeto;
+        if(changed)this.wiring.sourceChanged();
         this.session = { ...this.session, ...message.payload };
         this.preparing = null;
-        this.wiring.authoritativeState(message.payload.controlEpoch);
+        if(changed)this.wiring.authoritativeState(message.payload.controlEpoch);
         this.state.controlEpoch = message.payload.controlEpoch; this.state.coachMode = message.payload.coachMode;
         // Student CONTROL_STATE acknowledges the cutoff, not permission to overwrite a draft.
         if (message.payload.writeOwner === 'STUDENT') { this.pendingSteps.clear(); this.saves.forEach((_, path) => this.schedule(path)); }

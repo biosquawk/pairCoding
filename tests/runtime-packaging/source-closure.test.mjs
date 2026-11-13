@@ -112,7 +112,8 @@ test('synthetic --output STORE ZIP independently matches all Git bytes/manifest 
   const inside=path.join(f.root,'forbidden');pack(f,['--output',inside],1);assert.equal(fs.existsSync(inside),false);
 });
 for(const name of ['paircoach.runtime.json','docs/windows-polyglot.md',...scripts,'runtimes/catalog.json','runtimes/images.lock.json','runtimes/production-inputs.lock.json','runtimes/pylsp-requirements.lock','docker/runtime.Dockerfile',...assets.filter(n=>n.endsWith('/task.v2.json')),
-  'tests/snapshots/snapshot-crash.test.ts','tests/snapshots/snapshot-child.ts','tests/snapshots/helpers.ts']) {
+  'tests/snapshots/snapshot-crash.test.ts','tests/snapshots/snapshot-child.ts','tests/snapshots/helpers.ts',
+  'tests/journal-lease-native/lease.test.ts','tests/journal-lease-native/lease-child.ts']) {
   test(`missing mandatory input fails closed: ${name}`,t=>{const f=fixture(t);fs.unlinkSync(path.join(f.root,name));f.revision=f.commit();const out=path.join(f.base,'absent');
     assert.match(pack(f,['--output',out],1).stderr,/Brak wymaganego pliku/);assert.equal(fs.existsSync(out),false);});
 }

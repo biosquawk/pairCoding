@@ -197,3 +197,16 @@ for (const name of ['tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/s
     const r = run(f, { trust, expected: 1 }); assert.match(r.stderr, /MISSING_REQUIRED_FILE/);
   });
 }
+
+for (const name of ['tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts']) {
+  test(`Git preflight rejects committed missing native lease input ${name}`, t => {
+    assert.ok(requiredFiles.includes(name), name);
+    const f = fixture(t); fs.unlinkSync(path.join(f.source, name)); f.revision = f.commit();
+    const r = run(f, { expected: 1 }); assert.match(r.stderr, /MISSING_REQUIRED_FILE/);
+  });
+  test(`trusted archive cannot omit mandatory native lease input ${name}`, t => {
+    assert.ok(requiredFiles.includes(name), name);
+    const f = fixture(t), trust = archiveMode(f, m => ({ ...m, files: m.files.filter(f => f.path !== name) }));
+    const r = run(f, { trust, expected: 1 }); assert.match(r.stderr, /MISSING_REQUIRED_FILE/);
+  });
+}

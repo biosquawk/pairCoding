@@ -4,6 +4,8 @@ import test, {type TestContext} from 'node:test';
 import assert from 'node:assert/strict';
 import {setImmediate} from 'node:timers/promises';
 import {once} from 'node:events';
+import {AsyncLocalStorage} from 'node:async_hooks';
+import {createHash} from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
@@ -98,24 +100,63 @@ test('ordinary editor HTTP remains bounded at5000ms (fakeclock)',async t=>{
 });
 
 for(const disconnect of [false,true])test(`UNIT actual HTTP abort after durable CONFIRMED_ID; WS disconnect=${disconnect}; supported exact-original read-first resolution, no second create`,{timeout:15000},async t=>{
-  const f=await httpNetworkFixture(t),app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project')).body,peer=await f.connect(port,p.sessionId);
+  const f=await httpNetworkFixture(t,true),app=f.app(),port=await app.listen(),p=(await f.http(port,'GET','/api/project')).body,peer=await f.connect(port,p.sessionId);
   const original={requestId:randomUUID(),clientId:'tab',sessionId:p.sessionId,expectedWorkspaceVersion:p.workspaceVersion,
     configurationGeneration:p.capabilities.execution.runtime.configurationGeneration,controlEpoch:app.session.state.controlEpoch};
-  const responseFile=path.join(f.state,'service-network','response-001.json'),receiptFile=path.join(f.state,'service-network','receipt.json');
-  const gate=deferred<void>(),entered=deferred<void>(),run=f.fake.run.bind(f.fake);let held=false;
+  const networkDirectory=path.join(f.state,'service-network-http-v1');
+  const responseFile=path.join(networkDirectory,'response-001.json'),receiptFile=path.join(networkDirectory,'receipt.json');
+  // Tag the genuine first incoming POST async chain, not the concurrent WS readiness chain.
+  const scope=new AsyncLocalStorage<string>();let posts=0;
+  const tag=(req:import('node:http').IncomingMessage)=>{
+    if(req.method==='POST'&&req.url==='/api/runtime/service-network/prepare'&&++posts===1)scope.enterWith(original.requestId);
+  };
+  app.server.prependListener('request',tag);
+  const gate=deferred<void>(),entered=deferred<void>(),left=deferred<void>(),run=f.fake.run.bind(f.fake);let held=false;
   f.fake.run=async(args)=>{
-    // Actual helper persists response before starting post-create observe(). Hold its first info.
-    if(!held&&args[0]==='info'&&fs.existsSync(responseFile)){held=true;entered.resolve();await gate.promise;}
+    if(!held&&scope.getStore()===original.requestId&&args.join(' ')==='info --format {{json .ID}}'&&fs.existsSync(responseFile)) {
+      // This is the original NAT producer's post-create observe, not a readiness probe.
+      held=true;
+      try {
+        const intentBytes=fs.readFileSync(path.join(networkDirectory,'intent-001.json')),intent=JSON.parse(intentBytes.toString());
+        const response=JSON.parse(fs.readFileSync(responseFile,'utf8'));
+        assert.equal(intent.requestId,original.requestId);assert.ok(intent.name.endsWith('-service-http-v1'));
+        assert.equal(response.intentSha256,createHash('sha256').update(intentBytes).digest('hex'));
+        assert.equal(response.outcome,'CONFIRMED_ID');assert.equal(response.networkId,f.getNetwork()!.Id);
+        assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);
+        t.diagnostic(JSON.stringify({event:'held-original-postcreate-observe',requestId:original.requestId,args,intent,response}));
+        entered.resolve();await gate.promise;
+        return await run(args);
+      } finally {left.resolve();}
+    }
     return run(args);
   };
-  t.after(()=>gate.resolve());const controller=new AbortController();
+  t.after(()=>{app.server.off('request',tag);f.fake.run=run;scope.disable();});
+  const controller=new AbortController();let settled=false,responseBytes!:Buffer;
   const pending=fetch(`http://127.0.0.1:${port}/api/runtime/service-network/prepare`,{method:'POST',signal:controller.signal,
     headers:{Authorization:`Bearer ${f.token}`,'Content-Type':'application/json'},body:JSON.stringify(original)});
-  const aborted=assert.rejects(pending,{name:'AbortError'});await entered.promise;
-  const responseBytes=fs.readFileSync(responseFile);assert.equal(JSON.parse(responseBytes.toString()).outcome,'CONFIRMED_ID');
-  assert.equal(fs.existsSync(receiptFile),false);controller.abort();await aborted;
-  if(disconnect){const closed=once(peer.ws,'close');peer.ws.close();await closed;await until(()=>app.session.state.controlEpoch!==original.controlEpoch);}
-  gate.resolve();
+  const completion=pending.then(async response=>{settled=true;return {status:response.status,body:await response.text()};},error=>{settled=true;return {error:String(error)};});
+  // Own the assertion immediately, including its failure lifetime, before waiting for the gate.
+  const abortCheck=assert.rejects(pending,{name:'AbortError'});
+  const ownedCheck=Promise.allSettled([abortCheck]);
+  try {
+    await Promise.race([entered.promise,completion.then(value=>{throw Error('Original POST settled before held operation: '+JSON.stringify(value));})]);
+    assert.equal(settled,false,'genuine original POST still pending BEFORE abort');
+    const durableDirectory=path.join(f.project,'.paircoach','runtime-network-maintenance');
+    const durableFiles=fs.readdirSync(durableDirectory).filter(n=>n.endsWith('.json'));assert.equal(durableFiles.length,1);
+    const durable=JSON.parse(fs.readFileSync(path.join(durableDirectory,durableFiles[0]),'utf8')).body;
+    assert.equal(durable.state,'PENDING');assert.equal(durable.result,null);assert.deepEqual(durable.request,original);
+    assert.equal(durable.context.purpose,'http-nat-v1');
+    t.diagnostic(JSON.stringify({event:'original-post-pending',requestId:original.requestId,settled,state:durable.state,purpose:durable.context.purpose}));
+    responseBytes=fs.readFileSync(responseFile);assert.equal(JSON.parse(responseBytes.toString()).outcome,'CONFIRMED_ID');
+    assert.equal(fs.existsSync(receiptFile),false);controller.abort();await abortCheck;
+    t.diagnostic(JSON.stringify({event:'real-fetch-aborted',requestId:original.requestId,disconnect,completion:await completion}));
+    if(disconnect){const closed=once(peer.ws,'close');peer.ws.close();await closed;await until(()=>app.session.state.controlEpoch!==original.controlEpoch);}
+  } finally {
+    controller.abort();gate.resolve();if(held)await left.promise;
+    const [check]=await ownedCheck;
+    // A failed rejection assertion is never swallowed, including on an earlier failure.
+    if(check.status==='rejected')throw check.reason;
+  }
   const directory=path.join(f.project,'.paircoach','runtime-network-maintenance');
   const records=()=>fs.readdirSync(directory).filter(n=>n.endsWith('.json'));
   await until(()=>records().length===1);const file=path.join(directory,records()[0]);
@@ -126,10 +167,17 @@ for(const disconnect of [false,true])test(`UNIT actual HTTP abort after durable 
     assert.equal(fs.existsSync(receiptFile),false,'revoked lease cannot mint receipt');assert.deepEqual(retained.body.request,original);
     await f.connect(port,p.sessionId);
   } else await until(()=>JSON.parse(fs.readFileSync(file,'utf8')).body.state==='PREPARED');
+  const beforeRecovery=f.networkCalls.length;
   const wire=JSON.stringify(original),recovered=await f.http(port,'POST','/api/runtime/service-network/prepare',JSON.parse(wire));
   assert.equal(recovered.status,200,JSON.stringify(recovered));assert.equal(recovered.body.networkId,f.getNetwork()!.Id);
   assert.equal(f.networkCalls.filter(a=>a[1]==='create').length,1);assert.deepEqual(fs.readFileSync(responseFile),responseBytes);
   const terminal=JSON.parse(fs.readFileSync(file,'utf8'));assert.equal(terminal.body.state,'PREPARED');assert.deepEqual(terminal.body.request,original);
   assert.equal(JSON.parse(fs.readFileSync(receiptFile,'utf8')).networkId,recovered.body.networkId);
   assert.ok(f.networkCalls.every(a=>['ls','inspect','create'].includes(a[1])),'no delete/connect/new network');
+  assert.equal(posts,2,'one original HTTP POST and one explicit exact-original recovery');
+  const recoveryCalls=f.networkCalls.slice(beforeRecovery);assert.equal(recoveryCalls[0][1],'ls');
+  assert.ok(recoveryCalls.every(a=>['ls','inspect'].includes(a[1])),'exact-original recovery is read-first, without create');
+  t.diagnostic(JSON.stringify({event:'reconciled',requestId:original.requestId,disconnect,creates:f.networkCalls.filter(a=>a[1]==='create').length,
+    purpose:terminal.body.context.purpose,originalRetained:true,recoveryCalls,responseUnchanged:fs.readFileSync(responseFile).equals(responseBytes)}));
+  t.after(()=>{assert.equal(app.server.listening,false);assert.equal(fs.existsSync(f.root),false);t.diagnostic(JSON.stringify({event:'cleanup',disconnect,rootRemoved:true,listening:false}));});
 });
