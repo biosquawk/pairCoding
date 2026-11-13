@@ -25,7 +25,10 @@ export async function liveNodeFixture(t:TestContext,files:Record<string,string>,
   const token=id(),clientId=id(),app=createPairCoachServer({port:0,rootPath:dirs.rootPath,token,enableExecution:true,enableCoach:false,...options,
     runtimeEnvironment:{},runtimeArguments:['--runtime-config',runtimeConfig,'--prepared-runtime',path.join(prepared,'jobs/javascript-node')]});
   const peers=new Set<{close():void}>();
-  t.after(async()=>{for(const p of peers)p.close();try{await app.close();}finally{
+  t.after(async()=>{for(const p of peers)p.close();
+    // An unconfirmed close must retain its Run ownership/journals for diagnosis.
+    // Cleanup starts only after the real owner confirms successful close.
+    await app.close();
     // Immutable Run inputs are deliberately read-only; only unlock this fixture after owner close.
     const unlock=(directory:string)=>{if(fs.statSync(directory).uid===process.getuid?.())fs.chmodSync(directory,0o700);for(const item of fs.readdirSync(directory,{withFileTypes:true}))if(item.isDirectory()&&!item.isSymbolicLink())unlock(path.join(directory,item.name));};
     unlock(dirs.base);
@@ -41,7 +44,7 @@ export async function liveNodeFixture(t:TestContext,files:Record<string,string>,
       const mounts=foreignRoots.flatMap((directory,n)=>['--mount',`type=bind,src=${directory},dst=/fixture${n}`]);
       await execute('docker',['run','--rm','--pull=never','--name','paircoach-test-cleanup-'+randomUUID(),'--user','10001:10001','--cap-drop=ALL','--security-opt=no-new-privileges','--network=none','--memory=128m','--cpus=1','--pids-limit=32','--log-opt','max-size=10m','--log-opt','max-file=1',...mounts,image.imageId,'node','-e',clean,...foreignRoots.map((_,n)=>'/fixture'+n)],{encoding:'utf8',timeout:10000,maxBuffer:1048576});
     }
-    await dirs.cleanup();}});
+    await dirs.cleanup();});
   const port=await app.listen(),baseURL=`http://127.0.0.1:${port}`,sessionId=app.session.state.sessionId;
   const peer=new Peer({port,baseURL,clientId,sessionId,token,peers} as any);await peer.connect();
   // Consume the actual measured readiness already requested by HELLO, rather than

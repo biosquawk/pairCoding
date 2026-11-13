@@ -14,6 +14,13 @@ test('LIGHT selection: exact remote-only directories and file/title pairs; mixed
   assert.ok(selection.nativeMjs.includes('tests/runtime-prepare-cli/public.test.mjs'));
   assert.ok(selection.tsx.includes('tests/runtime-prepare-cli/prepared-selector.test.mjs'));
   const groups=testArguments(selection),mixed=groups.find(g=>g.args.includes('tests/runtime-prepare-cli/public.test.mjs'));
+  const scheduled=groups.flatMap(g=>g.args.filter(arg=>arg.startsWith('tests/')));
+  assert.deepEqual(scheduled.sort(),[...selection.active].sort(),'all active files scheduled exactly once');
+  for(const file of ['tests/execution/runner.test.ts','tests/integration/g3-public.test.ts']) {
+    const group=groups.find(g=>g.args.includes(file));
+    assert.deepEqual(group.args.filter(arg=>arg.startsWith('tests/')),[file],'physical Docker file has an exclusive lane');
+    assert.equal(group.args.includes('--test-skip-pattern'),false);
+  }
   assert.equal(mixed.args.includes('--import'),false);
   const pattern=new RegExp(mixed.args[mixed.args.indexOf('--test-skip-pattern')+1]);
   assert.equal(pattern.test('actual default argv reads full V2/non-dot/current raw; deterministic with zero writes, network or children'),false);

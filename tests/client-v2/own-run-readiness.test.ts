@@ -55,4 +55,16 @@ for(const mode of ['RUN_MAIN','RUN_TESTS'] as const) {
     f.client.applyProject(f.p,f.accepted);assert.equal(f.client.snapshot().reconciliationRequired,true);
     assert.equal(await f.client.run(mode),false);assert.equal(f.calls,1);
   });
+  for (const code of ['PENDING', 'DAEMON_UNAVAILABLE', 'IMAGE_MISSING']) {
+    test(`${mode}: unrelated ${code} cannot be normalized or healed by a later matching snapshot`,async t=>{
+      const f=fixture(mode);t.after(()=>f.client.dispose());const pending=f.client.run(mode);
+      f.client.applyProject(f.p,f.accepted);
+      const foreign=structuredClone(f.changed);
+      foreign.capabilities.execution.modes.RUN_TESTS.problem={...problem,code};
+      assert.equal(f.client.applyProject(foreign,f.accepted),true);
+      f.client.applyProject(f.p,f.accepted);
+      f.resolve(f.accepted);assert.equal(await pending,false);
+      assert.equal(f.client.snapshot().reconciliationRequired,true);assert.equal(f.calls,1);
+    });
+  }
 }

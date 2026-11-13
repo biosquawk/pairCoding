@@ -33,8 +33,11 @@ export function testArguments(selection) {
   const groups=[];
   for(const [lane,files] of [['tsx',selection.tsx],['nativeMjs',selection.nativeMjs]]) {
     const cases=selection.supersededCases;
+    // Real-daemon lifecycle timing is measured without another test file competing
+    // for that engine. These remain active, unfiltered cases with unchanged deadlines.
+    const isolated=files.filter(file=>['tests/execution/runner.test.ts','tests/integration/g3-public.test.ts'].includes(file));
     const matched=files.filter(file=>cases.some(c=>c.file===file));
-    const ordinary=files.filter(file=>!matched.includes(file));
+    const ordinary=files.filter(file=>!matched.includes(file)&&!isolated.includes(file));
     // Bound simultaneous filesystem-heavy fixtures; keep the exact same active files/cases and deadlines.
     const flags=[...(lane==='tsx'?['--import','tsx']:[]),'--test','--test-concurrency=2'];
     let batch=[...flags],length=batch.join(' ').length;
@@ -43,6 +46,7 @@ export function testArguments(selection) {
       batch.push(file);length+=file.length+3;
     }
     if(batch.length>flags.length)groups.push({lane,args:batch});
+    for(const file of isolated)groups.push({lane,args:[...flags,file]});
     // File-bound, anchored literal titles: an ordinary case with the SAME title in
     // another file is still active. Mixed files are never blanket-excluded.
     for(const file of matched){

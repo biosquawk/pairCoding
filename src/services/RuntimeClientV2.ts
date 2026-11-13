@@ -130,6 +130,15 @@ export class RuntimeClientV2 {
     // Run and unchanged authority; this comparison never settles a dispatch.
     // MAIN readiness and every other field (including future fields) stay exact.
     const tests = pending.project.capabilities.execution.modes.RUN_TESTS;
+    const current = value.capabilities.execution.modes.RUN_TESTS;
+    if (!equal(current, tests)) {
+      // Normalize only the derived states emitted by our probe. An unrelated
+      // execution failure is a real intervening observation, even for this Run.
+      const derived = (mode: typeof tests) => mode.canRun ? mode.problem === null :
+        mode.problem?.retryable === true &&
+        ['PREPARE_REQUIRED', 'RUNTIME_READINESS_PENDING'].includes(mode.problem.code);
+      if (!derived(tests) || !derived(current)) return false;
+    }
     const observed: ProjectV2 = { ...value, capabilities: { ...value.capabilities,
       execution: { ...value.capabilities.execution, modes: { ...value.capabilities.execution.modes,
         RUN_TESTS: { ...value.capabilities.execution.modes.RUN_TESTS,
