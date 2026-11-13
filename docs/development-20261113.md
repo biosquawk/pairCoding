@@ -51,3 +51,59 @@ Wyłączono metadane IDE/VCS i artefakty (`.idea`, `.git`, `target`, `.gitignore
 - Starszy przygotowany obraz nadal wypisuje ostrzeżenie Jansi o noexec w /tmp; obserwowane Run/Main/Test kończą się zgodnie z wynikiem. W tym zakresie nie przebudowywano obrazów ani nie przedstawiano tego komunikatu jako naprawionego.
 
 Publikacja obejmuje osiem zleconych kroków na gałęzi stabilizacyjnej. Ostatni wynik Quality Guard pozostaje REJECTED (pomiar po kroku 3); późniejsze osłony mają własne testy celowane, nie nową pełną bramkę. Nie oznacza to pełnego PASS historycznego npm test, odbioru wszystkich języków/Windows ani całego Zadania 9. Thalamus i jego role nie zostały wznowione.
+
+## 9. Uzupełnienie: coverage i rzeczywiste MCP Quality Guard
+
+Kod integracji: `96a52adf0bda11fc57975bb09446cc6bc77b626d`, baza `8a1a03e`.
+Ten etap dodaje działający pomiar pokrycia i połączenie z narzędziem oceny kodu.
+Nie stanowi pełnego odbioru całego produktu lub historycznego Zadania 9.
+
+Dodano c8 12, mapowanie do TS/TSX, LCOV oraz jawną granicę kodu produkcyjnego.
+`npm run coverage` wykonuje opisany w README podzbiór, nie pełny `npm test`.
+Pomiar zachowuje także niewykonane źródła; nie obniżono progów i nie ukryto trudnych plików.
+Konfiguracja Quality Guard używa przenośnego `node`; PATH lokalnego serwera MCP
+ustawiono w konfiguracji Thalamusa, poza opublikowanym produktem. Zaktualizowano
+zależne kontrole pakowania i integralności nowych skryptów.
+
+Końcowy wynik lokalny na `96a52ad`:
+
+- 164/164 pliki w LCOV, w tym 130 całkowicie niepokrytych; wybrano 15 plików testów,
+  pozostałe 246 aktywnych plików testowych pozostają niewykonane w tym pomiarze.
+- Dwie grupy testów: 138/138 i 139/139 PASS; pomiar zakończony exit 0 w 62,14 s.
+- Pokrycie linii 14,29%, gałęzi 73,09%, funkcji 48,51% według tego pomiaru.
+  To nie jest miara pokrycia wszystkich scenariuszy aplikacji.
+- Niezależne testy poprawki cleanup: 8/8 PASS; 16/16 prób bez żywego potomka
+  w chwili powrotu; negatywny kontrtest poprawnie zwraca błąd z timedOut=true.
+- Typecheck i build ROOT: exit 0 na `23c6bf9`. Między nim a `96a52ad` zmieniły się
+  wyłącznie skrypt coverage MJS i jego test MJS; wejścia kompilacji TS/Vite są identyczne.
+- Środowisko: Ubuntu/WSL2, Node 22.22.2. Pełny suite oraz nowe kampanie Windows,
+  GUI i Docker nie były wykonywane dla tej zmiany narzędzi developerskich.
+
+Weryfikacja wykryła dwa rzeczywiste problemy nowego wrappera: powrót przed
+potwierdzeniem śmierci potomka po SIGKILL oraz brak odrzucenia Promise, gdy cleanup
+nie może się zakończyć. K poprawił je w swojej linii po zatrzymaniu sesji DEV;
+VERIFY niezależnie odtworzył błędy na poprzednich rewizjach i potwierdził poprawkę.
+Historyczne FAIL nie zostały zastąpione nowymi etykietami PASS. Ograniczenia Windows,
+procesów celowo opuszczających grupę i zadań systemowych niepodatnych na sygnały opisano w README.
+
+Rzeczywiste `audit_project(refresh_coverage=True, mode="sonar")`, `inspect_unit`
+i `claim_quality_gate` wykonano na `acdb024`. Audyt odczytał pomiar (`MEASURED`),
+ale nie potrafił przeanalizować trzech istniejących plików TypeScript:
+`RuntimeExecutionLayout.ts`, `PairCoachClient.ts` i `paircoach.ts`. TypeScript rozpoznaje
+ich składnię; nie poprawiano prawidłowego kodu wyłącznie pod ograniczenie parsera wtyczki.
+Werdykt narzędzia pozostał `REJECTED`, bez pieczęci zaliczenia; nie wykonano przez to
+końcowego baseline narzędzia. Raport odnotowuje także niski poziom pokrycia części źródeł.
+Nie przeniesiono tego audytu na późniejszy SHA: bramka `96a52ad` jest **nieoceniona**,
+a końcowa poprawka ma odrębne testy i aktualny lokalny pomiar. Nie ogłaszamy zielonej bramki.
+
+Pracę wykonał Thalamus: DEV, niezależny VERIFY, integrujący K/LEAD oraz JUDGE/GOVERNOR.
+ROOT przeczytał kod, raporty i końcowe oceny. Wszystkie role używały gpt-6.1-sol/high.
+Raporty i pełne logi zachowano w projekcie software_dev_2 w deliveries; duże odpowiedzi
+narzędzia nie są dołączane do publicznego repozytorium. Thalamus pozostaje uruchomiony.
+
+Osobno naprawiono środowisko Maven IntelliJ/WSL: cache użytkownika należał do root:root,
+co blokowało pobieranie JUnit i pluginów. Przywrócono darulec:darulec; ten sam Maven
+z IntelliJ wykonał `clean package dependency:build-classpath -DskipTests` z exit 0 na
+JDK 27 i release 11. Skompilowano też testy; nie uruchamiano ich ani nie rozwiązano ćwiczenia.
+Właściciel potwierdził działanie IDE. Publiczne PairCoding pozostawiono na 01-oddity,
+bez restartu sesji i bez modyfikacji rozwiązania użytkownika.
