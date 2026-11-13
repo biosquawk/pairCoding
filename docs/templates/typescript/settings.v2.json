@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 2,
+  "taskFilePath": "challenge.md",
+  "taskMode": "IMPLEMENTATION",
+  "reviewNotesPath": "review.md",
+  "aiConsent": false,
+  "contextPatterns": [
+    "src/**/*.java",
+    "*.py",
+    "*.js",
+    "*.ts",
+    "challenge.md"
+  ],
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SCRIPT",
+          "path": "main.ts"
+        },
+        "tests": {
+          "paths": [
+            "counter.test.ts"
+          ],
+          "names": []
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SCRIPT",
+          "path": "main.ts"
+        },
+        "tests": {
+          "paths": [
+            "counter.test.ts"
+          ],
+          "names": []
+        }
+      }
+    }
+  ]
+}

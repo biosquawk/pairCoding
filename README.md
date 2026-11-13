@@ -34,6 +34,8 @@ Przycisk **Otwórz folder…** nad drzewem plików pozwala wyklikać inne ćwicz
 
 Szczegółowe polecenia PowerShell, konfiguracja Codexa i przebieg pierwszego zadania: [instrukcja Windows](docs/windows-start.md).
 
+Gotowe wzorce nowych ćwiczeń Java, Spring Boot, JavaScript, TypeScript i Python: [szablony zadań](docs/templates/README.md).
+
 ## Konfiguracja modelu Codex
 
 Plik [paircoach.config.json](paircoach.config.json) w katalogu aplikacji:
