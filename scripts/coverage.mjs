@@ -9,7 +9,31 @@ import { boundedSelection, sourceInventory, assertLcovInventory } from './covera
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const report = value => console.log(JSON.stringify(value));
 
-// Only descendants of this invocation are targeted. No host-wide process discovery.
+// Inspect only membership of our owned group/PID; never signal unrelated processes.
+function ownedProcessRunning(pid, inheritGroup) {
+  if (process.platform === 'linux') {
+    // kill(..., 0) also sees zombies. They have terminated; PID 1 may reap later.
+    const entries = inheritGroup ? [String(pid)] : fs.readdirSync('/proc').filter(name => /^\d+$/.test(name));
+    return entries.some(entry => {
+      try {
+        const stat = fs.readFileSync(`/proc/${entry}/stat`, 'utf8');
+        const fields = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+        return (inheritGroup || Number(fields[2]) === pid) && !['Z', 'X'].includes(fields[0]);
+      } catch (error) { if (error.code === 'ENOENT' || error.code === 'ESRCH') return false; throw error; }
+    });
+  }
+  try { process.kill(inheritGroup ? pid : -pid, 0); return true; }
+  catch (error) { if (error.code === 'ESRCH') return false; throw error; }
+}
+
+async function waitOwnedTermination(pid, inheritGroup) {
+  const deadline = performance.now() + 2000;
+  while (ownedProcessRunning(pid, inheritGroup)) {
+    if (performance.now() >= deadline) throw Error('Owned process cleanup did not complete within 2000 ms');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+}
+
 async function killOwnedTree(child, inheritGroup) {
   if (!child.pid) return;
   if (process.platform !== 'win32') {
@@ -17,6 +41,7 @@ async function killOwnedTree(child, inheritGroup) {
     // group on every exit. A lane timeout first terminates its direct runner.
     try { if (inheritGroup) child.kill('SIGKILL'); else process.kill(-child.pid, 'SIGKILL'); }
     catch (error) { if (error.code !== 'ESRCH') throw error; }
+    await waitOwnedTermination(child.pid, inheritGroup);
     return;
   }
   await new Promise(resolve => {
@@ -34,7 +59,7 @@ export async function runBounded(command, args, { timeout, cwd = root, env = pro
   let timedOut = false, cleanup;
   const clean = () => cleanup ??= killOwnedTree(child, inheritGroup);
   const result = await new Promise(resolve => {
-    const timer = setTimeout(() => { timedOut = true; void clean(); }, timeout);
+    const timer = setTimeout(() => { timedOut = true; void clean().catch(() => {}); }, timeout);
     const done = result => { clearTimeout(timer); resolve(result); };
     child.once('error', error => done({ error: error.message }));
     child.once('exit', (status, signal) => done({ status, signal }));

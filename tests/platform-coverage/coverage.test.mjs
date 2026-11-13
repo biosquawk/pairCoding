@@ -145,3 +145,55 @@ test('outer coverage timeout also kills a nested lane and its descendants in the
     } catch (error) { if (error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error; }
   }
 });
+
+test('cleanup waits for termination after signalling and rejects an unconfirmed cleanup', { skip: process.platform === 'win32' }, async t => {
+  const { runBounded } = await import('../../scripts/coverage.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-cleanup-confirmation-'));
+  const kill = process.kill.bind(process);
+  const groups = new Set(), pending = new Set();
+  t.after(() => {
+    t.mock.restoreAll();
+    for (const timer of pending) clearTimeout(timer);
+    for (const group of groups) {
+      try { kill(group, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  write(dir, 'orphan.mjs', `import fs from 'node:fs'; import {spawn} from 'node:child_process';
+    const child = spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('leaf.pid', String(process.pid)); setInterval(()=>{},100)"], {stdio:'ignore'});
+    child.unref();
+    const timer = setInterval(() => { if (fs.existsSync('leaf.pid')) { clearInterval(timer); process.exit(0); } }, 5);`);
+  let suppress = false, signals = 0;
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid < 0 && signal === 'SIGKILL') {
+      groups.add(pid); signals++;
+      // Deterministically model asynchronous signal completion, not a test-side
+      // grace period. The immediate postcondition below must still hold.
+      if (!suppress) {
+        const timer = setTimeout(() => { pending.delete(timer); kill(pid, signal); }, 50);
+        pending.add(timer);
+      }
+      return true;
+    }
+    return kill(pid, signal);
+  });
+  await runBounded(process.execPath, ['orphan.mjs'], { cwd: dir, timeout: 3000, stdio: 'ignore' });
+  assert.equal(signals, 1);
+  const pid = Number(fs.readFileSync(path.join(dir, 'leaf.pid')));
+  let running = true;
+  try {
+    kill(pid, 0);
+    if (process.platform === 'linux') {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      running = !['Z', 'X'].includes(stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0]);
+    }
+  } catch (error) { if (error.code === 'ESRCH' || error.code === 'ENOENT') running = false; else throw error; }
+  assert.equal(running, false, 'no grace period after runBounded resolves');
+
+  fs.rmSync(path.join(dir, 'leaf.pid'));
+  suppress = true;
+  const start = Date.now();
+  await assert.rejects(runBounded(process.execPath, ['orphan.mjs'], { cwd: dir, timeout: 3000, stdio: 'ignore' }), /cleanup did not complete/);
+  assert.ok(Date.now() - start < 4000, 'unconfirmed cleanup must fail within its bounded budget');
+  assert.equal(signals, 2);
+});

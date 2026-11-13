@@ -99,7 +99,11 @@ Expected output: `coverage/lcov.info`, `coverage-summary.json`, `coverage-final.
 NOT_RUN and SUPERSEDED), and `measurement.json`. A failed test, timeout or missing
 source is an error, not a PASS. The asynchronous runner sets a 180 s test-phase
 deadline and a 240 s c8 deadline. On timeout it kills the owned process group
-on POSIX (including SIGTERM-resistant descendants); Windows uses taskkill /T /F
+on POSIX (including SIGTERM-resistant descendants). Before returning, POSIX cleanup
+confirms termination within an additional 2 s budget or fails; Linux zombies count
+as terminated, while other POSIX systems conservatively require PID/group absence.
+Nested lanes confirm only their direct runner; the outer owner confirms the group.
+Windows uses taskkill /T /F
 with a 2 s cleanup budget (best effort, not independently validated here). Detached processes that deliberately escape the group
 and OS-level uninterruptible tasks are outside this guarantee. No further test
 lane starts after a timeout. This starts no application server or Docker campaign. Reports and scratch
