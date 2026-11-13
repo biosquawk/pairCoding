@@ -1,0 +1,52 @@
+{
+  "format": "ai-unslop-1",
+  "document": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/characters/halloween-theme/skills/design-patterns/SKILL.md",
+  "domain": "instrukcje nauczania programowania i kontraktu narzędzi",
+  "audience": "trener Codex wspierający polskojęzycznego ucznia",
+  "chapter_level": 6,
+  "structure": {
+    "headings": [],
+    "code": [],
+    "tables": [],
+    "links": [],
+    "inline_code": [],
+    "list_markers": [
+      "- ",
+      "- ",
+      "- ",
+      "- ",
+      "- "
+    ],
+    "references": [],
+    "line_breaks": [
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n"
+    ]
+  },
+  "revision": 1,
+  "phase": "audited",
+  "audited": [
+    0
+  ],
+  "pass_number": 0,
+  "document_sha256": "71786a98c8612b431039976b99b11ba52ec6195433a8031e8b6f18f0c66034ea",
+  "cells_sha256": "1d9bebaa76750bf4bf0226c030a57c850b64f2c6b4f35b9c6309288ab5e75384",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-patterns/readme_bitmap_261113_192700.png"
+}

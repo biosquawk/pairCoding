@@ -1,0 +1,64 @@
+{
+  "action": "audit_chapter",
+  "chapter_id": 0,
+  "ratings": [
+    {
+      "id": 1,
+      "score": 2,
+      "reason": "Metadane wskazują zadanie skilla."
+    },
+    {
+      "id": 2,
+      "score": 1,
+      "reason": "Dokładny warunek doboru i nazwa wywołania."
+    },
+    {
+      "id": 3,
+      "score": 1,
+      "reason": "Ton pochodzi z wybranego pliku."
+    },
+    {
+      "id": 4,
+      "score": 1,
+      "reason": "Wymaga danych zamiast wymyślonego wykonania."
+    },
+    {
+      "id": 5,
+      "score": 1,
+      "reason": "Zapowiada trzy konkretne części."
+    },
+    {
+      "id": 6,
+      "score": 1,
+      "reason": "Wskazuje pojedynczą obserwację."
+    },
+    {
+      "id": 7,
+      "score": 2,
+      "reason": "Nieco opisowe, ale określa funkcję pytania."
+    },
+    {
+      "id": 8,
+      "score": 1,
+      "reason": "Proponuje działanie ucznia."
+    },
+    {
+      "id": 9,
+      "score": 1,
+      "reason": "Zachowuje wyjątek na żądanie rozwiązania."
+    },
+    {
+      "id": 10,
+      "score": 1,
+      "reason": "Rozdziela przypuszczenie i fakt."
+    },
+    {
+      "id": 11,
+      "score": 2,
+      "reason": "Określa instrukcyjny zakres skilla."
+    }
+  ],
+  "revision": 1,
+  "at": "2026-11-13T18:27:00.150547+00:00",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-feedback/readme_bitmap_261113_192700.png"
+}

@@ -1,0 +1,44 @@
+{
+  "format": "ai-unslop-1",
+  "document": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/characters/halloween-theme/skills/lesson-feedback/SKILL.md",
+  "domain": "instrukcje nauczania programowania i kontraktu narzędzi",
+  "audience": "trener Codex wspierający polskojęzycznego ucznia",
+  "chapter_level": 6,
+  "structure": {
+    "headings": [],
+    "code": [],
+    "tables": [],
+    "links": [],
+    "inline_code": [],
+    "list_markers": [
+      "- ",
+      "- ",
+      "- "
+    ],
+    "references": [],
+    "line_breaks": [
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n",
+      "\n"
+    ]
+  },
+  "revision": 1,
+  "phase": "audited",
+  "audited": [
+    0
+  ],
+  "pass_number": 0,
+  "document_sha256": "0461a454a32d46af67d2bb09e651d81842c4deb2d8fdd9edc25f8d39d70f1b87",
+  "cells_sha256": "5bfc65c25a567ff0206eee78b218e0b555f610f503803b6d8a0ec493a1121fd1",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-feedback/readme_bitmap_261113_192700.png"
+}

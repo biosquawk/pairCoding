@@ -1,0 +1,109 @@
+{
+  "action": "audit_chapter",
+  "chapter_id": 0,
+  "ratings": [
+    {
+      "id": 1,
+      "score": 2,
+      "reason": "Nazwa i opis wskazują dobór lub odrzucenie wzorca."
+    },
+    {
+      "id": 2,
+      "score": 1,
+      "reason": "Lista terminów służy wyszukiwaniu skilla."
+    },
+    {
+      "id": 3,
+      "score": 1,
+      "reason": "Konkretne przykłady problemów uzasadniają dobór."
+    },
+    {
+      "id": 4,
+      "score": 1,
+      "reason": "Zastrzeżenie zależy od braku problemu."
+    },
+    {
+      "id": 5,
+      "score": 1,
+      "reason": "Ogranicza najbliższy krok, nie architekturę projektu."
+    },
+    {
+      "id": 6,
+      "score": 3,
+      "reason": "Kalka „role na nazwach ucznia” utrudnia rozumienie polecenia."
+    },
+    {
+      "id": 7,
+      "score": 2,
+      "reason": "Podaje trzy proste alternatywy."
+    },
+    {
+      "id": 8,
+      "score": 1,
+      "reason": "Zapowiada konkretne przykłady."
+    },
+    {
+      "id": 9,
+      "score": 1,
+      "reason": "Odróżnia algorytm od zachowania zależnego od stanu."
+    },
+    {
+      "id": 10,
+      "score": 1,
+      "reason": "Wyjaśnia dwie różne odpowiedzialności."
+    },
+    {
+      "id": 11,
+      "score": 2,
+      "reason": "Wskazuje tworzenie oraz złożone składanie obiektu."
+    },
+    {
+      "id": 12,
+      "score": 1,
+      "reason": "Podaje istotne koszty powiadomień."
+    },
+    {
+      "id": 13,
+      "score": 1,
+      "reason": "Rozdziela obiekt żądania od infrastruktury."
+    },
+    {
+      "id": 14,
+      "score": 1,
+      "reason": "Wymaga przypadku granicznego."
+    },
+    {
+      "id": 15,
+      "score": 1,
+      "reason": "Wymaga kroku zachowującego wynik."
+    },
+    {
+      "id": 16,
+      "score": 1,
+      "reason": "Zabrania deklaracji bez wyniku."
+    },
+    {
+      "id": 17,
+      "score": 1,
+      "reason": "Chroni istniejące testy i skalę zmiany."
+    },
+    {
+      "id": 18,
+      "score": 1,
+      "reason": "Rezygnuje z niepomocnej nazwy."
+    },
+    {
+      "id": 19,
+      "score": 1,
+      "reason": "Wyraźnie nie wymusza frameworka w małym zadaniu."
+    },
+    {
+      "id": 20,
+      "score": 1,
+      "reason": "Określa granicę wykonania."
+    }
+  ],
+  "revision": 1,
+  "at": "2026-11-13T18:27:00.236574+00:00",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-patterns/readme_bitmap_261113_192700.png"
+}

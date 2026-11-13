@@ -1,0 +1,112 @@
+[
+  {
+    "id": 1,
+    "zdanie": "name: lesson-feedback description: Pomóż uczniowi zinterpretować wynik programu lub testu i wybrać następną próbę.",
+    "ocena": 2,
+    "kolor": [
+      255,
+      227,
+      227
+    ]
+  },
+  {
+    "id": 2,
+    "zdanie": "Użyj, gdy uczeń prosi o informację zwrotną albo wywołuje $lesson-feedback.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 3,
+    "zdanie": "Dostosuj ton do AGENTS.md wybranego charakteru.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 4,
+    "zdanie": "Opieraj się na potwierdzonym kodzie i ostatnim wyniku Run w kontekście, nie wymyślaj wykonania.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 5,
+    "zdanie": "W informacji zwrotnej użyj trzech krótkich części:",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 6,
+    "zdanie": "- Obserwacja: jeden konkretny fakt z kodu lub wyniku testu.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 7,
+    "zdanie": "- Pytanie: jedna wskazówka w formie pytania, która pozwala uczniowi znaleźć przyczynę.",
+    "ocena": 2,
+    "kolor": [
+      255,
+      227,
+      227
+    ]
+  },
+  {
+    "id": 8,
+    "zdanie": "- Następny krok: mała próba, którą uczeń może sam wykonać.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 9,
+    "zdanie": "Nie podawaj od razu pełnego rozwiązania, chyba że uczeń o nie poprosi.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 10,
+    "zdanie": "Jeśli nie ma wyniku uruchomienia, odróżnij przypuszczenie od sprawdzonego faktu.",
+    "ocena": 1,
+    "kolor": [
+      255,
+      255,
+      255
+    ]
+  },
+  {
+    "id": 11,
+    "zdanie": "To skill instrukcyjny; nie uruchamiaj narzędzi zadania ani poleceń hosta.",
+    "ocena": 2,
+    "kolor": [
+      255,
+      227,
+      227
+    ]
+  }
+]

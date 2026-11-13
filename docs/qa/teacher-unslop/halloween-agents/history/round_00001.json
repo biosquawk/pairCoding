@@ -1,0 +1,484 @@
+{
+  "action": "audit_chapter",
+  "chapter_id": 0,
+  "ratings": [
+    {
+      "id": 1,
+      "score": 1,
+      "reason": "Konkretny nagłówek roli."
+    },
+    {
+      "id": 2,
+      "score": 1,
+      "reason": "Określa język i ton bez rozwlekłości."
+    },
+    {
+      "id": 3,
+      "score": 1,
+      "reason": "Wskazuje materiał i sposób wyjaśniania."
+    },
+    {
+      "id": 4,
+      "score": 2,
+      "reason": "Długi zapis, ale jasno oddziela inspirację od podszywania się."
+    },
+    {
+      "id": 5,
+      "score": 1,
+      "reason": "Nagłówek wskazuje czynność nauczyciela."
+    },
+    {
+      "id": 6,
+      "score": 1,
+      "reason": "Pierwszeństwo bieżącego pytania."
+    },
+    {
+      "id": 7,
+      "score": 1,
+      "reason": "Krótki nakaz odpowiedzi wprost."
+    },
+    {
+      "id": 8,
+      "score": 1,
+      "reason": "Opisuje sprawdzalną sekwencję nauki."
+    },
+    {
+      "id": 9,
+      "score": 1,
+      "reason": "Oddziela analizę statyczną od wykonania."
+    },
+    {
+      "id": 10,
+      "score": 1,
+      "reason": "Trzy konkretne elementy wyjaśnienia."
+    },
+    {
+      "id": 11,
+      "score": 1,
+      "reason": "Zastępuje abstrakcyjną ocenę wskazaniem problemu."
+    },
+    {
+      "id": 12,
+      "score": 1,
+      "reason": "Nakazuje używać nazw z kodu."
+    },
+    {
+      "id": 13,
+      "score": 1,
+      "reason": "Przykłady wyjaśniają, kiedy objaśnić termin."
+    },
+    {
+      "id": 14,
+      "score": 2,
+      "reason": "Cel podpowiedzi jest czytelny, choć ogólny."
+    },
+    {
+      "id": 15,
+      "score": 1,
+      "reason": "Zachowuje jawną prośbę i zakres uprawnień."
+    },
+    {
+      "id": 16,
+      "score": 1,
+      "reason": "Pochwała zależy od obserwacji."
+    },
+    {
+      "id": 17,
+      "score": 1,
+      "reason": "Ocena dotyczy kodu, nie osoby."
+    },
+    {
+      "id": 18,
+      "score": 1,
+      "reason": "Usuwa automatyczne pochwały."
+    },
+    {
+      "id": 19,
+      "score": 1,
+      "reason": "Zwięzły nagłówek obszaru."
+    },
+    {
+      "id": 20,
+      "score": 2,
+      "reason": "Lista konkretnych cech kodu; nie jest pustą pochwałą jakości."
+    },
+    {
+      "id": 21,
+      "score": 1,
+      "reason": "Wyjaśnia częsty błąd stosowania SOLID."
+    },
+    {
+      "id": 22,
+      "score": 1,
+      "reason": "Podaje warunek oraz zakres omówienia wzorca."
+    },
+    {
+      "id": 23,
+      "score": 1,
+      "reason": "Wymaga porównania z prostszym rozwiązaniem."
+    },
+    {
+      "id": 24,
+      "score": 1,
+      "reason": "Wymaga uzasadnienia rezygnacji ze wzorca."
+    },
+    {
+      "id": 25,
+      "score": 3,
+      "reason": "Powtórzenie „zmianami zachowującymi zachowanie” brzmi mechanicznie."
+    },
+    {
+      "id": 26,
+      "score": 3,
+      "reason": "Skrót „przypadku i granicy” nie wyjaśnia, czego dotyczy granica."
+    },
+    {
+      "id": 27,
+      "score": 1,
+      "reason": "Konkretny zakaz spekulacyjnej hierarchii."
+    },
+    {
+      "id": 28,
+      "score": 1,
+      "reason": "Wskazuje dokładne nazwy i zastosowania skillów."
+    },
+    {
+      "id": 29,
+      "score": 1,
+      "reason": "Nagłówek porządkuje instrukcje wykonawcze."
+    },
+    {
+      "id": 30,
+      "score": 2,
+      "reason": "Fakty Run to znany termin kontraktu, choć brzmienie jest techniczne."
+    },
+    {
+      "id": 31,
+      "score": 1,
+      "reason": "Jawny zakaz fabrykowania dowodów."
+    },
+    {
+      "id": 32,
+      "score": 1,
+      "reason": "Precyzyjnie wskazuje pola lokalizacji."
+    },
+    {
+      "id": 33,
+      "score": 1,
+      "reason": "Literalna flaga ma znaczenie wykonawcze."
+    },
+    {
+      "id": 34,
+      "score": 1,
+      "reason": "Chroni przed zgadywaniem lokalizacji."
+    },
+    {
+      "id": 35,
+      "score": 1,
+      "reason": "Dokładny limit formatu HINT."
+    },
+    {
+      "id": 36,
+      "score": 1,
+      "reason": "Dobiera kanał odpowiedzi do rozmiaru pytania."
+    },
+    {
+      "id": 37,
+      "score": 1,
+      "reason": "Określa warunek milczenia."
+    },
+    {
+      "id": 38,
+      "score": 1,
+      "reason": "Wiąże wynik z testami i wejściem."
+    },
+    {
+      "id": 39,
+      "score": 1,
+      "reason": "Istotnie ogranicza wniosek z zielonych testów."
+    },
+    {
+      "id": 40,
+      "score": 1,
+      "reason": "Chroni rozumowanie wewnętrzne."
+    },
+    {
+      "id": 41,
+      "score": 1,
+      "reason": "Wskazuje sprawdzalne uzasadnienie."
+    },
+    {
+      "id": 42,
+      "score": 1,
+      "reason": "Konkretny nagłówek integracji."
+    },
+    {
+      "id": 43,
+      "score": 1,
+      "reason": "Opisuje wspólne otwarcie folderu."
+    },
+    {
+      "id": 44,
+      "score": 1,
+      "reason": "Odróżnia normalny zapis człowieka od awarii."
+    },
+    {
+      "id": 45,
+      "score": 1,
+      "reason": "Dokładna lista metadanych wyłączonych z analizy."
+    },
+    {
+      "id": 46,
+      "score": 1,
+      "reason": "Wyjaśnia, jak traktować metadane."
+    },
+    {
+      "id": 47,
+      "score": 1,
+      "reason": "Korzysta z istniejącego uzgadniania zamiast tworzyć nowe."
+    },
+    {
+      "id": 48,
+      "score": 1,
+      "reason": "Jednoznaczna ochrona nowszego kodu."
+    },
+    {
+      "id": 49,
+      "score": 1,
+      "reason": "Nagłówek określa granice uprawnień."
+    },
+    {
+      "id": 50,
+      "score": 1,
+      "reason": "Wskazuje wymagany kontrakt odpowiedzi."
+    },
+    {
+      "id": 51,
+      "score": 1,
+      "reason": "Rozdziela dane zadania od instrukcji."
+    },
+    {
+      "id": 52,
+      "score": 1,
+      "reason": "Chroni testy i kryteria, podając cel zakazu."
+    },
+    {
+      "id": 53,
+      "score": 1,
+      "reason": "Wymienia rzeczywiste zabezpieczenia zapisu."
+    },
+    {
+      "id": 54,
+      "score": 1,
+      "reason": "Jednoznaczny skutek weta."
+    },
+    {
+      "id": 55,
+      "score": 1,
+      "reason": "Blokuje obejście wcześniejszej odmowy."
+    },
+    {
+      "id": 56,
+      "score": 1,
+      "reason": "Literalny tryb i zakaz zmiany źródeł."
+    },
+    {
+      "id": 57,
+      "score": 1,
+      "reason": "Precyzyjny wyjątek dla ścieżki notatek."
+    },
+    {
+      "id": 58,
+      "score": 2,
+      "reason": "Wymaga propozycji i potwierdzenia dla operacji."
+    },
+    {
+      "id": 59,
+      "score": 1,
+      "reason": "Odróżnia deklarację od potwierdzonej czynności."
+    },
+    {
+      "id": 60,
+      "score": 1,
+      "reason": "MUTE zależy od bieżącej prośby."
+    },
+    {
+      "id": 61,
+      "score": 1,
+      "reason": "Precyzuje materiały bez autoryzacji."
+    },
+    {
+      "id": 62,
+      "score": 1,
+      "reason": "Określa ograniczenia karty i skillów."
+    },
+    {
+      "id": 63,
+      "score": 1,
+      "reason": "Wskazuje wykonawcę programów i testów."
+    },
+    {
+      "id": 64,
+      "score": 1,
+      "reason": "Nagłówek rozpoznawalnej persony."
+    },
+    {
+      "id": 65,
+      "score": 1,
+      "reason": "Opis konwencji na życzenie właściciela."
+    },
+    {
+      "id": 66,
+      "score": 2,
+      "reason": "Dłuższa metafora celowo buduje horrorową konwencję."
+    },
+    {
+      "id": 67,
+      "score": 1,
+      "reason": "Wyjaśnia fikcyjny charakter konwencji."
+    },
+    {
+      "id": 68,
+      "score": 1,
+      "reason": "Żart dotyczy kodu, nie osobistych cech."
+    },
+    {
+      "id": 69,
+      "score": 1,
+      "reason": "Dokładny oczekiwany śmiech postaci."
+    },
+    {
+      "id": 70,
+      "score": 1,
+      "reason": "Wskazuje częstość i sytuację użycia."
+    },
+    {
+      "id": 71,
+      "score": 1,
+      "reason": "Określa język i długość."
+    },
+    {
+      "id": 72,
+      "score": 1,
+      "reason": "Łączy żart z konkretną pomocą."
+    },
+    {
+      "id": 73,
+      "score": 1,
+      "reason": "Nie obarcza ucznia winą za platformę."
+    },
+    {
+      "id": 74,
+      "score": 1,
+      "reason": "Wprowadza przykłady wypowiedzi."
+    },
+    {
+      "id": 75,
+      "score": 1,
+      "reason": "Fragment zamierzonego śmiechu."
+    },
+    {
+      "id": 76,
+      "score": 1,
+      "reason": "Krótka kwestia teatralna."
+    },
+    {
+      "id": 77,
+      "score": 1,
+      "reason": "Metafora stosu zachowuje głos postaci."
+    },
+    {
+      "id": 78,
+      "score": 1,
+      "reason": "Pytanie odnosi się do konkretnego operatora."
+    },
+    {
+      "id": 79,
+      "score": 1,
+      "reason": "Zamierzony śmiech, nie przypadkowy wypełniacz."
+    },
+    {
+      "id": 80,
+      "score": 1,
+      "reason": "Celowy horrorowy obraz błędu indeksu."
+    },
+    {
+      "id": 81,
+      "score": 1,
+      "reason": "Konkretne pytanie o zakres indeksów."
+    },
+    {
+      "id": 82,
+      "score": 1,
+      "reason": "Fragment wypowiedzi postaci."
+    },
+    {
+      "id": 83,
+      "score": 1,
+      "reason": "Celowa przesada w ramach wybranej konwencji."
+    },
+    {
+      "id": 84,
+      "score": 1,
+      "reason": "Prowadzi do linii kodu ucznia."
+    },
+    {
+      "id": 85,
+      "score": 1,
+      "reason": "Pytanie po poprawnym wyniku."
+    },
+    {
+      "id": 86,
+      "score": 1,
+      "reason": "Celowy śmiech w przykładzie."
+    },
+    {
+      "id": 87,
+      "score": 1,
+      "reason": "Domyka metaforę bez deklarowania działania narzędzia."
+    },
+    {
+      "id": 88,
+      "score": 1,
+      "reason": "Proponuje przypadek graniczny."
+    },
+    {
+      "id": 89,
+      "score": 1,
+      "reason": "Fragment wypowiedzi klauna."
+    },
+    {
+      "id": 90,
+      "score": 1,
+      "reason": "Celowa personifikacja null."
+    },
+    {
+      "id": 91,
+      "score": 1,
+      "reason": "Pytanie o drogę przepływu danych."
+    },
+    {
+      "id": 92,
+      "score": 1,
+      "reason": "Chroni działający kod i testy."
+    },
+    {
+      "id": 93,
+      "score": 1,
+      "reason": "Zakazuje udawania błędu."
+    },
+    {
+      "id": 94,
+      "score": 1,
+      "reason": "Szanuje prośbę o zmianę tonu."
+    },
+    {
+      "id": 95,
+      "score": 1,
+      "reason": "Zachowuje potwierdzenia i weto."
+    }
+  ],
+  "revision": 1,
+  "at": "2026-11-13T18:27:00.055950+00:00",
+  "snapshot": "/home/darulec/dev/codex_prjects/pairCoding-publication-20261112/docs/qa/teacher-unslop/halloween-agents/readme_bitmap_261113_192700.png"
+}
