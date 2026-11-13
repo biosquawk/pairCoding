@@ -441,12 +441,18 @@ export class LiveBackend {
         try { this.receive(JSON.parse(String(event.data))); } catch (error) { this.fail(error); this.resync(); }
       };
       ws.onerror = () => { if (ws === this.ws) { this.fail(new Error('Błąd połączenia z backendem.')); ws.close(); } };
-      ws.onclose = () => { if (ws === this.ws) { this.ws = null; this.disconnected(); } };
+      ws.onclose = event => { if (ws === this.ws) {
+        this.ws = null;
+        const problem=event?.code===1008 && event.reason==='Lease conflict'
+          ? 'LEASE_CONFLICT: Inna karta lub okno PairCoach nadal używa tej sesji. Wróć do tamtej karty albo zamknij pozostałe karty tej aplikacji i kliknij „Połącz ponownie”. Pliki projektu pozostają na dysku.'
+          : undefined;
+        this.disconnected(problem);
+      } };
     } catch (error) { this.fail(error); this.disconnected(); }
     finally { this.connecting = false; }
   }
   reconnect() { this.retries = 0; this.stopped = false; clearTimeout(this.reconnectTimer); this.resync(); }
-  private disconnected() {
+  private disconnected(connectionProblem?: string) {
     this.maintenanceRevision++;
     this.languageScope=null;this.languagePresentation();
     this.wiring.invalidate('DISCONNECTED');
@@ -460,7 +466,16 @@ export class LiveBackend {
       this.proposalDecision.disconnected = true;
       this.unknownDecision(this.proposalDecision, 'Połączenie utracone; wynik nieznany dla decyzji. Połącz ponownie, aby odczytać wcześniejszy wynik.');
     }
-    this.persist(); this.publish();
+    this.persist();
+    if(connectionProblem) {
+      clearTimeout(this.reconnectTimer);
+      this.state.connectionError=[this.proposalDecision?.notice ?? this.finishAttempt?.notice ?? this.decisionResultError,connectionProblem]
+        .filter(Boolean).join('\n');
+    }
+    this.publish();
+    // Another live tab owns the session. Retrying cannot authorize this tab;
+    // retain drafts and unknown outcomes until the user explicitly reconnects.
+    if(connectionProblem)return;
     if (this.retries < 3) {
       const delay = [500, 1000, 2000][this.retries++];
       clearTimeout(this.reconnectTimer); this.reconnectTimer = setTimeout(() => void this.connect(), delay);
