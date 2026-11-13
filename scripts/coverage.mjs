@@ -2,20 +2,52 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { testArguments } from './runtime-test.mjs';
 import { boundedSelection, sourceInventory, assertLcovInventory } from './coverage-policy.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const report = value => console.log(JSON.stringify(value));
-function run(command, args, timeout, env) {
-  const result = spawnSync(command, args, { cwd: root, stdio: 'inherit', shell: false, timeout, env });
-  if (result.error || result.signal || result.status !== 0) {
-    throw Error('Coverage/baseline execution failed: ' + JSON.stringify({ command, args,
-      error: result.error?.message, signal: result.signal, status: result.status }));
+
+// Only descendants of this invocation are targeted. No host-wide process discovery.
+async function killOwnedTree(child, inheritGroup) {
+  if (!child.pid) return;
+  if (process.platform !== 'win32') {
+    // Nested lanes remain in the c8 owner group; the outer runner reaps that
+    // group on every exit. A lane timeout first terminates its direct runner.
+    try { if (inheritGroup) child.kill('SIGKILL'); else process.kill(-child.pid, 'SIGKILL'); }
+    catch (error) { if (error.code !== 'ESRCH') throw error; }
+    return;
+  }
+  await new Promise(resolve => {
+    const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore', shell: false });
+    const timer = setTimeout(() => { killer.kill(); child.kill('SIGKILL'); resolve(); }, 2000);
+    const done = () => { clearTimeout(timer); child.kill('SIGKILL'); resolve(); };
+    killer.once('error', done);
+    killer.once('exit', done);
+  });
+}
+
+export async function runBounded(command, args, { timeout, cwd = root, env = process.env, stdio = 'inherit', inheritGroup = false }) {
+  if (!Number.isFinite(timeout) || timeout <= 0) throw Error('Positive execution timeout required');
+  const child = spawn(command, args, { cwd, stdio, shell: false, env, detached: process.platform !== 'win32' && !inheritGroup });
+  let timedOut = false, cleanup;
+  const clean = () => cleanup ??= killOwnedTree(child, inheritGroup);
+  const result = await new Promise(resolve => {
+    const timer = setTimeout(() => { timedOut = true; void clean(); }, timeout);
+    const done = result => { clearTimeout(timer); resolve(result); };
+    child.once('error', error => done({ error: error.message }));
+    child.once('exit', (status, signal) => done({ status, signal }));
+  });
+  // Also remove an orphaned descendant after a successful direct child exit.
+  await clean();
+  if (timedOut || result.error || result.signal || result.status !== 0) {
+    const error = Error('Coverage/baseline execution failed: ' + JSON.stringify({ command, args, ...result, timedOut }));
+    error.timedOut = timedOut;
+    throw error;
   }
 }
-function tests() {
+async function tests() {
   const selection = boundedSelection(root);
   report(selection);
   const tmp = path.join(root, 'target/coverage-test-tmp');
@@ -29,12 +61,15 @@ function tests() {
     const args = [...group.args];
     args.splice(args.indexOf('--test') + 1, 0, '--test-timeout=' + Math.min(150_000, remaining));
     try {
-      run(process.execPath, args, remaining + 1000, { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp });
-    } catch (error) { failures.push(error.message); }
+      await runBounded(process.execPath, args, { timeout: remaining, inheritGroup: process.env.PAIRCOACH_COVERAGE_OWNED_GROUP === '1', env: { ...process.env, TMPDIR: tmp, TMP: tmp, TEMP: tmp } });
+    } catch (error) {
+      if (error.timedOut) throw error;
+      failures.push(error.message);
+    }
   }
   if (failures.length) throw Error(failures.join('\n'));
 }
-function coverage() {
+async function coverage() {
   // Fail before measurement for an unclassified/missing source, never silently shrink scope.
   const inventory = sourceInventory(root);
   const selection = boundedSelection(root);
@@ -44,8 +79,8 @@ function coverage() {
   }
   let failure;
   try {
-    run(process.execPath, [path.join(root, 'node_modules/c8/bin/c8.js'), '--config', '.c8rc.json',
-      process.execPath, 'scripts/coverage.mjs', '--tests'], 240_000, process.env);
+    await runBounded(process.execPath, [path.join(root, 'node_modules/c8/bin/c8.js'), '--config', '.c8rc.json',
+      process.execPath, 'scripts/coverage.mjs', '--tests'], { timeout: 240_000, env: { ...process.env, PAIRCOACH_COVERAGE_OWNED_GROUP: '1' } });
   } catch (error) { failure = error; }
   const lcov = fs.readFileSync(path.join(root, 'coverage/lcov.info'), 'utf8');
   const match = assertLcovInventory(lcov, inventory, root);
@@ -59,9 +94,11 @@ function coverage() {
   report(match);
   if (failure) throw failure;
 }
-try {
-  const args = process.argv.slice(2);
-  if (args.length === 1 && args[0] === '--tests') tests();
-  else if (!args.length) coverage();
-  else throw Error('Usage: node scripts/coverage.mjs [--tests]');
-} catch (error) { console.error(error.message); process.exitCode = 1; }
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  try {
+    const args = process.argv.slice(2);
+    if (args.length === 1 && args[0] === '--tests') await tests();
+    else if (!args.length) await coverage();
+    else throw Error('Usage: node scripts/coverage.mjs [--tests]');
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
+}

@@ -35,7 +35,7 @@ test('QG and c8 cover identical production roots including tooling, no complexit
   assert.deepEqual(config.include, sourceRoots.map(r => ['src', 'scripts'].includes(r) ? r + '/**' : r));
   assert.deepEqual(config.exclude, ['**/*.d.ts', '**/*.d.mts', '**/*.d.cts', '**/*.test.*', '**/*.spec.*']);
   for (const lang of ['javascript', 'typescript']) {
-    assert.match(runner[lang].coverage_command[0], /[/\\]node(?:\.exe)?$/);
+    assert.equal(runner[lang].coverage_command[0], 'node');
     assert.deepEqual(runner[lang].coverage_command.slice(1), ['scripts/coverage.mjs']);
     assert.deepEqual(runner[lang].test_command, [...runner[lang].coverage_command, '--tests']);
     assert.deepEqual(runner[lang].coverage_reports, ['coverage/lcov.info']);
@@ -85,4 +85,63 @@ test('real c8 maps TS/TSX lines and retains a never-imported production TSX at m
   // The unexecuted branch must still map to its ORIGINAL TS line, not generated JS.
   assert.match(records.find(r => r.includes('SF:src/branch.ts')), /BRDA:3,\d+,\d+,0/);
   assert.ok(!lcov.includes('node_modules') && !lcov.includes('run.test.ts'));
+});
+
+test('independent test runner removes inherited NODE_TEST_CONTEXT, failures are not swallowed', async t => {
+  const { runBounded } = await import('../../scripts/coverage.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-context-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  write(dir, 'independent.test.mjs', 'import test from "node:test"; import assert from "node:assert/strict"; test("intentional negative control", () => assert.equal(1, 2));');
+  const env = { ...process.env, NODE_TEST_CONTEXT: 'child-v8' };
+  delete env.NODE_TEST_CONTEXT;
+  await assert.rejects(runBounded(process.execPath, ['--test', 'independent.test.mjs'], {
+    cwd: dir, env, stdio: 'ignore', timeout: 3000,
+  }), /"status":1/);
+  await assert.rejects(runBounded(path.join(dir, 'missing-executable'), [], {
+    cwd: dir, stdio: 'ignore', timeout: 3000,
+  }), /ENOENT/);
+  await assert.rejects(runBounded(process.execPath, [], { timeout: 0 }), /Positive execution timeout/);
+});
+
+test('timeout kills the owned SIGTERM-resistant child and grandchild; success also cleans orphan', { skip: process.platform === 'win32' }, async t => {
+  const { runBounded } = await import('../../scripts/coverage.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-timeout-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const alive = pid => {
+    try {
+      process.kill(pid, 0);
+      // A zombie is terminated, pending reaping by the container's PID 1.
+      if (process.platform === 'linux' && /\) Z /.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8'))) return false;
+      return true;
+    } catch (error) { if (error.code === 'ESRCH' || error.code === 'ENOENT') return false; throw error; }
+  };
+  write(dir, 'tree.mjs', `import fs from 'node:fs'; import {spawn} from 'node:child_process';
+    process.on('SIGTERM', () => {});
+    fs.writeFileSync('parent.pid', String(process.pid));
+    const child = spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('grandchild.pid', String(process.pid)); process.on('SIGTERM', () => {}); setInterval(()=>{}, 100)"], {stdio:'ignore'});
+    if (process.argv[2] === 'orphan') { child.unref(); setTimeout(() => process.exit(0), 300); }
+    else setInterval(()=>{}, 100);`);
+  const start = Date.now();
+  await assert.rejects(runBounded(process.execPath, ['tree.mjs'], { cwd: dir, timeout: 1000, stdio: 'ignore' }), error => error.timedOut === true);
+  assert.ok(Date.now() - start < 4000, 'deadline must not wait for SIGTERM-resistant descendants');
+  for (const file of ['parent.pid', 'grandchild.pid']) assert.equal(alive(Number(fs.readFileSync(path.join(dir, file)))), false, file);
+  await runBounded(process.execPath, ['tree.mjs', 'orphan'], { cwd: dir, timeout: 3000, stdio: 'ignore' });
+  assert.equal(alive(Number(fs.readFileSync(path.join(dir, 'grandchild.pid')))), false, 'normal-exit orphan');
+});
+
+test('outer coverage timeout also kills a nested lane and its descendants in the owner group', { skip: process.platform === 'win32' }, async t => {
+  const { runBounded } = await import('../../scripts/coverage.mjs');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coverage-nested-timeout-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const moduleUrl = pathToFileURL(path.join(root, 'scripts/coverage.mjs')).href;
+  write(dir, 'nested.mjs', `import {runBounded} from ${JSON.stringify(moduleUrl)};
+    await runBounded(process.execPath, ['-e', "require('node:fs').writeFileSync('nested.pid', String(process.pid)); process.on('SIGTERM',()=>{}); const c=require('node:child_process').spawn(process.execPath,['-e',\\\"require('node:fs').writeFileSync('leaf.pid', String(process.pid)); process.on('SIGTERM',()=>{}); setInterval(()=>{},100)\\\"],{stdio:'ignore'}); setInterval(()=>{},100)"], {cwd:process.cwd(), timeout:5000, inheritGroup:true, stdio:'ignore'});`);
+  await assert.rejects(runBounded(process.execPath, ['nested.mjs'], { cwd: dir, timeout: 1000, stdio: 'ignore' }), error => error.timedOut === true);
+  for (const name of ['nested.pid', 'leaf.pid']) {
+    const pid = Number(fs.readFileSync(path.join(dir, name)));
+    try {
+      process.kill(pid, 0);
+      assert.ok(process.platform === 'linux' && /\) Z /.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')), `${name} still running`);
+    } catch (error) { if (error.code !== 'ESRCH' && error.code !== 'ENOENT') throw error; }
+  }
 });

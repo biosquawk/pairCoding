@@ -86,6 +86,8 @@ Dostępność `gpt-6.1-sol` zależy od konta; konfiguracja i `login status` nie 
 
 Możesz otworzyć ten sam folder zadania w PairCoding i IntelliJ. Źródła zapisane z IDE są normalnymi zmianami zewnętrznymi i trafiają do edytora przez istniejące uzgadnianie wersji; konflikt nie daje AI prawa do nadpisania nowszego kodu. `.idea`, `.git`, `target`, `.gitignore` oraz pliki `.iml`, `.ipr`, `.iws` są pomijane przy obserwowaniu zadania, budowie kontekstu AI, snapshotach i wejściu Run. Nie są usuwane ani przywracane do starszej wersji. Podpowiedzi semantyczne możesz wykorzystywać w IntelliJ; PairCoding pozostaje lekkim edytorem z lokalnymi podpowiedziami.
 
+**PENDING_FINAL_QA** — pełny odbiór produktu pozostaje nieukończony; celowany pomiar poniżej nie zastępuje końcowej kontroli QA.
+
 ## Bounded platform coverage / MCP Quality Guard
 
 After `npm ci` with Node >=22.22.0, run **`npm run coverage`** from the repository.
@@ -95,8 +97,12 @@ and checks that every production inventory entry has exactly one LCOV record.
 Expected output: `coverage/lcov.info`, `coverage-summary.json`, `coverage-final.json`,
 `inventory.json` (individual exclusions and reasons), `selection.json` (selected,
 NOT_RUN and SUPERSEDED), and `measurement.json`. A failed test, timeout or missing
-source is an error, not a PASS. The test phase is bounded at 180 s, measurement
-at 240 s; it starts no application server or Docker campaign. Reports and scratch
+source is an error, not a PASS. The asynchronous runner sets a 180 s test-phase
+deadline and a 240 s c8 deadline. On timeout it kills the owned process group
+on POSIX (including SIGTERM-resistant descendants); Windows uses taskkill /T /F
+with a 2 s cleanup budget (best effort, not independently validated here). Detached processes that deliberately escape the group
+and OS-level uninterruptible tasks are outside this guarantee. No further test
+lane starts after a timeout. This starts no application server or Docker campaign. Reports and scratch
 fixtures are local ignored artifacts (`coverage/`, `target/`).
 
 Production boundary: all `src/`, all `scripts/`, `vite.config.ts` and the shipped
@@ -108,11 +114,12 @@ coverage or high complexity. New unclassified source files fail inventory.
 The canonical `npm test` selector/retirement policy is unchanged.
 
 `.quality-policy.json` uses the same production roots. `.quality-runner.json`
-runs the exact `coverage`/`test:coverage` script entrypoints using an explicit
-Node executable for both JavaScript and TypeScript (MCP does not inherit this
-shell's PATH). The recorded path is the supplied SharedDesk Node 22.22.2; update
-that executable path when relocating the QG workspace. Ordinary npm commands
-remain portable. The latter runs the same bounded test selection
+runs the exact `coverage`/`test:coverage` script entrypoints using `node` from
+the runner process PATH for both JavaScript and TypeScript. Configure the MCP
+server process PATH to include your local Node installation if it differs from
+your terminal; no operator-specific executable path belongs in the published
+configuration and no global Node installation is required. `test:coverage` runs
+the same bounded test selection
 through canonical TS/native-MJS lanes and retirement filters, without c8. This
 bounded profile is intentional under the owner's no-long-suite constraint;
 any MCP gate applies only to that profile and is **not full-product acceptance**.
