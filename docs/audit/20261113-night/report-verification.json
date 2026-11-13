@@ -25,7 +25,10 @@
   "known_root_tokens": 208538779,
   "known_combined_tokens": 690033448,
   "suite_failures": 244,
-  "report_sha256": "f0255eb5cf538bb2503a90ada1e08e56eb252913a201bc749d7ed4f8f11881d6",
+  "report_sha256": "535baf8087e695a4303e5813e71479ebcec374da7800fb0115cef454a9e8bdcf",
   "historical_status_suffix_sha256": "d3ea665a0263ab9937a332739c8250dec2cdbe99dd48aab0e5b653079206e536",
-  "checks": "PASS: arithmetic and scope; product NO-GO"
+  "checks": "PASS: arithmetic and scope; product NO-GO",
+  "followup_added": "Section13: read-only existing evidence; 244-case partition and hourly sums; no product test execution",
+  "followup_failure_total": 244,
+  "followup_updated_utc": "2026-11-13T08:44:55.612752+00:00"
 }

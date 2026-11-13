@@ -1,0 +1,488 @@
+{
+  "format": "paircoach.readonly-followup/1",
+  "source_product_commit": "257e90b838abec4e9b332385c71f1be8201fc013",
+  "source_thalamus_commit": "4f2fea7c5c2551d65f6d271d1b23ac93412ce2a1",
+  "no_agents_no_tests_no_product_changes": true,
+  "failure_group_counts": {
+    "TIMEOUT": 3,
+    "UNMEASURED_READINESS": 1,
+    "PERMISSIONS": 12,
+    "MASKED_RECOVERY": 70,
+    "DATA_DIR": 75,
+    "INITIALIZING": 29,
+    "ANCESTRY": 1,
+    "GENERATOR_BYTES": 3,
+    "CSS_IMPORT": 1,
+    "ADMISSION_FENCE": 1,
+    "FACADE_BYTES": 2,
+    "JDT_ASSERTION": 1,
+    "FAKE_DOCKER_JSON": 1,
+    "FAKE_EXPORT": 1,
+    "VM_CONTEXT": 2,
+    "BASELINE_MISSING": 33,
+    "LEGACY_CHECKPOINT_SIGKILL": 4,
+    "RETENTION_BYTES": 2,
+    "CLI_EARLY_EXIT": 1,
+    "REMAINDER_REGEX": 1
+  },
+  "failure_total": 244,
+  "fixes_static_mapping": [
+    {
+      "commit": "158881b",
+      "failed_cases_in_changed_files": 28,
+      "per_file": {
+        "tests/client/finish-network-unknown.test.ts": 1,
+        "tests/client/finish-snapshot-cache.test.ts": 12,
+        "tests/client/header-start.test.ts": 1,
+        "tests/client/presence.test.ts": 7,
+        "tests/client/real.test.ts": 2,
+        "tests/coach/codex-provider.test.ts": 2,
+        "tests/core/rename-http.test.ts": 1,
+        "tests/core/rename-lossless.test.ts": 2
+      }
+    },
+    {
+      "commit": "8099dea",
+      "failed_cases_in_changed_files": 6,
+      "per_file": {
+        "tests/backend-cutover/http-run-report.test.ts": 1,
+        "tests/client/finish-unknown.test.ts": 1,
+        "tests/client/proposal-unknown.test.ts": 4
+      }
+    }
+  ],
+  "hours": [
+    {
+      "hour": 0,
+      "attempts": 1624,
+      "unknown": 0,
+      "input": 119716363,
+      "cached": 28001920,
+      "output": 538561,
+      "root_input": 39747443,
+      "root_cached": 39345664,
+      "root_output": 96564
+    },
+    {
+      "hour": 1,
+      "attempts": 1249,
+      "unknown": 2,
+      "input": 95698333,
+      "cached": 24855296,
+      "output": 418993,
+      "root_input": 49335263,
+      "root_cached": 48498944,
+      "root_output": 106432
+    },
+    {
+      "hour": 2,
+      "attempts": 837,
+      "unknown": 1,
+      "input": 65475124,
+      "cached": 15111040,
+      "output": 375262,
+      "root_input": 32129814,
+      "root_cached": 31731456,
+      "root_output": 95121
+    },
+    {
+      "hour": 3,
+      "attempts": 733,
+      "unknown": 2,
+      "input": 64792150,
+      "cached": 20246528,
+      "output": 337858,
+      "root_input": 33062025,
+      "root_cached": 32756352,
+      "root_output": 85681
+    },
+    {
+      "hour": 4,
+      "attempts": 1514,
+      "unknown": 2,
+      "input": 127189864,
+      "cached": 27948160,
+      "output": 699509,
+      "root_input": 36677999,
+      "root_cached": 35532288,
+      "root_output": 113831
+    },
+    {
+      "hour": 5,
+      "attempts": 1015,
+      "unknown": 1,
+      "input": 80129625,
+      "cached": 17787904,
+      "output": 435236,
+      "root_input": 35219101,
+      "root_cached": 34979584,
+      "root_output": 100978
+    },
+    {
+      "hour": 6,
+      "attempts": 450,
+      "unknown": 99,
+      "input": 25069181,
+      "cached": 5742976,
+      "output": 146466,
+      "root_input": 11204514,
+      "root_cached": 11041024,
+      "root_output": 25143
+    },
+    {
+      "hour": 7,
+      "attempts": 108,
+      "unknown": 108,
+      "input": 0,
+      "cached": 0,
+      "output": 0,
+      "root_input": 0,
+      "root_cached": 0,
+      "root_output": 0
+    },
+    {
+      "hour": 8,
+      "attempts": 100,
+      "unknown": 82,
+      "input": 1238554,
+      "cached": 178176,
+      "output": 5703,
+      "root_input": 3419705,
+      "root_cached": 3404928,
+      "root_output": 2137
+    }
+  ],
+  "incidents": [
+    {
+      "id": "63919bfa-fff7-4c36-9d07-566f7263e0fe",
+      "role": "P1",
+      "work": "paircoach-lightweight-real-selection-v2-fixture-alignment",
+      "reason": "DECLARED_FILE_UNAVAILABLE",
+      "detail": "MISSING_FILE",
+      "status": "ESCALATED",
+      "opened_ms": 1794527490503,
+      "failed_ms": 1794527490556,
+      "open_sequence": 88116,
+      "fail_sequence": 88118,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "63919bfa-fff7-4c36-9d07-566f7263e0fe",
+        "operation_id": "63919bfa-fff7-4c36-9d07-566f7263e0fe",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "DECLARED_FILE_UNAVAILABLE"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "63919bfa-fff7-4c36-9d07-566f7263e0fe",
+        "operation_id": "63919bfa-fff7-4c36-9d07-566f7263e0fe",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "bc5d994d-170b-400c-b96d-bda2baee5542",
+      "role": "P2",
+      "work": "paircoach-ac027-veto-browser-ack-path-diagnosis",
+      "reason": "TURN_REQUIRES_RECONCILIATION",
+      "detail": "TRANSPORT_LIMIT",
+      "status": "ESCALATED",
+      "opened_ms": 1794529633250,
+      "failed_ms": 1794529633269,
+      "open_sequence": 90280,
+      "fail_sequence": 90281,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "bc5d994d-170b-400c-b96d-bda2baee5542",
+        "operation_id": "bc5d994d-170b-400c-b96d-bda2baee5542",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "TURN_REQUIRES_RECONCILIATION"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "bc5d994d-170b-400c-b96d-bda2baee5542",
+        "operation_id": "bc5d994d-170b-400c-b96d-bda2baee5542",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "264a3d6b-8df0-42b9-ae0c-1957f86125b2",
+      "role": "P2",
+      "work": "paircoach-ac027-veto-browser-ack-path-diagnosis",
+      "reason": "AUTOMATIC_RECOVERY_UNRESOLVED",
+      "detail": "RECOVERY_ATTEMPTS_EXHAUSTED",
+      "status": "ESCALATED",
+      "opened_ms": 1794529803613,
+      "failed_ms": 1794529803631,
+      "open_sequence": 90521,
+      "fail_sequence": 90522,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "264a3d6b-8df0-42b9-ae0c-1957f86125b2",
+        "operation_id": "264a3d6b-8df0-42b9-ae0c-1957f86125b2",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "AUTOMATIC_RECOVERY_UNRESOLVED"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "264a3d6b-8df0-42b9-ae0c-1957f86125b2",
+        "operation_id": "264a3d6b-8df0-42b9-ae0c-1957f86125b2",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "77ed3a36-b4ea-4fd2-8de4-a81d72ad1f6a",
+      "role": "K",
+      "work": "",
+      "reason": "TURN_REQUIRES_RECONCILIATION",
+      "detail": "TURN_UNSETTLED",
+      "status": "ESCALATED",
+      "opened_ms": 1794530437676,
+      "failed_ms": 1794530437688,
+      "open_sequence": 91389,
+      "fail_sequence": 91390,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "77ed3a36-b4ea-4fd2-8de4-a81d72ad1f6a",
+        "operation_id": "77ed3a36-b4ea-4fd2-8de4-a81d72ad1f6a",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "TURN_REQUIRES_RECONCILIATION"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "77ed3a36-b4ea-4fd2-8de4-a81d72ad1f6a",
+        "operation_id": "77ed3a36-b4ea-4fd2-8de4-a81d72ad1f6a",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "4eb2898f-d468-411a-916b-317168e2a0fa",
+      "role": "K",
+      "work": "",
+      "reason": "TURN_REQUIRES_RECONCILIATION",
+      "detail": "TURN_UNSETTLED",
+      "status": "ESCALATED",
+      "opened_ms": 1794532410188,
+      "failed_ms": 1794532410206,
+      "open_sequence": 92771,
+      "fail_sequence": 92772,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "4eb2898f-d468-411a-916b-317168e2a0fa",
+        "operation_id": "4eb2898f-d468-411a-916b-317168e2a0fa",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "TURN_REQUIRES_RECONCILIATION"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "4eb2898f-d468-411a-916b-317168e2a0fa",
+        "operation_id": "4eb2898f-d468-411a-916b-317168e2a0fa",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "65f127fa-64ef-41c8-9f19-95e5eaf59b6a",
+      "role": "K",
+      "work": "",
+      "reason": "TURN_REQUIRES_RECONCILIATION",
+      "detail": "TURN_UNSETTLED",
+      "status": "ESCALATED",
+      "opened_ms": 1794538457837,
+      "failed_ms": 1794538457882,
+      "open_sequence": 96320,
+      "fail_sequence": 96321,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "65f127fa-64ef-41c8-9f19-95e5eaf59b6a",
+        "operation_id": "65f127fa-64ef-41c8-9f19-95e5eaf59b6a",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "TURN_REQUIRES_RECONCILIATION"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "65f127fa-64ef-41c8-9f19-95e5eaf59b6a",
+        "operation_id": "65f127fa-64ef-41c8-9f19-95e5eaf59b6a",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "7215d865-479d-4769-8cb1-256de6cb1067",
+      "role": "P1_4",
+      "work": "paircoach-lightweight-27e-java-run-reconciliation-ro-diagnosis",
+      "reason": "TURN_REQUIRES_RECONCILIATION",
+      "detail": "TURN_UNSETTLED",
+      "status": "ESCALATED",
+      "opened_ms": 1794541409243,
+      "failed_ms": 1794541409371,
+      "open_sequence": 99314,
+      "fail_sequence": 99316,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "7215d865-479d-4769-8cb1-256de6cb1067",
+        "operation_id": "7215d865-479d-4769-8cb1-256de6cb1067",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "TURN_REQUIRES_RECONCILIATION"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "7215d865-479d-4769-8cb1-256de6cb1067",
+        "operation_id": "7215d865-479d-4769-8cb1-256de6cb1067",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    },
+    {
+      "id": "9527243e-7e49-4c2f-bf92-1f7c43aad874",
+      "role": "K",
+      "work": "",
+      "reason": "TURN_REQUIRES_RECONCILIATION",
+      "detail": "TURN_UNSETTLED",
+      "status": "ESCALATED",
+      "opened_ms": 1794543289657,
+      "failed_ms": 1794543289672,
+      "open_sequence": 101014,
+      "fail_sequence": 101015,
+      "opened_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "9527243e-7e49-4c2f-bf92-1f7c43aad874",
+        "operation_id": "9527243e-7e49-4c2f-bf92-1f7c43aad874",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "start",
+        "reason": "TURN_REQUIRES_RECONCILIATION"
+      },
+      "failed_payload": {
+        "schema": "thalamus.log/1",
+        "run_id": "9527243e-7e49-4c2f-bf92-1f7c43aad874",
+        "operation_id": "9527243e-7e49-4c2f-bf92-1f7c43aad874",
+        "source": "Watchdog",
+        "target": "JUDGE",
+        "layer": "Supervision",
+        "phase": "fail",
+        "reason": "INCIDENT_ANALYSIS_UNRESOLVED"
+      }
+    }
+  ],
+  "decision_receipts": [
+    {
+      "id": "c9056c9f-1f24-4b02-93d0-f9197b3d115e",
+      "at": "2026-11-12T10:22:03.162000+01:00",
+      "content_sha256": "ca87e5633a02f14433d142efd6b35f9e7cb06ccf01f59816b11cca38af6015f4"
+    },
+    {
+      "id": "6238031a-7dbb-4179-b90a-6031511f2deb",
+      "at": "2026-11-12T10:49:51.870000+01:00",
+      "content_sha256": "45828d722f5f3b6e766846682d326268a686717d1644c9771cfe825d9f9218ed"
+    },
+    {
+      "id": "393ee9a0-4060-427e-8762-7ba7b2b569ae",
+      "at": "2026-11-12T13:21:14.776000+01:00",
+      "content_sha256": "5321d0d975b57b432570fbd4d0833c60d6c1b71a5f2d0d4849edd77da34796db"
+    },
+    {
+      "id": "44b050f2-8a9a-4531-bf30-f7788a664f63",
+      "at": "2026-11-12T21:07:51.115000+01:00",
+      "content_sha256": "dab459b0cdf903a62bc0af3f51aaaf85a92f208a84bc0d23d8daeb5040c34646"
+    },
+    {
+      "id": "2b288f8f-b6f8-4941-8f7e-c3fd47d5661a",
+      "at": "2026-11-13T03:58:59.688000+01:00",
+      "content_sha256": "1d3b0dcbf11fb0c36895b2cebffac2eb16705c9cf7a2143eac567ade4649d889"
+    }
+  ],
+  "fanout": {
+    "messages": 1283,
+    "distinct_inputs": 67,
+    "minimum_per_input": 6,
+    "maximum_per_input": 28,
+    "outside_current_input_window": [
+      {
+        "id": "c9056c9f-1f24-4b02-93d0-f9197b3d115e",
+        "notifications": 6,
+        "sender": "HUMAN",
+        "at": "2026-11-12T10:22:03.162000+01:00"
+      }
+    ],
+    "by_role": {
+      "P1_4": 81,
+      "P3": 240,
+      "P2_4": 66,
+      "P1_3": 6,
+      "P1_2": 97,
+      "P4": 164,
+      "P6": 152,
+      "P5": 92,
+      "P1": 48,
+      "P2": 258,
+      "P2_3": 70,
+      "P2_2": 9
+    }
+  },
+  "multiplicity": {
+    "MULTI": {
+      "attempts": 4897,
+      "distinct_call_turns": 788
+    },
+    "NONE": {
+      "attempts": 1115,
+      "distinct_call_turns": 136
+    },
+    "SINGLE": {
+      "attempts": 244,
+      "distinct_call_turns": 26
+    }
+  },
+  "stop_recheck": {
+    "paused_roles": 14,
+    "running_turns": 0,
+    "calls_created_after_stop": 0,
+    "judge_turns_in_original_8h_window": 0
+  }
+}

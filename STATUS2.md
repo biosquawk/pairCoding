@@ -353,6 +353,269 @@ Jej kopia nie jest załącznikiem do publicznego repo. Surowe ślady AI równie�
 
 **Bieżąca decyzja: STOP zachowany, wydanie NO-GO, nowa ETA nieustalona.** Publikacja kodu i tego audytu jest zabezpieczeniem stanu, nie deklaracją gotowości do użycia.
 
+## 13. Odpowiedzi na pytania pokontrolne właściciela
+
+Uzupełnienie 13.11.2026 na podstawie **istniejących** danych: pełnego TAP, 244 wierszy CSV, bazy otwartej `mode=ro`, źródła produktu `257e90b8`, diffów checkpointów oraz źródła Thalamusa `4f2fea7c`. **Nie uruchamiano agentów, testów, modelu produktu, przygotowania środowiska, builda ani serwera.** Produkcyjnego kodu i fixture nie zmieniono.
+
+To uzupełnienie koryguje uproszczenia §6.1: nie każdy błąd jest skutkiem umask, a dwa ReferenceError nie dowodzą uruchamiania wycofanego LSP. Tam, gdzie wyjątek został utracony lub ślad nie rejestruje wymaganej zmiennej, podaję **UNKNOWN**, zamiast dopisywać prawdopodobną przyczynę jako fakt.
+
+### 13.1. Wszystkie 244 FAIL — rozłączne grupy i odpowiedź a–d
+
+Pełny TAP rozwija wielowierszowe `error: |-`, które pierwotny CSV skracał do samego `|-`. Przypisałem każdy z 244 wpisów dokładnie do jednej grupy obserwowanego błędu. **To kategoryzacja symptomów i wykazanych przyczyn, nie 244 niezależne bugi.** Wiersz po wierszu: [followup-failure-classification.csv](docs/audit/20261113-night/followup-failure-classification.csv). ID to kolejny czerwony wpis w pełnym logu, niezależnie od numeracji poszczególnych grup TAP.
+
+| Grupa | FAIL | Dokładny komunikat / ustalenie |
+| --- | ---: | --- |
+| PERMISSIONS | 12 | `RECOVERY_REQUIRED: Workspace identity authority is not privately owned.` — 10 bezpośrednio, 2 przez child/ERR_ASSERTION |
+| DATA_DIR | 75 | `INVALID_V2_DATA_DIR: V2 workspace storage must be the canonical project .paircoach directory...` — 70 bezpośrednio, 5 jako `Product child exited 1/null` |
+| INITIALIZING | 29 | `PROJECT_INITIALIZING: Canonical project recovery has not completed. Await listen before accessing the core.` — 22 bezpośrednio + 7 w child/harnessie |
+| UNMEASURED_READINESS | 1 | `ERR_ASSERTION`: oczekiwane canRun=true, odpowiedź ma `RUNTIME_READINESS_PENDING`; `http-run-report.test.ts` |
+| MASKED_RECOVERY | 70 | `RUN_RECOVERY_REQUIRED: Runtime ownership could not be recovered; finish/project replacement cannot forget retained Runs...` w transition/close; wcześniejszy błąd może zostać zamaskowany |
+| BASELINE_MISSING | 33 | `Pinned e982 baseline source required` / `Pinned e982 source required`: 31 razy fixture-child + 2 legacy-empty-child; brak `PAIRCOACH_IDENTITY_BASELINE` |
+| VM_CONTEXT | 2 | `disableNativeCompletionProviders is not defined` oraz `retiredModelsRef is not defined` w **wyekstrahowanym callbacku uruchamianym przez node:vm** |
+| CSS_IMPORT | 1 | `ERR_UNKNOWN_FILE_EXTENSION: Unknown file extension ".css"` przy imporcie Monaco w Node; `lightweight-editor/words.test.ts` |
+| GENERATOR_BYTES | 3 | `ERR_ASSERTION` porównania generatora: LF kontra CRLF zamrożonych plików; config, descriptors i java27-exact |
+| FACADE_BYTES | 2 | Marker z `\n` nie znajduje CRLF oraz inny hash parseJUnit; `runner-facade/boundary.test.ts` |
+| JDT_ASSERTION | 1 | `ERR_ASSERTION: null !== '27.0.1.0.2'`: stary wymóg `language.serverJvm` w `runtime-adapters/java27-exact.test.ts` |
+| FAKE_DOCKER_JSON | 1 | `SyntaxError: Unexpected end of JSON input` w observeEngine; kontrolowany fake Docker w `prepare-phase.test.ts` nie zwrócił JSON dla bieżącej ścieżki |
+| FAKE_EXPORT | 1 | `SyntaxError: ...runtime-prepare.mjs does not provide an export named 'beginDockerCommand'`: podstawiony moduł w prepare-orchestration-counter |
+| LEGACY_CHECKPOINT_SIGKILL | 4 | `ERR_ASSERTION: 'SIGKILL' !== null` w historycznych przypadkach REQUIRED private pipe; zadziałał własny 20-sekundowy kill harnessu |
+| RETENTION_BYTES | 2 | `ERR_ASSERTION`: hash pliku retention z CRLF kontra zatwierdzony hash LF |
+| REMAINDER_REGEX | 1 | Top-level `ERR_ASSERTION: exact image guard located`; wrapper raportuje `ERR_TEST_FAILURE: test failed`. Regex szuka starego `check(values.length...)`, obecny kod ma `check(Array.isArray(values) && values.length...)` |
+| TIMEOUT | 3 | Po jednym `Child timeout:`, `Timeout: server ready`, `observation timeout`; sama końcowa obserwacja nie dowodzi jednej przyczyny |
+| CLI_EARLY_EXIT | 1 | `ERR_TEST_FAILURE: child exited before marker`; `runtime-prepare-cli/control.test.mjs` |
+| ADMISSION_FENCE | 1 | `ERR_ASSERTION: true !== false` dla `reconciliationRequired` po pierwotnym Run; `lightweight-live-run-admission/http-budget.test.ts:39` |
+| ANCESTRY | 1 | `RECOVERY_REQUIRED: Private snapshot/recovery ancestry changed; preserve its material.` w negatywie cooperative-topology |
+| **SUMA** | **244** | Każdy przypadek policzony raz |
+
+**a) Uprawnienia:** dokładnie **12 jawnych odmów prywatności magazynu**, nie „244 od umask”. Guard `SnapshotStorage.privateAuthority()` w `SnapshotStorage.ts:144–151` sprawdza zarówno `(stat.mode & 0o077)`, jak i UID. Log nie wypisuje mode/UID każdej ścieżki, więc dosłownego `0755` nie można dowieść dla wszystkich dwunastu wyłącznie komunikatem. Pominięte `umask 077` i precreate katalogów bez mode są wykazaną przyczyną rodziny problemów; dodatkowe takie błędy mogły zostać przykryte przez grupę 70 cleanup. **Nie wolno dopisać tych 70 do 12 jako potwierdzonych 0755.**
+
+**b) Stare fixture/start/readiness:** jawnie **75 + 29 + 1 = 105**. To trzy rozłączne grupy. W szczególności await listen nie jest kosmetyką: wcześniejszy odczyt `app.workspace` trafia w `currentCore()` i poprawnie zwraca PROJECT_INITIALIZING. Brak baseline e982 daje osobne 33, a nie dodatkowe awarie storage.
+
+**c) Wycofane LSP:** **1 bezpośrednio wykazany przypadek starej asercji JDT `serverJvm`**. Dwa ReferenceError z VM **nie są testami wycofanego LSP**: obie nazwy istnieją w produkcyjnym `EditorPanel.tsx`. Cztery SIGKILL dotyczą starego kontrolera przygotowania/ROOT pipe, nie dowodzą awarii usług językowych. Pozostałe testy z dawnych katalogów mają mieszane kontrakty; nie klasyfikuję ich hurtowo jako usuwalne. Patrz §13.5.
+
+**d) Ile jest rzeczywistych bugów produkcyjnych?** Z tych materiałów **nie da się rzetelnie wyprowadzić jednej liczby**: liczba FAIL, liczba przyczyn i liczba wad produktu to różne wielkości. Nie nazywam wszystkich guard refusals błędami guardów. Dwa konkretne problemy wymagają uwagi w produkcyjnym kodzie:
+
+- **Maskowanie błędu startup przez cleanup** jest wykazane w źródle: `listen().catch(async error => { await close(); throw error; })` (`http.ts:1007`), a `close()` wywołuje `stopRuntimeForTransition(false)` (`1017`). Ten rzuca `RUN_RECOVERY_REQUIRED` (`612–613`), jeśli nie ma runtimeExecution lub binding ma runtimeError. Wtedy pierwotny wyjątek nie zostaje ponownie rzucony. W logu jest **70 końcowych wystąpień tego kodu**, ale bez zachowanego pierwotnego wyjątku nie da się wykazać, że każde z nich było wyłącznie maskowaniem albo osobnym bugiem. Rozkład tych 70 jest poniżej.
+- **1 aktywny test zachowania admission** (`http-budget.test.ts:39`) kończy się nieoczekiwanie `reconciliationRequired=true` po oczekiwanym rozliczeniu Run. To konkretny sygnał regresji używanej ścieżki klienta, nie stary wymóg LSP. Kod i ślad GUI ujawniają mechanizm opisany w §13.2. Bez ponowienia na poprawnie przygotowanych fixture nie zamieniam tego w dowód jedynej przyczyny każdego podobnego FAIL.
+
+Timeouty, ancestry i early-exit pozostają przypadkami wymagającymi dalszego rozstrzygnięcia. **Nie ogłaszam „173 fixture + 71 potwierdzonych bugów” ani innej sztucznej sumy pierwotnych przyczyn.** To przekraczałoby zawartość dowodów.
+
+Pliki z 70 końcowymi `RUN_RECOVERY_REQUIRED`:
+
+| Plik testu | FAIL |
+| --- | ---: |
+| `tests/backend-cutover/http-startup.test.ts` | 1 |
+| `tests/client/finish-network-unknown.test.ts` | 1 |
+| `tests/client/finish-snapshot-cache.test.ts` | 12 |
+| `tests/integration/g3-async-public.test.ts` | 3 |
+| `tests/integration/g3-corrections.test.ts` | 7 |
+| `tests/integration/g3-public.test.ts` | 15 |
+| `tests/integration/ledger-public-failure.test.ts` | 5 |
+| `tests/integration/report-history-p1.test.ts` | 2 |
+| `tests/lightweight-backend/handshake-readiness.test.ts` | 12 |
+| `tests/readiness-capture-interleaving/interleaving.test.ts` | 12 |
+
+**Dodatkowy dowód CRLF bez uruchamiania testów:** odczytany retention script ma raw SHA `21f749fa…5ac31`; po samym przeliczeniu bajtów z CRLF→LF daje dokładnie oczekiwany `19e2c8b7…9eaed7`. Wycięte parseJUnit po normalizacji daje dokładnie golden `29bffb52…d5450`. W logu generatorów porównano Buffer(19924) z Buffer(20702), a w config oba warianty timeoutu mają 900000 — różnią się końcami linii. To nie jest zgoda na zmianę goldenów ani osłabienie ochrony źródeł; kodu nie modyfikowano.
+
+#### Czy dwa niescalone commity pomagają konkretnym FAIL?
+
+Tak, **statycznie adresują rozpoznane przyczyny w plikach zawierających łącznie 34 czerwone przypadki**. Nie dowodzi to 34 naprawionych testów: żadnego nie ponowiono, a po usunięciu pierwszej przeszkody mogą ujawnić się następne.
+
+| Checkpoint | Plik / liczba czerwonych przypadków z logu | Co zmienia |
+| --- | --- | --- |
+| `158881b` | `tests/client/finish-network-unknown.test.ts`: **1**; `tests/client/finish-snapshot-cache.test.ts`: **12**; `tests/client/header-start.test.ts`: **1**; `tests/client/presence.test.ts`: **7**; `tests/client/real.test.ts`: **2**; `tests/coach/codex-provider.test.ts`: **2**; `tests/core/rename-http.test.ts`: **1**; `tests/core/rename-lossless.test.ts`: **2**. Łącznie **28** | Canonical dataDir w 8 plikach; w codex-provider dodatkowo await listen i jawne ustawienia V2/consent przez istniejący transport. |
+| `8099dea` | `tests/backend-cutover/http-run-report.test.ts`: **1**; `tests/client/finish-unknown.test.ts`: **1**; `tests/client/proposal-unknown.test.ts`: **4**. Łącznie **6** | 3 pliki: measured GET przed canRun; child await listen przed workspace/hook; canonical dataDir. Obserwacja finish-unknown miała timeout bez stderr, więc to powiązanie źródłowe, nie dowiedziona naprawa konkretnego timeoutu. |
+
+Oba commity są zachowane jako checkpointy, nie są scalone. Asercje i progi zachowano w diffie; **wynik po poprawkach NOT_RUN**, a nie PASS. Nie rozwiązują wszystkich 244 przypadków, np. 33 baseline, CRLF i obu VM-context.
+
+### 13.2. Dlaczego drugi Run Tests został zablokowany
+
+Źródło: [RuntimeClientV2.ts w 257e90b8](https://github.com/biosquawk/pairCoding/blob/257e90b838abec4e9b332385c71f1be8201fc013/src/services/RuntimeClientV2.ts#L97), funkcje `applyProject`, `matchesPendingRunProject`, `perform`, `requiresReconciliation`.
+
+Istotny, **istniejący** wycinek kodu (`126–137`):
+
+```ts
+// Only TESTS canRun/problem are neutral presentation metadata for pending MAIN.
+// Pending TESTS retains its original strict equality.
+if (pending.request.mode !== 'RUN_MAIN') return equal(value, pending.project);
+const tests = pending.project.capabilities.execution.modes.RUN_TESTS;
+// ... tworzenie observed z przywróconymi tests.canRun / tests.problem ...
+return equal(observed, pending.project);
+```
+
+Łańcuch prowadzący do trwałego fence:
+
+1. `run()` (`283–286`) zapisuje oryginalny request, authority i kopię projektu w `pendingRun`; callback dispatch w `perform()` (`244–248`) dodaje ten request do `unresolved` z `inFlight=true`.
+2. `applyProject()` (`99–102`) oblicza `own = matchesPendingRunProject(...) && equal(authority,...) && matchingRun`, następnie **`pending.valid &&= own`**. Jedna niezgodna obserwacja trwale zatruwa tę próbę. Kolejny poprawny snapshot nie przywraca valid.
+3. Dla pending TESTS pełne `equal(value, pending.project)` traktuje również pochodną gotowość `canRun/problem` jako niezmienną tożsamość żądania. Dopływ queued snapshot z własnym TESTS PREPARE_REQUIRED może więc zatruć oryginalne przyjęcie, choć runId/mode/config/workspace są nadal właściwe.
+4. Po oryginalnym HTTP202 `perform()` (`250–252`) wymaga zgodnej revision lub `ownsPendingRunObservation()`. Zatrute `pending.valid=false` obala ten wyjątek. Alternatywnie sam accept w `run()` (`293–294`) odrzuca `!admission.valid`. W obu ścieżkach catch nie usuwa unresolved.
+5. Usunięcie wpisu występuje wyłącznie w zaakceptowanej ścieżce (`255–256`) albo autoryzowanym reconcile. `finally` (`265–269`) ustawia `inFlight=false` i czyści pendingRun, ale **nie usuwa unresolved**.
+6. `requiresReconciliation()` (`71–73`) widzi zachowany wpis dla projektu/klienta. `App.tsx:228` podmienia oba canRun na false, jeśli `reconciliationRequired`; `RuntimeStatusV2.tsx:16` i przyciski stosują te flagi. Dlatego nowe READY nie wystarcza do kolejnego Run. Zwiększanie timeoutu nic tu nie naprawia.
+
+**Zgodność z istniejącym śladem 257e:**
+
+| UTC | Dowód |
+| --- | --- |
+| 05:05:28.365 | Rozpoczęcie oryginalnego POST TESTS w trace.network |
+| 05:06:02.107 | Snapshot: ten sam session/project, workspace5/controlEpoch0, własny Run `1d34e540...` QUEUED; runtime READY, TESTS canRun=false/PREPARE_REQUIRED |
+| 05:06:06.127 | Własny Run przechodzi RUNNING; oryginalna odpowiedź 202 dotarła w tym przedziale, przed edycją |
+| 05:06:15.782 | Faktyczne zakończenie FAILED; JUnit 1 test/1 failure |
+| 05:06:21.548 / .636 | CODE_CHANGED poprawki i jej oryginalny ACK, workspace6 |
+| 05:06:28.958 | Snapshot tego samego FAILED, workspace6, runtime READY i oba canRun=true |
+| końcowe 30 s | Playwright: 62 odczyty przycisku nadal disabled, mimo powyższej gotowości |
+
+Mechanizm jest wykazany w kodzie i zgadza się z przejściami śladu. **Ślad nie zrzuca bezpośrednio wartości prywatnej zmiennej pending.valid ani wszystkich pól zamknięcia pendingRun.** Nie nazywam odczytu źródła instrumentowanym dowodem wykonania każdej gałęzi; brakującej diagnostyki nie uzupełniam fikcyjnym logiem. Oryginalne 202 i późniejszy terminal nie mogą samodzielnie omijać kontroli requestId/authority.
+
+**Dlaczego 833ffe tylko MAIN?** To nie domysł o roztargnieniu wykonawcy: TASK **`32c248f3-1ae2-47d9-ab73-70c5aabb3bed`** zlecał wprost „metadata-only TESTS readiness podczas pending MAIN” i zachowanie selected MAIN semantics. Delivery/risks i komentarz kodu jawnie pozostawiają TESTS strict. Commit **`833ffe1801f615f815231aca096fe40023ad1658`** był wąską poprawką wcześniejszego scenariusza MAIN. Brak rozszerzenia odbioru na przejściowe metadane **własnego TESTS** jest luką zakresu/integracji; nie naprawiono jej samym przyjęciem 833ffe.
+
+**Punkt przyszłej zmiany:** powyższy branch `if (pending.request.mode !== 'RUN_MAIN') return equal(...)` i normalizacja `canRun/problem` w `matchesPendingRunProject`, używana przez obie kontrole. Nie należy po prostu usuwać unresolved albo ignorować całego projektu. Ewentualna poprawka musi rozróżnić pochodną gotowość podczas już wysłanego, dokładnie skorelowanego Run od rzeczywistej zmiany settings/root/files/workspace/config/client/connection/controlEpoch i zachować trwałe poison po realnym drift. To wskazanie miejsca i kontraktu naprawy, **bez wdrożenia lub deklaracji przetestowanego patcha**.
+
+### 13.3. Skąd 1 283 powiadomienia i wielokrotne work_id
+
+Źródło Thalamusa: `4f2fea7c5c2551d65f6d271d1b23ac93412ce2a1`. Klasy poniżej są w `next-runtime`.
+
+**a) `core/.../OwnerSources.java`, `notifyWorkers(String input)`, linie 432–478.** Wywołują ją m.in. `nativeInput()` i `humanReply()` (`410–430`). Kluczowe elementy:
+
+```java
+for (var task : store.rows(
+    "SELECT * FROM tasks WHERE state NOT IN ('ACCEPTED','CANCELLED')")) {
+    if (!rootsForWork(work).contains(selected)) continue;
+    String id = "source-update:" + Invocation.hash(input + "\0" + role + "\0" + work);
+    // INSERT OR IGNORE ... recipient=assignee, kind=QUESTION
+    // content="Owner source updated for " + work + ...
+}
+```
+
+**To nie jedna wiadomość na rolę i nie bezwarunkowy broadcast do całego zespołu.** Powstaje jedna wiadomość na kombinację **input × rola × niezamknięty work**, tylko dla właściwego korzenia źródła. RESULT_READY i RECEIVED nadal przechodzą filtr. Set zwracany z metody deduplikuje role do wybudzenia, lecz nie wiadomości — identyfikator zawiera work. `INSERT OR IGNORE` blokuje powtórkę tej samej trójki, nie kilku starych zadań tej samej roli.
+
+Dodatkowy odczyt bazy daje **67 różnych Updated input**, po **6–28 wiadomości**. W oknie były 66 wejścia HUMAN, ale 6 powiadomień odnosi się do **starego** źródła `c9056c9f-1f24-4b02-93d0-f9197b3d115e` z 12.11 10:22:03.162. Dlatego iloraz 1283/66 w §5 jest wskaźnikiem natężenia, **nie dosłownym rachunkiem 66 identycznych broadcastów**. Liczba open works i późne wiązanie źródeł są potrzebne do wyjaśnienia wyniku.
+
+| Odbiorca | Powiadomienia |
+| --- | ---: |
+| P1_4 | 81 |
+| P3 | 240 |
+| P2_4 | 66 |
+| P1_3 | 6 |
+| P1_2 | 97 |
+| P4 | 164 |
+| P6 | 152 |
+| P5 | 92 |
+| P1 | 48 |
+| P2 | 258 |
+| P2_3 | 70 |
+| P2_2 | 9 |
+
+**b) `runtime/.../SessionRuntime.java`, `bindTurnWork(...)`, linie 1032–1066.** `executeTurn()` wywołuje ją po INSERT turns (`787`). Dla zwykłej tury SQL brzmi:
+
+```sql
+INSERT INTO turn_work SELECT ?,work_id,execution_id FROM tasks
+WHERE assignee=? AND state NOT IN ('ACCEPTED','CANCELLED')
+```
+
+Nie ma wyboru tylko nowego inbox/current task. Wszystkie historyczne taski tej roli, które nie osiągnęły ACCEPTED/CANCELLED, trafiają do kolejnej tury, także RESULT_READY. Osobna ścieżka `RECOVERY:` kopiuje ograniczony zestaw z poprzedniej tury po zgodnym execution; reminder-recovery zachowuje zwykłe wiązanie. K jako manager nie dostaje automatycznie worków pracowników — stąd dużo jego tur bez taskowego przypisania.
+
+**Korekta jednostki:** **4 897 to próby dostawcy**, nie 4 897 tur. Są związane z **788 różnymi calls.turn** w grupie MULTI. Pozostałe grupy: 244 próby/26 turn SINGLE i 1 115 prób/136 turn NONE. Liczby nie muszą równać się licznikom TurnStarted w oknie: turn może zacząć się przed oknem, a jedna tura wykonywać wiele odpowiedzi dostawcy.
+
+Powiązanie ma również ścieżkę kontekstową: `SessionRuntime.contextInput()` (`1142–1164`) pobiera worki z turn_work oraz nieprzeczytanego inbox, następnie `TaskTransportService.contextInputs()` (`51…`) dołącza odpowiednie TASK/input. Zapytanie pamięci jest ograniczone do 4096 znaków, więc sam INSERT w turn_work **nie jest dowodem nieograniczonego kopiowania całej historii do pojedynczego promptu**. Wiele tasków, wiadomości i tur wywołuje powtarzane odczyty/konsolidacje; to wykazany mechanizm narzutu. Nie da się jednak z samego SQL przypisać konkretnej liczby zaoszczędzonych tokenów ani dowieść, że odpowiada za całe 108 mln P2. **108 mln to suma wejść przez 8 godzin, nie rozmiar jednego kontekstu.**
+
+### 13.4. Osiem incydentów JUDGE — dokładne wyzwalacze i utracony wyjątek
+
+Odczytano wszystkie **16 payloadów events** i odpowiadające im `incidents.evidence.detail_code`. Każda para ma `schema=thalamus.log/1`, `run_id=operation_id=ID incydentu`, `source=Watchdog`, `target=JUDGE`, `layer=Supervision`. Otwarcie ma `phase=start` i reason jak niżej; failure ma zawsze `phase=fail`, **`reason=INCIDENT_ANALYSIS_UNRESOLVED`**. Wszystkie 8 rekordów incydentów ma status ESCALATED.
+
+| Incydent / sekwencje open→fail | Europe/Warsaw open→fail | Rola / work_id | Trigger / detail_code |
+| --- | --- | --- | --- |
+| `63919bfa-fff7-4c36-9d07-566f7263e0fe` / 88116→88118 | 00:51:30.503 → 00:51:30.556 | P1 / `paircoach-lightweight-real-selection-v2-fixture-alignment` | `DECLARED_FILE_UNAVAILABLE` / `MISSING_FILE` |
+| `bc5d994d-170b-400c-b96d-bda2baee5542` / 90280→90281 | 01:27:13.250 → 01:27:13.269 | P2 / `paircoach-ac027-veto-browser-ack-path-diagnosis` | `TURN_REQUIRES_RECONCILIATION` / `TRANSPORT_LIMIT` |
+| `264a3d6b-8df0-42b9-ae0c-1957f86125b2` / 90521→90522 | 01:30:03.613 → 01:30:03.631 | P2 / `paircoach-ac027-veto-browser-ack-path-diagnosis` | `AUTOMATIC_RECOVERY_UNRESOLVED` / `RECOVERY_ATTEMPTS_EXHAUSTED` |
+| `77ed3a36-b4ea-4fd2-8de4-a81d72ad1f6a` / 91389→91390 | 01:40:37.676 → 01:40:37.688 | K / `(brak work)` | `TURN_REQUIRES_RECONCILIATION` / `TURN_UNSETTLED` |
+| `4eb2898f-d468-411a-916b-317168e2a0fa` / 92771→92772 | 02:13:30.188 → 02:13:30.206 | K / `(brak work)` | `TURN_REQUIRES_RECONCILIATION` / `TURN_UNSETTLED` |
+| `65f127fa-64ef-41c8-9f19-95e5eaf59b6a` / 96320→96321 | 03:54:17.837 → 03:54:17.882 | K / `(brak work)` | `TURN_REQUIRES_RECONCILIATION` / `TURN_UNSETTLED` |
+| `7215d865-479d-4769-8cb1-256de6cb1067` / 99314→99316 | 04:43:29.243 → 04:43:29.371 | P1_4 / `paircoach-lightweight-27e-java-run-reconciliation-ro-diagnosis` | `TURN_REQUIRES_RECONCILIATION` / `TURN_UNSETTLED` |
+| `9527243e-7e49-4c2f-bf92-1f7c43aad874` / 101014→101015 | 05:14:49.657 → 05:14:49.672 | K / `(brak work)` | `TURN_REQUIRES_RECONCILIATION` / `TURN_UNSETTLED` |
+
+Wyzwalacze: 1 deklaracja niedostępnego pliku, 6 nierozliczonych tur (P2, 4×K, P1_4), 1 wyczerpanie prób automatycznego recovery P2. Detail_code są z evidence, nie dorobioną interpretacją.
+
+**Konkretny wyjątek analizy nie został utrwalony.** `WatchdogAndVenetianJudge.analyze()` (`427…`, catch `474–498`) robi:
+
+```java
+} catch (Exception ex) {
+    if (ex instanceof Failure f && f.code().equals("ROLE_BUSY")) {
+        // requeue, nie JudgeAnalysisFailed
+        return;
+    }
+    // UPDATE incidents SET status='ESCALATED'
+    journal.record("JudgeAnalysisFailed", /* ... */ "fail",
+                   "INCIDENT_ANALYSIS_UNRESOLVED");
+}
+```
+
+Catch odrzuca class/message/stack/cause wyjątku. `incidents` też nie ma pola przechowującego exception. W sąsiednich zdarzeniach nie zapisano szczegółowego błędu JUDGE. W badanym oknie nie ma ani prób calls JUDGE, ani utrwalonych turns JUDGE: błąd występuje przed zapisem nowej tury, a nie jako udowodniona semantyczna odpowiedź modelu. Z tego **nie wynika**, czy przerwanie było spowodowane startem sandboxa, poświadczeniami, profilem lub innym wyjątkiem przed wywołaniem dostawcy. Kod ROLE_BUSY ma osobną ścieżkę i nie wyjaśnia tych ośmiu failure events. `EMPTY_JUDGE_CORRECTION` istnieje w kodzie po uzyskaniu wyniku tury, ale przy braku zapisanej tury nie jest wyjaśnieniem potwierdzonym dla tych ośmiu zdarzeń.
+
+Nie przypisuję więc zmyślonego `ROLE_PAUSED`, `MODEL_AT_CAPACITY` ani błędu narzędzia jako „konkretnego wyjątku”. **Konkretny utrwalony błąd to tylko INCIDENT_ANALYSIS_UNRESOLVED; pierwotny wyjątek UNKNOWN z powodu utraty diagnostyki.** To wykazana luka obserwowalności, nie brak odczytu tych 16 payloadów. Ich oczyszczone dokładne wartości są w [followup-technical-evidence.json](docs/audit/20261113-night/followup-technical-evidence.json).
+
+### 13.5. JS-first native paste i dwa ReferenceError
+
+Źródło: P2 `paircoach-lightweight-27e-final-editor-ai-gui/artifacts/ts-editor-final257e-01/runner.log` oraz proof `editor-integrated-js-first-a0237-nal-ACK-Undo---cold-refresh/proof.json`. To próba **257e**, nie wcześniejsza diagnoza TS.
+
+Dokładna różnica z Playwrighta w `harness/editor.spec.mjs:37:69`:
+
+```text
+Error: expect(received).toMatchObject(expected)
+Object {
+  "available": true, "collapsed": true, "end": true, "focused": true,
+- "value": "void workerProofAl",
++ "value": "",
+}
+Call Log: Timeout 5000ms exceeded while waiting on the predicate
+```
+
+Poprzedni krok zapisał clipboard, ustawił focus, nacisnął Ctrl+A i **potwierdził rzeczywistą selekcję całych 194 znaków źródła**. Następnie wysłano Ctrl+V i Ctrl+End. Nie uzyskano oczekiwanej końcowej zawartości natywnej textarea. Skrypt przerwał się **przed Ctrl+Space**, a w śladzie było **0 wysłanych CODE_CHANGED**. To porażka dostarczenia/zaobserwowania edycji na tej ścieżce, nie wynik zapytania completion.
+
+Co da się rozstrzygnąć:
+
+- **Brak focusu:** nie potwierdza go log; focus był true przed i podczas końcowej asercji. Nie wolno podać „nie miał fokusu” jako przyczyny.
+- **Bootstrap:** przed paste harness zapisał „JS worker actual ON then first TS model ON”; proof pokazuje właściwy URI `main.ts`, zasoby workerów i 0 pageerrors. Nie ma dowodu prostego „czekał jeszcze na bootstrap”.
+- **readOnly Monaco:** ślad nie rejestruje `editor.getOption(readOnly)` w chwili paste. STUDENT w komunikacie kontrolnym nie jest pomiarem tej opcji. Nie da się uczciwie rozstrzygnąć readOnly, obsługi clipboard, opóźnionej zmiany modelu lub innej przyczyny na podstawie pustej textarea i braku CODE_CHANGED. Sam tekst textarea również nie jest pełnym zrzutem modelu Monaco.
+
+**Przyczyna głębsza pozostaje UNKNOWN.** Znany jest dokładny krok, asercja, stan focusu i brak wysłanej edycji. Nie przeprowadzano ponownego testu ani nowej instrumentacji w tym uzupełnieniu.
+
+**`retiredModelsRef` nie jest wycofanym serwerem LSP.** W produkcyjnym `EditorPanel.tsx:83` nadal istnieje `useRef(new Set<ITextModel>())` do wycofywanych modeli. `disableNativeCompletionProviders` jest importowane z lokalnego bridge (`10`) i używane przy mount (`112`). Test `tests/triage/browser-client-fix.test.ts` wycina tekst callbacku z komponentu i wykonuje go przez `vm.runInNewContext` (`19`, `130`) w ręcznie zbudowanym kontekście, w którym obu nazw brakuje. Stąd dokładnie **2 ReferenceError w testowym VM**, bez dowodu ReferenceError w działającym bundle. Nie usuwać ich automatycznie jako „starego LSP”; test nadal dotyczy aktywnych gwarancji lifetime/switch/Undo, ale jego kontekst nie nadążył za kodem.
+
+### 13.6. Na jakiej podstawie uruchomiono więcej ról + HOURLY
+
+W bazie są następujące konkretne wpisy HUMAN→K. Są to **wejścia operatora przekazujące decyzje właściciela**, a nie dowód, że właściciel sam wpisał je bezpośrednio w UI Thalamusa.
+
+| Europe/Warsaw | message_id | Decyzja |
+| --- | --- | --- |
+| 12.11 10:22:03.162 | `c9056c9f-1f24-4b02-93d0-f9197b3d115e` | Początkowy Lightweight: K + dokładnie P1 BE + P2 FE; repliki zabronione, P3–P6 do finału |
+| **12.11 10:49:51.870** | **`6238031a-7dbb-4179-b90a-6031511f2deb`** | **Nadrzędna korekta**, cytująca „pracujecie wszystkimi agentami, bez subsetP1/P2?” i „wylacz ograniczenia ról…”; jawnie znosi K+1BE+1FE i limit 4 instancji; dopuszcza rozłączne repliki i P3–P6 |
+| 12.11 13:21:14.776 | `393ee9a0-4060-427e-8762-7ba7b2b569ae` | Potwierdza lepszą dystrybucję i repliki, ale ciężkie P5/P6 dopiero na kandydacie; jedna integracja i Lightweight nadal obowiązują |
+| 12.11 21:07:51.115 | `44b050f2-8a9a-4531-bf30-f7788a664f63` | Po WSL: każda używana rola odzyskuje swój stan, sprząta własne zasoby i wraca do PairCoach |
+| 13.11 02:58:59.688 | `2b288f8f-b6f8-4941-8f7e-c3fd47d5661a` | Finał na 27e: P4 paczka, P3 runtime GUI, P2 edytor/AI, P5/P6 celowane końcowe przeglądy; odblokowanie po TASK |
+
+Zatem rozszerzenie składu **miało jawną podstawę**, nie było samo w sobie nieposłuszeństwem wobec nadal obowiązującego K+1BE+1FE. To **nie zwalnia ROOT/K z odpowiedzialności za sposób użycia równoległości**, starych tasków, kosztów i brak końca. Późniejsze ograniczenie P6 do bramki końcowej także pozostawało wiążące; nazwa roli i jej użycie do własnego cleanup nie dowodzą, że pełniła rolę drugiego kierownika.
+
+#### HOURLY 00:00–08:00 — zapis bezpośrednio w raporcie
+
+Strefa Europe/Warsaw. Wiersz 08 obejmuje tylko **08:00–08:51:06.800 STOP**. Ponieważ pytanie żąda godzin od 00:00, tabela obejmuje **00:00 → STOP**, tj. 8 h 51 min, a nie dokładne osiem godzin §2. Osobno pokazano input/output i cached obu obserwowanych kanałów; koszt produktu Coach E2E nadal poza rachunkiem. Cached nie dodawać drugi raz.
+
+| Godzina | Próby Thalamus / UNKNOWN | Thalamus input | w tym cached | Thalamus output | ROOT input | w tym cached | ROOT output | Znane razem I+O |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 00:00–00:59 | 1 624 / 0 | 119 716 363 | 28 001 920 | 538 561 | 39 747 443 | 39 345 664 | 96 564 | 160 098 931 |
+| 01:00–01:59 | 1 249 / 2 | 95 698 333 | 24 855 296 | 418 993 | 49 335 263 | 48 498 944 | 106 432 | 145 559 021 |
+| 02:00–02:59 | 837 / 1 | 65 475 124 | 15 111 040 | 375 262 | 32 129 814 | 31 731 456 | 95 121 | 98 075 321 |
+| 03:00–03:59 | 733 / 2 | 64 792 150 | 20 246 528 | 337 858 | 33 062 025 | 32 756 352 | 85 681 | 98 277 714 |
+| 04:00–04:59 | 1 514 / 2 | 127 189 864 | 27 948 160 | 699 509 | 36 677 999 | 35 532 288 | 113 831 | 164 681 203 |
+| 05:00–05:59 | 1 015 / 1 | 80 129 625 | 17 787 904 | 435 236 | 35 219 101 | 34 979 584 | 100 978 | 115 884 940 |
+| 06:00–06:59 | 450 / 99 | 25 069 181 | 5 742 976 | 146 466 | 11 204 514 | 11 041 024 | 25 143 | 36 445 304 |
+| 07:00–07:59 | 108 / 108 | 0 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 08:00–08:51 (STOP) | 100 / 82 | 1 238 554 | 178 176 | 5 703 | 3 419 705 | 3 404 928 | 2 137 | 4 666 099 |
+| **SUMA** | 7 630 / 297 | 579 309 194 | 139 872 000 | 2 957 588 | 240 795 864 | 237 290 240 | 625 887 | **823 688 533** |
+
+07:00 ma 108 prób UNKNOWN z usage NULL. Zapis „0 znanych tokenów” **nie oznacza potwierdzonego zera kosztu ani braku prób**. Tabela ROOT powstała wyłącznie z istniejących token_count: powtórzone cumulative pominięto, a przyrost uzgodniono z last_token_usage; nie eksportowano treści sesji.
+
+**Stan po uzupełnieniu pozostaje STOP / 14 PAUSED / wydanie NO-GO.** To dokładniejsze rozpoznanie i publikacja raportu; nie wznowienie implementacji ani obietnica naprawienia znalezionych problemów.
+
 ## Aneks A — wszystkie 81 powiązań rola–zadanie
 
 Statusy poniżej są zapisami transportu w cutoff, nie werdyktem wydania. Wszystkie role są obecnie PAUSED także wtedy, gdy task ma historyczne RECEIVED lub ACCEPTED. Wiersze „wspólne” NIE SĄ ADDYTYWNE. Utrzymuję pełne work_id, aby reviewer mógł wrócić do dowodu i nie musiał odgadywać znaczenia skrótu.

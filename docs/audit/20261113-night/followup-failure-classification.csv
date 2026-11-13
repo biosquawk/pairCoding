@@ -1,0 +1,245 @@
+case_id,title,test_file,tap_code,observed_group
+1,47 - UNIT genuine SIGKILL TERMINAL restores original owner/Stop intent without create/start or premature cleanup,tests/backend-cutover/http-run-recovery.test.ts,ERR_TEST_FAILURE,TIMEOUT
+2,53 - UNIT actual HTTP Run/results -> reconnect -> immutable Report/AI retains original identity and safe structural facts across restart,tests/backend-cutover/http-run-report.test.ts,ERR_ASSERTION,UNMEASURED_READINESS
+3,61 - actual HTTP source failure is recovered as abort without replacing malformed original; auth and strict reconcile schema remain enforced,tests/backend-cutover/http-save-reconcile.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+4,"66 - HTTP bound invalid runtime/malformed settings retain actual bytes, safe metadata, editor and V2 schema",tests/backend-cutover/http-startup.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+5,76 - HTTP listen exposes ONLY recovered canonical settings after actual child death REPLACED,tests/backend-cutover/http-startup.test.ts,ERR_ASSERTION,PERMISSIONS
+6,77 - HTTP listen exposes ONLY recovered canonical settings after actual child death COMMITTED,tests/backend-cutover/http-startup.test.ts,ERR_ASSERTION,PERMISSIONS
+7,217 - SEAM malformed canonical settings are retained byte-exact at startup; execution remains migration-required,tests/backend-cutover/startup-options.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+8,218 - SEAM actual prepared consumer with no selected roots never grants READY from valid V2 settings/image metadata,tests/backend-cutover/startup-options.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+9,"352 - AC011 KEEP_LOCAL after expired conflict timer, multiple edits: real CODE_CHANGED + matched ACK + exact disk",tests/client/ac011-keep-local.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+10,"353 - AC011 KEEP_LOCAL after expired conflict timer, one edit: real CODE_CHANGED + matched ACK + exact disk",tests/client/ac011-keep-local.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+11,"354 - AC011 no decision then LOAD_DISK: no CODE_CHANGED, no silent commit, both versions archived",tests/client/ac011-keep-local.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+12,"382 - REAL socket loss after capture admission: valid task file, asynchronous authenticated reconciliation, one POST/snapshot",tests/client/finish-network-unknown.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+13,"383 - REAL finish normal: durable list refresh in same session, original request, no extra mutation",tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+14,"384 - REAL finish loss: durable list refresh in same session, original request, no extra mutation",tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+15,"385 - REAL finish timeout: durable list refresh in same session, original request, no extra mutation",tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+16,386 - REAL latest GET guard: stale empty success cannot overwrite newer final list/error,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+17,387 - REAL latest GET guard: stale error cannot overwrite newer final list/error,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+18,388 - REAL generation guard: stale empty success after same-project snapshot is ignored,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+19,389 - REAL generation guard: stale error after same-project snapshot is ignored,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+20,390 - REAL project switch: clear old copies/errors immediately; delayed success cannot leak them,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+21,391 - REAL project switch: clear old copies/errors immediately; delayed error cannot leak them,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+22,392 - REAL close guard: delayed success publishes nothing after disposal,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+23,393 - REAL close guard: delayed error publishes nothing after disposal,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+24,394 - REAL current list error stays separate from file/connection failure; newer success beats delayed error,tests/client/finish-snapshot-cache.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+25,"402 - REAL FINISH separate process: 6500ms capture, original 5s UNKNOWN, durable READY+FINISHED, one POST and one final snapshot",tests/client/finish-unknown.test.ts,ERR_ASSERTION,TIMEOUT
+26,407 - HeaderBar actual Start handler -> real POST200/lifecycle RUNNING; Pause and Resume use WS actions,tests/client/header-start.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+27,438 - REAL HTTP/WS old Hidden page closes; new FOCUSED page replays pre-connect latest after HELLO snapshot,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+28,439 - REAL HTTP/WS old Hidden page closes; new HIDDEN page replays pre-connect latest after HELLO snapshot,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+29,440 - REAL HTTP/WS old Hidden page closes; new BLURRED page replays pre-connect latest after HELLO snapshot,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+30,441 - REAL HTTP/WS initial focus replay cannot erase manual pause or veto cooldown,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+31,442 - REAL HTTP/WS latest update during reconnect is retained and replays again for a new session,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+32,443 - REAL HTTP/WS latest change while snapshot file hydration is unsynced is not lost,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+33,444 - REAL HTTP/WS rejected HELLO never sends retained presence without an authorized snapshot,tests/client/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+34,"454 - REAL separate-process >5s restore: success, late ACK",tests/client/proposal-unknown.test.ts,ERR_TEST_FAILURE,INITIALIZING
+35,"455 - REAL separate-process >5s restore: success, lost ACK + client ledger reconnect",tests/client/proposal-unknown.test.ts,ERR_TEST_FAILURE,INITIALIZING
+36,"456 - REAL separate-process >5s restore: recovery, late ACK",tests/client/proposal-unknown.test.ts,ERR_TEST_FAILURE,INITIALIZING
+37,"457 - REAL separate-process >5s restore: recovery, lost ACK + client ledger reconnect",tests/client/proposal-unknown.test.ts,ERR_TEST_FAILURE,INITIALIZING
+38,"458 - REAL HTTP/WS GATE001 client bootstrap, HELLO, CODE_CHANGED, disk/ACK, external conflict, veto and reconnect",tests/client/real.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+39,459 - REGRESSION: lost veto ACK then real reconnect snapshot proves cutoff and unlocks preserved draft,tests/client/real.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+40,"545 - Codex selection reaches real backend/WS consented chat via fakeCLI, not a provider injection",tests/coach/codex-provider.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+41,547 - public Finish selects Codex report without Gemini key and filters private context,tests/coach/codex-provider.test.ts,PROJECT_INITIALIZING,INITIALIZING
+42,"599 - root replaced by a foreign directory link remains fail-closed, not a mass deletion",tests/core/cooperative-topology.test.ts,RECOVERY_REQUIRED,ANCESTRY
+43,630 - RENAME real REST/WS: partial failure is 409 + external sync; replay repeats failure without deleting copies,tests/core/rename-http.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+44,639 - RENAME cleanup transient: REST/tree/WS/recovery agree without opening hardlinks,tests/core/rename-lossless.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+45,640 - RENAME cleanup persistent: REST/tree/WS/recovery agree without opening hardlinks,tests/core/rename-lossless.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+46,934 - G2 real REST/WS: consent OFF means no provider call; enabling consent yields HINT without control,tests/integration/coach-http.test.ts,PROJECT_INITIALIZING,INITIALIZING
+47,935 - G2 real coordinator: CONTROL_READY and matching STEP_RENDERED gate each actual disk step,tests/integration/coach-http.test.ts,PROJECT_INITIALIZING,INITIALIZING
+48,"936 - G2 real veto: abort provider/coordinator, late STEP_RENDERED cannot commit second step",tests/integration/coach-http.test.ts,PROJECT_INITIALIZING,INITIALIZING
+49,937 - G2 analysis does not block real autosave; stale output never acquires control and latest CHAT uses current context,tests/integration/coach-http.test.ts,PROJECT_INITIALIZING,INITIALIZING
+50,938 - G2 default factory exact token redaction and explicit local fallback preserve real editing,tests/integration/coach-http.test.ts,PROJECT_INITIALIZING,INITIALIZING
+51,939 - Finish includes actual hint bubbles in frozen AI report conversation,tests/integration/coach-http.test.ts,PROJECT_INITIALIZING,INITIALIZING
+52,"940 - WS view -> next CHAT actual providercontext, motion has no AI/disk/epoch/Veto side effects",tests/integration/editor-view-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+53,941 - WS invalid version/range/path/session rejects without replacing accepted view; edits and reconnect clear it,tests/integration/editor-view-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+54,942 - WS policy/redaction and project switch: no secret or foreign view reaches next provider,tests/integration/editor-view-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+55,943 - real VIEW ACK owns documentVersion; motion alone no provider; next CHAT gets selection; rejected VIEW blocks question,tests/integration/editor-view-p2.test.ts,PROJECT_INITIALIZING,INITIALIZING
+56,944 - P3 control: normal terminal Run starts actual local provider analysis and hint,tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+57,945 - P3 finish: live Runner stopAll keeps full final facts but starts zero decide/interventions during snapshot await,tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+58,946 - P3 finish: real timer overtime cannot start provider while snapshot persistence is gated,tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+59,"947 - P3 finish snapshot storage failure: no FINISHED, student write and coach resume, later finish succeeds",tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+60,"948 - P3 finish report storage failure: no FINISHED, student write and coach resume, later finish succeeds",tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+61,"949 - P3 finish report-existing storage failure: no FINISHED, student write and coach resume, later finish succeeds",tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+62,"950 - P3 finish report-rename storage failure: no FINISHED, student write and coach resume, later finish succeeds",tests/integration/finish-coach-quiescence.p3.test.ts,PROJECT_INITIALIZING,INITIALIZING
+63,"951 - G3 real async public restore: success; busy reads, live PING, one backup and terminal snapshot/ACK",tests/integration/g3-async-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+64,"952 - G3 real async public restore: VETO during forward rolls back; busy reads, live PING, one backup and terminal snapshot/ACK",tests/integration/g3-async-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+65,953 - G3 real async public finish captures once: BUSY reads and responsive control precede durable report/FINISHED,tests/integration/g3-async-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+66,954 - G3 failed open (report-store) preserves exact live core/lease/socket and closes prepared resources,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+67,955 - G3 failed open (coach-constructor) preserves exact live core/lease/socket and closes prepared resources,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+68,956 - G3 prepared successful open adopts new core once; new peer gate/external events use new binding,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+69,957 - G3 both AI boundaries share structural Run allowlist; arbitrary stdout stays local in UI and frozen facts,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+70,958 - G3 async seam awaits one gate promise before terminal ACK; success deduplicates,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+71,959 - G3 async seam awaits one gate promise before terminal ACK; VETO revokes captured auth,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+72,960 - G3 finish awaits yieldable capture before persistence and FINISHED; identical HTTP request shares result,tests/integration/g3-corrections.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+73,"961 - G3 separate-process finish capture exceeds real client deadline: UNKNOWN then durable SESSION_REPORT, never early FINISHED",tests/integration/g3-finish-timeout.test.ts,ERR_ASSERTION,TIMEOUT
+74,962 - G3 restore goes through gate once per proposalId with two distinct messageIds; backup and no timer reset,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+75,"963 - G3 No closes proposal in authoritative snapshot, leaves disk/timer running and consumes the decision",tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+76,964 - G3 stale proposal and 60s expiry boundary (clock advanced) reject before backup/effect,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+77,965 - G3 actual backup storage failure maps STALE_PROPOSAL without task-file effect,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+78,"966 - G3 ambiguous failure after journal effect remains RECOVERY_REQUIRED, not stale",tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+79,967 - G3 missing profile and real zero-test/green JUnit are honest; green never auto-finishes,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+80,"968 - G3 real parent/child stop: REST responsive, tree ends, frozen finish ordering",tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+81,"969 - G3 real parent/child timeout: REST responsive, tree ends, frozen finish ordering",tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+82,"970 - G3 real parent/child finish: REST responsive, tree ends, frozen finish ordering",tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+83,971 - G3 frozen report facts/consent/AI attribution and allowlisted AI projection survive later live edits + FAILED/retry,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+84,972 - G3 consent OFF never calls injected report AI; local facts retain real coach-step attribution,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+85,973 - G3 snapshot persistence failure cannot finish the session or mutate task files,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+86,974 - G3 pending-root gate refusal cleans startup/open resources and retains the original live session,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+87,975 - G3 report facts storage failure also leaves lifecycle uncommitted and task bytes intact,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+88,976 - G3 concurrent FINISH_EXERCISE acceptance deduplicates even while real Stop is pending,tests/integration/g3-public.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+89,977 - G3 slow sync restore: real client timeout then guarded ledger reconciliation (success),tests/integration/g3-timeout.test.ts,ERR_TEST_FAILURE,INITIALIZING
+90,978 - G3 slow sync restore: real client timeout then guarded ledger reconciliation (recovery),tests/integration/g3-timeout.test.ts,ERR_TEST_FAILURE,INITIALIZING
+91,979 - real REST authentication/bootstrap/Host/Origin and default workspace (TEST001/026),tests/integration/http.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+92,"980 - real CODE_CHANGED ACK, version, CRLF, duplicate and changed-id conflict (TEST004/010)",tests/integration/http.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+93,981 - second client cannot steal lease and external disk change prevents stale overwrite (TEST005/026),tests/integration/http.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+94,"989 - P1 real HTTP/WS: PING no history, VIEW dedupe, truthful session reset, old open IDs never switch again",tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+95,990 - P1 real HTTP: open ledger has its own truthful process budget and remembers failures/known retry after adoption,tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+96,991 - P1 real HTTP: deferred old stop settles to retired ledger; pending open cannot be superseded by another open,tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+97,992 - P1 real WS: VETO receipts survive new epochs and do not revoke a later coach intervention twice,tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+98,993 - P1 real WS: accepted concurrent proposal decisions restore once; changed decision conflicts; stable rejection replay,tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+99,994 - P1 real HTTP: closing during deferred project adoption never installs a fresh unretired scope,tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+100,"995 - P1 real HTTP: oversize after-effect warns publicly, identical retry stays failed without another effect",tests/integration/ledger-http-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+101,996 - REAL REST storage503 → LiveBackend finish UNKNOWN; repeated/opposite clicks never create a newPOST/ID,tests/integration/ledger-public-failure.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+102,"997 - REAL WS storage503 → LiveBackend autosave warning, retained draft, no unauthorized effect or new-ID retry",tests/integration/ledger-public-failure.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+103,998 - REAL WS known receipt missing after effect:503 replay never becomes a cache miss or repeats CODE_CHANGED,tests/integration/ledger-public-failure.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+104,999 - REAL REST oversize settings outcome → safe503 survives public projection and reaches LiveBackend,tests/integration/ledger-public-failure.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+105,"1000 - REAL REST finish oversize after effect → LiveBackend UNKNOWN then matching GET-only reconciliation, one snapshot/POST",tests/integration/ledger-public-failure.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+106,1002 - P1 real REST: oversize result warning is non-retryable and same ID preserves one effect,tests/integration/ledger-public-failures-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+107,"1003 - P1 real REST+WS: storage obstruction fails before effect, exposes fixed non-retryable ambiguous warning",tests/integration/ledger-public-failures-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+108,1004 - P1 real WS→LiveBackend autosave: ambiguous storage warning reaches connectionError and draft is retained,tests/integration/ledger-public-failures-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+109,"1005 - P1 real REST→LiveBackend finish storage503 retains UNKNOWN; repeat click and reconnect use GET only, no new ID/POST",tests/integration/ledger-public-failures-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+110,1006 - P1 real503headers then response.destroy: LiveBackend keeps UNKNOWN and original ID; reclick/reconnect GET-only,tests/integration/ledger-public-failures-p1.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+111,"1014 - ledger REST/WS: concurrent CODE_CHANGED, failed replay, conflicts, cross-transport veto once",tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+112,1015 - ledger REST/WS: 1100 autosaves with PING and view history do not hit an arbitrary 500/1000 cutoff,tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+113,1016 - ledger project/open lifecycle: old open replay cannot rebind project and old-session mutation cannot execute,tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+114,"1017 - ledger proposal decision: concurrent decline, new message duplicate and conflicting response",tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+115,"1018 - ledger proposal decision: concurrent accept, new message duplicate and conflicting response",tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+116,1019 - ledger proposal rejected outcome remains rejected with a new messageId,tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+117,1020 - ledger VIEW_CHANGED delayed duplicate cannot revert the newer view,tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+118,"1021 - ledger real budget lifecycle: PING bypasses history, adoption resets session capacity but not process-lived open capacity",tests/integration/ledger-retention-public.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+119,1034 - real LIVE client bootstrap+REST+WS autosave and reload matches disk (TEST001/004),tests/integration/liveRoundTrip.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+120,1035 - real external IDE vs local draft preserves both and explicit choice saves only selected version (TEST005),tests/integration/liveRoundTrip.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+121,"1036 - real HTTP A→B→restart: immutable historical identity/facts, minimal listing, no historical WS/current overwrite",tests/integration/report-history-p1.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+122,"1037 - HTTP history is bearer-authenticated/current-project only; invalid IDs, foreign facts and symlinks cannot leak",tests/integration/report-history-p1.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+123,1038 - completed Run with exit 0 preserves wire ordering and subsequent settings access,tests/integration/run-event-order.test.ts,PROJECT_INITIALIZING,INITIALIZING
+124,1039 - completed Run with exit 1 preserves wire ordering and subsequent settings access,tests/integration/run-event-order.test.ts,PROJECT_INITIALIZING,INITIALIZING
+125,1040 - static stream: ordinary GET/HEAD and root index use real bytes; HEAD opens no stream,tests/integration/static-stream.test.ts,ERR_TEST_FAILURE,DATA_DIR
+126,"1041 - static stream: traversal/realpath, missing, method, Host/Origin and API token guards remain enforced",tests/integration/static-stream.test.ts,ERR_TEST_FAILURE,DATA_DIR
+127,1042 - static stream: asynchronous open EIO returns controlled 5xx; same API/session/authenticated WS survive,tests/integration/static-stream.test.ts,ERR_TEST_FAILURE,DATA_DIR
+128,"1043 - static stream: mid-read EIO after real bytes aborts only the response, without appending JSON",tests/integration/static-stream.test.ts,ERR_TEST_FAILURE,DATA_DIR
+129,1044 - static stream: client disconnect destroys the source and closes its real descriptor; API/WS survive,tests/integration/static-stream.test.ts,ERR_TEST_FAILURE,DATA_DIR
+130,1102 - LIGHT generator: fresh templates reproduce seven local profiles without changing task templates,tests/lightweight-backend/config.test.ts,ERR_ASSERTION,GENERATOR_BYTES
+131,"1105 - delayed actual HTTP+WS: bootstrap/snapshot and original ACK precede probe release beyond HELLO deadline; truthful READY reaches supported snapshot, Run still uses real admission",tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+132,"1106 - held readiness: wrong token/lease/stale session rejected, real FIFO and Veto/epoch/ACK guards survive, unavailable result is truthful and effect-free",tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+133,1107 - reconnect revokes old deferred publication and retains ordinary original ACK identity,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+134,1108 - settings source hash changed during delayed probe cannot publish stale READY; current migration problem is retained,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+135,1109 - project replacement while delayed readiness is held drops old publication without blocking new HTTP bootstrap,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+136,"1110 - actual production LiveBackend consumes deferred READY, preserves newer local draft/ordinary ACK and can submit Run through the original guarded HTTP path",tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+137,1111 - lease revoked while an authenticated peer waits: old measured result cannot publish or grant mutation,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+138,1112 - deferred full snapshot cannot reset actual client CONTROL_PREPARE; readiness resumes after existing CONTROL_STATE,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+139,"1113 - explicit authenticated HTTP actual-readiness opt-in is measured, malformed queries fail closed, and held actual read never blocks default HELLO/save",tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+140,"1114 - explicit measured HTTP unavailability stays false with actual problem, never fabricated READY",tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+141,1115 - ordinary save with actual CoachAdapter disabled by consent must not schedule another expensive probe from its routine CONTROL_STATE,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+142,1116 - same socket renewed HELLO while measurement is held cannot lose the new generation readiness,tests/lightweight-backend/handshake-readiness.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+143,"1148 - JS/TS readiness checks real public worker mirror, never calls diagnostics when merely checking completion readiness",tests/lightweight-editor/words.test.ts,ERR_UNKNOWN_FILE_EXTENSION,CSS_IMPORT
+144,"1177 - valid production admission beyond 5s keeps the active original HTTP request, then commits once",tests/lightweight-live-run-admission/http-budget.test.ts,ERR_ASSERTION,ADMISSION_FENCE
+145,"1261 - public WS: capability/evidence/MUTE rejection yields safe ERROR, no hint/proposal/write/control, autosave still works",tests/qa/coach-contract-p1.test.ts,PROJECT_INITIALIZING,INITIALIZING
+146,1262 - public WS defense: injected stale CoachService cannot publish GENERATE_TESTS through postProposal,tests/qa/coach-contract-p1.test.ts,PROJECT_INITIALIZING,INITIALIZING
+147,"1267 - AC-026 TEST-026: HTTP bearer, Host and Origin are enforced on the actual listener",tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+148,1268 - AC-003 TEST-003: real GET returns full 1MiB file; missing/oversize are explicit without rewriting,tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+149,"1269 - AC-004 TEST-004: CODE_CHANGED real disk ACK, WS duplicate and changed-ID-payload rejection",tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+150,1270 - AC-004 TEST-004: HTTP CREATE dedup uses same requestId and never duplicates effects,tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+151,1271 - AC-010 TEST-010: WS veto + HTTP fallback share identity and only invalidate once,tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+152,1272 - AC-005 TEST-005: actual watcher emits external content and rejects obsolete baseVersion,tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+153,"1273 - AC-026 TEST-026: traversal, Windows device/ADS and real outward symlink are denied",tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+154,"1274 - AC-004 TEST-004: reconnect same client resyncs confirmed bytes, not a second edit",tests/qa/g1-transport.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+155,"1282 - G2 probe TEST007: autonomous delayed analysis, actual autosave, stale plan denied and latest pending serialized",tests/qa/g2/probes.test.ts,PROJECT_INITIALIZING,INITIALIZING
+156,1283 - G2 probe TEST012: actual veto cooldown rejects wait/VIEW/whitespace; code+2s and chat resume analysis,tests/qa/g2/probes.test.ts,PROJECT_INITIALIZING,INITIALIZING
+157,"1284 - G2 probe TEST025/026: real consent boundary, exact token/file exclusion, Host/Origin/path attacks and positive control",tests/qa/g2/probes.test.ts,PROJECT_INITIALIZING,INITIALIZING
+158,"1307 - real separate process harness: authenticated GUI bootstrap endpoints, normal file bytes, kill/rebind has new session without mutation",tests/qa/mvp2-reconcile/controls.test.ts,ERR_TEST_FAILURE,INITIALIZING
+159,1308 - AC016: new page FOCUSED before connect replaces previous HIDDEN and automatically runs timer,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+160,1309 - AC016 negative: truly HIDDEN initial page must not be coerced to FOCUSED,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+161,"1310 - AC016: latest value during async connect wins, including BLURRED (no hardcoded focus)",tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+162,1311 - AC016 negative: restored FOCUSED must preserve prior manual pause,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+163,1312 - AC012/016 negative: restored FOCUSED must preserve veto cooldown without new user fact,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+164,1313 - AC016: new FOCUSED observation while reconnecting replaces last connected HIDDEN,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+165,"1314 - AC016: unchanged latest observation is replayed on real reconnect, without needing another browser event",tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+166,1315 - AC016 control: ordinary post-sync presence works and cannot cancel manual pause or veto,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+167,1316 - AC017 control: pauseOnHidden=false keeps timer running while actual HIDDEN still suppresses coach,tests/qa/presence.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+168,"1317 - deferred readiness crossing a real admitted immutable copy must not broadcast uncorrelated WORKSPACE_BUSY; capture, later edit and original ACK remain intact",tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+169,1318 - source/sequence fence rejects old measured READY after real edit and preserves original ACK,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+170,"1319 - changed settings source yields the genuine migration problem, not stale READY",tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+171,1320 - renewed same-socket handshake generation cannot receive old measurement,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+172,1321 - actual lease loss drops delayed projection and still rejects a stale-session mutation,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+173,1322 - project/session replacement cannot publish old readiness into the new binding,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+174,"1323 - genuine durable-version authority closure stays an ERROR, never hidden as transient capture",tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+175,"1324 - activeDocument belongs to the current view, not the pre-probe selected path",tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+176,"1325 - SAME FIFO: real capture terminal precedes guarded synchronous read, which precedes later write",tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+177,1326 - read callback throw and thenable rejection release root/counting; subsequent FIFO and sync mutation remain available,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+178,1327 - queued read never converts a genuine closed durable authority into a snapshot,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+179,1328 - malformed-settings zero-port await uses admitted source materialization and waits for a subsequently admitted real capture,tests/readiness-capture-interleaving/interleaving.test.ts,RUN_RECOVERY_REQUIRED,MASKED_RECOVERY
+180,"1340 - public facade is exactly a pure parser plus coordinator/type re-exports, with no import-time host engine",tests/runner-facade/boundary.test.ts,ERR_ASSERTION,FACADE_BYTES
+181,1341 - original pure JUnit function bytes and required XML import/limit stay frozen at c9f30b4,tests/runner-facade/boundary.test.ts,ERR_ASSERTION,FACADE_BYTES
+182,1368 - pure generator reproduces frozen catalog and all five original task fragments byte-exact,tests/runtime-adapters/descriptors.test.ts,ERR_ASSERTION,GENERATOR_BYTES
+183,"1369 - same exact-version predicate: original metadata rejects actual tools, corrected agrees; near misses still reject",tests/runtime-adapters/java27-exact.test.ts,ERR_ASSERTION,JDT_ASSERTION
+184,1370 - generator output byte-exact approved catalog/task fragments; no actual installs or toolchain processes,tests/runtime-adapters/java27-exact.test.ts,ERR_ASSERTION,GENERATOR_BYTES
+185,1374 - UNIT fake Docker producer preserves actual engine/manifest/tools/cache evidence and refuses absent/switched/mismatched engines,tests/runtime-adapters/prepare-phase.test.ts,ERR_ASSERTION,FAKE_DOCKER_JSON
+186,1375 - UNIT exact operator PREPARE_ONLY executes nine injected preparation jobs and two language-image closure without entering offline path,tests/runtime-adapters/prepare-phase.test.ts,ERR_ASSERTION,FAKE_EXPORT
+187,1907 - CONTROL: fast real HTTP SAVE confirms once and clears only its own uncertainty,tests/save-confirmation/http-ws.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+188,1908 - SAVE confirms the original HTTP while postcommit read-only readiness remains held beyond the unchanged 5s deadline,tests/save-confirmation/http-ws.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+189,"1909 - own genuine WS version publication before original fast HTTP200 confirms exact SAVE, never a snapshot-only success",tests/save-confirmation/http-ws.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+190,1910 - genuine postcommit Veto epoch before original HTTP200 remains fail-closed even after student control returns,tests/save-confirmation/http-ws.test.ts,RECOVERY_REQUIRED,PERMISSIONS
+191,2327 - 001 lifetime unit: only current instance disposal invalidates refs; stable editor shell across loading,tests/triage/browser-client-fix.test.ts,ERR_TEST_FAILURE,VM_CONTEXT
+192,"2328 - 003 REAL HTTP/WS error projection: binary, oversized, settings missing task; retain state timeline",tests/triage/browser-client-fix.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+193,"2329 - 003 positive control REAL HTTP/WS: no active binary failure, missing task IS exposed",tests/triage/browser-client-fix.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+194,2330 - 003 stale REAL read failure from previous root cannot contaminate new task or selection,tests/triage/browser-client-fix.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+195,"2332 - 001 switch unit: detach during loading retains named model/Undo, restores URI-scoped view; no cross-project view",tests/triage/browser-client-fix.test.ts,ERR_TEST_FAILURE,VM_CONTEXT
+196,2333 - 001 REAL create: late pre-selection snapshot cannot reset the created-file view; fresh save ACK and exact disk,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+197,2334 - 001 REAL create: snapshot during selected-file GET carries the current intent through generation replacement,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+198,2335 - 001 REAL negative ordering: slower old tab cannot replace the latest user selection,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+199,2336 - 001 REAL negative scope: selected view is not inherited by a new project with the same file path,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+200,2337 - 001 REAL negative deletion: removed selection falls back without a fake active document,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+201,2338 - 001 REAL negative session scope: same-root remote reopen invalidates old selected view and delayed GET,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+202,2339 - 001 REAL negative navigation: late CREATE response cannot override a newer manual tab choice,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+203,2340 - 001 REAL negative mutation scope: late CREATE response cannot install a previous project or choose its file,tests/triage/selection-snapshot.test.ts,INVALID_V2_DATA_DIR,DATA_DIR
+204,2343 - unchanged genuine e982 baseline retains exact settings/mutation outcomes and raw history,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+205,2344 - remount genuine e982 lazy retains UUID/versions/settings/outcomes/key/MAC bytes and supports current rename/snapshot,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+206,2345 - remount genuine e982 signed retains UUID/versions/settings/outcomes/key/MAC bytes and supports current rename/snapshot,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+207,2348 - current inode replacement and real content change still increment durable versions,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+208,2350 - fail closed/no anchor/raw change on lazy foreign-root,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+209,2351 - fail closed/no anchor/raw change on lazy wrong-id,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+210,2352 - fail closed/no anchor/raw change on lazy bad-stamp,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+211,2353 - fail closed/no anchor/raw change on lazy no-evidence,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+212,2354 - fail closed/no anchor/raw change on lazy corrupt,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+213,2355 - fail closed/no anchor/raw change on lazy partial,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+214,2356 - fail closed/no anchor/raw change on lazy missing,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+215,2357 - fail closed/no anchor/raw change on lazy signed-without-key,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+216,2358 - fail closed/no anchor/raw change on lazy identity-partial,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+217,2359 - fail closed/no anchor/raw change on lazy unsafe-mode,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+218,2360 - fail closed/no anchor/raw change on lazy hardlink,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+219,2361 - existing signed anchor wrong-binding is refused unchanged,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+220,2362 - existing signed anchor key-corrupt is refused unchanged,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+221,2363 - existing signed anchor bad-mode is refused unchanged,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+222,2364 - existing signed anchor hardlink is refused unchanged,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+223,2365 - ordinary copy root refuses copied authority without reset,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+224,2366 - ordinary move root refuses copied authority without reset,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+225,2367 - ordinary replacement root refuses copied authority without reset,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+226,2368 - ordinary symlink root refuses copied authority without reset,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+227,2369 - ordinary ancestor-link root refuses copied authority without reset,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+228,2370 - real child kernel owner refuses remount before identity publication; failed open releases lease,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+229,"2371 - pending genuine old snapshot remains fail closed, source/history unchanged after remount",tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+230,2373 - resolver never receives corrupt settings/outcome authority even with valid scope/checksum,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+231,"2374 - signed history MAC corruption refuses startup, retaining exact source/history",tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+232,2375 - same-device unsafe owner/version mode and parent mode are refused BEFORE additive write,tests/workspace-identity-reboot/identity.test.ts,ERR_ASSERTION,BASELINE_MISSING
+233,2376 - unchanged genuine lazy e982 empty remains compatible without a historical stamp witness,tests/workspace-identity-reboot/legacy-empty.test.ts,ERR_ASSERTION,BASELINE_MISSING
+234,2377 - unchanged genuine lazy e982 tombstone remains compatible without a historical stamp witness,tests/workspace-identity-reboot/legacy-empty.test.ts,ERR_ASSERTION,BASELINE_MISSING
+235,2378 - identity publication link fault retains partial material and never repairs/reset/replays on retry,tests/workspace-identity-reboot/publication.test.ts,ERR_ASSERTION,BASELINE_MISSING
+236,2379 - identity publication directory-flush fault retains partial material and never repairs/reset/replays on retry,tests/workspace-identity-reboot/publication.test.ts,ERR_ASSERTION,BASELINE_MISSING
+237,47 - NEW compatibility: REQUIRED explicit programmatic call uses real pipe after >60s RO,tests/runtime-image-recovery/mode-compat.test.mjs,ERR_ASSERTION,LEGACY_CHECKPOINT_SIGKILL
+238,48 - NEW compatibility: REQUIRED absent private pipe cannot fallback to valid initial guard,tests/runtime-image-recovery/mode-compat.test.mjs,ERR_ASSERTION,LEGACY_CHECKPOINT_SIGKILL
+239,49 - NEW compatibility: REQUIRED EOF cannot fallback to valid initial guard,tests/runtime-image-recovery/mode-compat.test.mjs,ERR_ASSERTION,LEGACY_CHECKPOINT_SIGKILL
+240,50 - NEW compatibility: REQUIRED no reply remains bounded by remaining global deadline,tests/runtime-image-recovery/mode-compat.test.mjs,ERR_ASSERTION,LEGACY_CHECKPOINT_SIGKILL
+241,"87 - retention: both finite policies select the accepted helper, not operator recovery",tests/runtime-packaging/retention-closure.test.mjs,ERR_ASSERTION,RETENTION_BYTES
+242,88 - retention: actual Git and trusted-manifest copying retain exact accepted helper bytes,tests/runtime-packaging/retention-closure.test.mjs,ERR_ASSERTION,RETENTION_BYTES
+243,175 - public CLI timeout interrupts blocked actual transport and durably records cancellation without publishing config,tests/runtime-prepare-cli/control.test.mjs,ERR_TEST_FAILURE,CLI_EARLY_EXIT
+244,20 - tests/runtime-remainder-image-equality/image-equality.test.mjs,tests/runtime-remainder-image-equality/image-equality.test.mjs,ERR_TEST_FAILURE,REMAINDER_REGEX
