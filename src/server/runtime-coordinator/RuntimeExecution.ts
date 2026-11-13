@@ -109,7 +109,7 @@ export function createRuntimeExecution(options: RuntimeExecutionOptions) {
     start: async plan => { const executor = byRun.get(plan.ownership.runId); if (!executor) throw Error('No captured execution policy'); return executor.start(plan); },
     subscribe: (h, listener) => retained(h).subscribe(h, listener),
     serviceReadiness: h => retained(h).serviceReadiness(h),
-    wait: (h, signal) => retained(h).wait(h, signal), stop: (h, reason) => retained(h).stop(h, reason),
+    wait: (h, signal, onTimeout) => retained(h).wait(h, signal, onTimeout), stop: (h, reason) => retained(h).stop(h, reason),
     recoverUnstarted: h => retained(h).recoverUnstarted(h),
     collect: (h, exit) => retained(h).collect(h, exit), cleanup: receipt => retained(receipt.handle).cleanup(receipt),
     inspectOwnedOrphans: async installationId => {

@@ -1,22 +1,33 @@
 /** UNIT: genuine Runner/NodeAdapter/immutable FS/DockerExecutor/journal/receipt; injected Docker+clock only. */
 import test, { type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { RuntimeRunState } from '../../src/server/runtime-coordinator/RuntimeRunState';
 import { Runner } from '../../src/server/Runner';
 import { DockerExecutor } from '../../src/server/execution/DockerExecutor';
 import { fixture, profile } from '../runner-fixture-migration/fixture';
 import type { ExecutionPort, ExecutionPlan, ExecutionHandle, DurableTerminalReceipt } from '../../src/server/execution/ports';
+
+// Compile the EXACT neutral wait forwarder from the actual production composition.
+// Only retained(handle) is bound to this test's genuine executor, not a substitute port.
+const runtimeSource=fs.readFileSync(new URL('../../src/server/runtime-coordinator/RuntimeExecution.ts',import.meta.url),'utf8');
+const waitRoute=runtimeSource.split('    wait: ')[1]?.split(', stop: ')[0];
+assert.ok(waitRoute);
+const bindWait=new Function('retained',`return (${waitRoute});`) as (retained:(h:ExecutionHandle)=>ExecutionPort)=>ExecutionPort['wait'];
 
 const tick=()=>new Promise<void>(resolve=>setImmediate(resolve));
 async function until(predicate:()=>boolean) {
   const deadline=Date.now()+10000;
   while(!predicate()){assert.ok(Date.now()<deadline,'bounded UNIT interleaving');await tick();}
 }
-async function composition(t:TestContext,expired=false,stopExit=137) {
+async function composition(t:TestContext,expired=false,stopExit=137,routed=true) {
   t.mock.timers.enable({apis:['setTimeout']});
   let clock=1000000, stopFails=false, persistFails=false, waitBlocked=false, stopBlocked=false;
   let runner!:Runner;let receipt:DurableTerminalReceipt|undefined;
   t.after(async()=>{stopFails=false;persistFails=false;waitBlocked=false;stopBlocked=false;await runner?.stopAll();});
-  const f=await fixture(t), trace:string[]=[];
+  const f=await fixture(t), trace:string[]=[],states=new RuntimeRunState(path.join(f.root,'states'));
+  let dispatchedPlan:ExecutionPlan|undefined;
   let collect=0,cleanup=0;
   const original=f.unit.run.bind(f.unit);
   f.unit.run=async args=>{
@@ -31,8 +42,8 @@ async function composition(t:TestContext,expired=false,stopExit=137) {
   const stop=executor.stop.bind(executor);
   executor.stop=async(h,reason)=>{trace.push('stop:'+reason);return stop(h,reason);};
   const execution:ExecutionPort=new Proxy(executor,{get(target,key){
-    if(key==='wait')return (...args:Parameters<ExecutionPort['wait']>)=>target.wait(args[0],args[1],args[2]?async()=>{trace.push('timeout-callback');await args[2]!();}:undefined);
-    if(key==='start')return async(plan:ExecutionPlan)=>{const handle=await target.start(plan);if(expired)clock+=1001;return handle;};
+    if(key==='wait')return (...args:Parameters<ExecutionPort['wait']>)=>(routed?bindWait(()=>target):target.wait.bind(target))(args[0],args[1],args[2]?async()=>{trace.push('timeout-callback');await args[2]!();}:undefined);
+    if(key==='start')return async(plan:ExecutionPlan)=>{dispatchedPlan=plan;const handle=await target.start(plan);if(expired)clock+=1001;return handle;};
     if(key==='collect')return async(...args:Parameters<ExecutionPort['collect']>)=>{collect++;trace.push('collect');return target.collect(...args);};
     if(key==='cleanup')return async(...args:Parameters<ExecutionPort['cleanup']>)=>{cleanup++;trace.push('cleanup');return target.cleanup(...args);};
     const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;
@@ -40,13 +51,14 @@ async function composition(t:TestContext,expired=false,stopExit=137) {
   const retained:('USER'|'TIMEOUT'|null)[]=[];
   runner=new Runner({execution,getWorkspaceVersion:()=>1,emit:()=>{},persistTerminal:async(h,outcome)=>{
     trace.push('persist-terminal');receipt=await executor.persistTerminal(h,outcome);return receipt;
-  },retainState:(_plan,_run,reason)=>{trace.push('intent:'+reason);if(reason==='TIMEOUT'&&persistFails)throw Error('UNIT retain failed');retained.push(reason);}});
+  },retainState:(plan,run,reason)=>{trace.push('intent:'+reason);if(reason==='TIMEOUT'&&persistFails)throw Error('UNIT retain failed');states.retain(plan,run,reason);retained.push(reason);}});
   async function terminal(runId:string) {
     await until(()=>!['QUEUED','RUNNING','STOPPING'].includes(runner.get(runId).status));
     return runner.get(runId);
   }
   async function physical(runId:string) {
     const record=await f.journal.read(runId);
+    assert.deepEqual(states.read(dispatchedPlan!)?.run,runner.get(runId));
     assert.equal(record.phase,'REMOVED');assert.ok(record.exit);assert.ok(record.collection);assert.ok(record.outcome);
     assert.ok(receipt,'genuine durable receipt captured at actual production persistTerminal');
     assert.deepEqual(receipt.exit,record.exit);assert.equal(receipt.collectionSha256,record.collection!.collectionSha256);
@@ -140,5 +152,12 @@ test('executor-first native exit128: truthful adapter FAILED differs from retain
   const f=await composition(t,true,128),run=await f.start();
   const result=await f.terminal(run.runId);assert.equal(result.status,'TIMED_OUT');assert.equal(result.exitCode,128);
   const record=await f.journal.read(run.runId);assert.equal(record.outcome!.status,'FAILED');assert.equal(record.exit!.exitCode,128);
+  assert.equal(f.retained.at(-1),'TIMEOUT');await f.physical(run.runId);
+});
+
+
+test('production wait-route: executor-first timeout reaches genuine durable app intent and TIMED_OUT',async t=>{
+  const f=await composition(t,true,128,true),run=await f.start();
+  assert.equal((await f.terminal(run.runId)).status,'TIMED_OUT');
   assert.equal(f.retained.at(-1),'TIMEOUT');await f.physical(run.runId);
 });
