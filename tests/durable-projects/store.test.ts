@@ -12,14 +12,14 @@ import {isContextPathAllowed,isCoachWriteAllowed} from '../../src/server/coach/c
 import {localizeDiagnostic} from '../../src/shared/localizeDiagnostic';
 
 test('durable project restores all chat, original time/locale, rules, notes, transitions, workspace and actual native IDs',t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'durable-project-'));t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'durable-project-'));
  const p=DurableProjectStore.create(dir,'Training','en'),id=p.view().id,file=p.projectFile;
  const at='2026-11-14T10:00:00.000Z';
  const chat=Array.from({length:105},(_,i)=>({messageId:randomUUID(),author:'STUDENT' as const,text:i===0?'/rule Use Java 21 without streams.':'question '+i,createdAt:at,locale:'en' as const}));
  p.recordExercise(path.join(dir,'external-A'));p.capture(chat,null);p.remember('Next: finish the condition, then explicitly Run Tests.');
  p.recordExercise(path.join(dir,'external-B'));p.setWorkspace({openTabs:['Main.java','challenge.md'],activePath:'Main.java',sidebarTab:'chat',bottomTab:'report'});
  const nativeId=randomUUID();p.nativeSession('default:gpt-6.1-sol:high').started(nativeId);p.close();
- const reopened=DurableProjectStore.open(file);t.after(()=>reopened.close());
+ const reopened=DurableProjectStore.open(file);t.after(()=>{reopened.close();fs.rmSync(dir,{recursive:true,force:true});});
  assert.equal(reopened.view().id,id);assert.equal(reopened.view().locale,'en');assert.equal(reopened.view().exercisePath,path.join(dir,'external-B'));
  assert.deepEqual(reopened.snapshot().chat,chat);assert.equal(reopened.snapshot().chat.length,105,'no historical 100-message truncation');
  assert.equal(reopened.coachContext().rules[0],'Use Java 21 without streams.');assert.match(reopened.coachContext().notes[0],/Next:/);
@@ -30,16 +30,16 @@ test('durable project restores all chat, original time/locale, rules, notes, tra
 });
 
 test('P and Q can reference the same exercise without chat/rules/notes/native session leakage',t=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'durable-isolation-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'durable-isolation-'));
  const a=path.join(root,'P'),b=path.join(root,'Q');fs.mkdirSync(a);fs.mkdirSync(b);
- const p=DurableProjectStore.create(a,'P'),q=DurableProjectStore.create(b,'Q');t.after(()=>{p.close();q.close();});
+ const p=DurableProjectStore.create(a,'P'),q=DurableProjectStore.create(b,'Q');t.after(()=>{p.close();q.close();fs.rmSync(root,{recursive:true,force:true});});
  p.recordExercise(root);q.recordExercise(root);p.capture([{messageId:randomUUID(),author:'STUDENT',text:'/rule P-only',createdAt:new Date().toISOString(),locale:'pl'}],null);p.remember('P note');p.nativeSession('teacher').started(randomUUID());
  assert.notEqual(p.view().id,q.view().id);assert.deepEqual(q.snapshot().chat,[]);assert.deepEqual(q.coachContext().rules,[]);assert.deepEqual(q.coachContext().notes,[]);assert.equal(q.nativeSession('teacher').id(),undefined);
 });
 
 test('unsafe, unknown and model-origin rule updates are rejected; metadata excluded from source/context/snapshots',t=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'durable-protect-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));
- const p=DurableProjectStore.create(root,'P');t.after(()=>p.close());
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'durable-protect-'));
+ const p=DurableProjectStore.create(root,'P');t.after(()=>{p.close();fs.rmSync(root,{recursive:true,force:true});});
  for(const w of [{openTabs:['../escape'],activePath:'../escape'},{openTabs:['.pairCoding/codex/state.json'],activePath:null},{openTabs:[],activePath:'Main.java'},{openTabs:[],activePath:null,rules:['unauthorized']},{openTabs:[],activePath:null,sidebarTab:'unknown'}])assert.equal(validProjectWorkspace(w),false,JSON.stringify(w));
  p.capture([{messageId:randomUUID(),author:'COACH',text:'/rule untrusted',createdAt:new Date().toISOString()}],null);assert.deepEqual(p.coachContext().rules,[]);
  for(const file of ['.pairCoding/codex/state.json','P.paircoding.json']) {assert.equal(snapshotAllowed(file),false);assert.equal(isContextPathAllowed(file),false);assert.equal(isCoachWriteAllowed(file,{} as any),false);}
