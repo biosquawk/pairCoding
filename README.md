@@ -110,6 +110,8 @@ Dostępność `gpt-6.1-sol` zależy od konta; konfiguracja i `login status` nie 
 
 ## Równoległa praca w IntelliJ
 
+Problemy z uprawnieniami cache Maven w WSL, czerwonymi importami JUnit lub uruchomieniem main w IDEA 2025.2.6: [sprawdzona instrukcja naprawy](docs/development-20261113.md#10-intellij--maven-w-wsl--sprawdzona-naprawa-14112026).
+
 Możesz otworzyć ten sam folder zadania w PairCoding i IntelliJ. Źródła zapisane z IDE są normalnymi zmianami zewnętrznymi i trafiają do edytora przez istniejące uzgadnianie wersji; konflikt nie daje AI prawa do nadpisania nowszego kodu. `.idea`, `.git`, `target`, `.gitignore` oraz pliki `.iml`, `.ipr`, `.iws` są pomijane przy obserwowaniu zadania, budowie kontekstu AI, snapshotach i wejściu Run. Nie są usuwane ani przywracane do starszej wersji. Podpowiedzi semantyczne możesz wykorzystywać w IntelliJ; PairCoding pozostaje lekkim edytorem z lokalnymi podpowiedziami.
 
 **PENDING_FINAL_QA** — pełny odbiór produktu pozostaje nieukończony; celowany pomiar poniżej nie zastępuje końcowej kontroli QA.

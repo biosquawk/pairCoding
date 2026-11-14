@@ -107,3 +107,104 @@ z IntelliJ wykonał `clean package dependency:build-classpath -DskipTests` z exi
 JDK 27 i release 11. Skompilowano też testy; nie uruchamiano ich ani nie rozwiązano ćwiczenia.
 Właściciel potwierdził działanie IDE. Publiczne PairCoding pozostawiono na 01-oddity,
 bez restartu sesji i bez modyfikacji rozwiązania użytkownika.
+
+## 10. IntelliJ + Maven w WSL — sprawdzona naprawa, 14.11.2026
+
+Przypadek: IntelliJ IDEA 2025.2.6 uruchomione w Windows, projekt w Ubuntu/WSL:
+`\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\pairCoding-publication-20261112\java-puzzlers\01-oddity`.
+Projekt używa JDK 27 w WSL, a Maven kompiluje z `release 11`.
+Poniższe trzy problemy wystąpiły oddzielnie; nie należy naprawiać ich jedną
+operacją Invalidate Caches ani zmieniać z tego powodu POM-u.
+
+### A. Maven nie może pobrać bibliotek: właściciel cache root:root
+
+Objaw: `AccessDeniedException` przy tworzeniu plików w repozytorium Maven
+użytkownika, np. dla `maven-clean-plugin`; JUnit i pluginy pozostają nierozwiązane.
+W tym przypadku repozytorium należało do `root:root` zamiast `darulec:darulec`.
+Naprawiono właściciela cache, a ten sam Maven z IntelliJ skompilował kod i testy
+(szczegóły poprzedniej naprawy w §9).
+
+Kontrola i ewentualne powtórzenie naprawy w terminalu WSL, jako darulec:
+
+```bash
+id
+ls -ld "$HOME/.m2" "$HOME/.m2/repository"
+find "$HOME/.m2/repository" -user root -print -quit
+# Tylko po potwierdzeniu błędnego właściciela własnego repozytorium:
+sudo chown -R darulec:darulec /home/darulec/.m2/repository
+```
+
+Jeżeli sam katalog `.m2` również należy do root, poprawić jego właściciela
+osobno: `sudo chown darulec:darulec /home/darulec/.m2`.
+Nie stosować `chmod 777`, nie zmieniać właściciela całego katalogu domowego
+i nie uruchamiać zwykłego Mavena przez sudo. To instrukcja odtworzenia wcześniejszej
+naprawy, nie zapis ponownego wykonania tych komend 14 listopada.
+
+### B. Kod się kompiluje, ale IntelliJ nie widzi źródeł/JUnit
+
+Po ręcznym oznaczaniu katalogów i czyszczeniu cache model Maven w IDE nadal miał
+poziom `JDK_1_5`, nierozwinięte ścieżki `${project.build.directory}` i brak bibliotek
+JUnit. Samo `mvn clean install` nie naprawiało modelu projektu w IDE.
+
+W **Settings → Build, Execution, Deployment → Build Tools → Maven → Importing**
+ustawienie **JDK for importer → Use Project JDK** było już prawidłowe
+(`openjdk-27 (WSL)`). Dopiero **Reload All Maven Projects** w oknie Maven naprawiło
+import. Po przeładowaniu zapisany model miał `JDK_11`, prawidłowe katalogi źródeł
+i osiem bibliotek JUnit oraz jego zależności. Właściciel potwierdził zniknięcie
+czerwonych importów. Nie trzeba było zmieniać wersji JUnit, JDK ani release.
+
+### C. Play przy main: błąd EEL/JPS, potem niechciane install
+
+Objaw przy uruchamianiu `demo.Puzzler`:
+
+```text
+Failure of obtaining prefix: could not convert LocalEelDescriptor to EelPath.
+The path does not belong to the default NIO FileSystem
+```
+
+Log IntelliJ wskazał `EelBuildCommandLineBuilder` i `BuildManager.launchBuildProcess`:
+błąd występował przy przygotowaniu kompilacji JPS przed startem main.
+W tym momencie model Maven nadal miał Java 11 i osiem bibliotek; nie stwierdzono
+ponownego uszkodzenia importu. Maven z IntelliJ potrafił skompilować kod i testy.
+Opis podobnego błędu producenta: [IJPL-211854](https://youtrack.jetbrains.com/issue/IJPL-211854).
+
+Pierwsze obejście — zaznaczenie **Delegate IDE build/run actions to Maven** —
+było zbyt szerokie. Istniejące zadanie **Build/Make** przed uruchomieniem zostało
+wykonane jako Maven `install`, więc Play uruchamiało również testy.
+Właściciel słusznie zgłosił ten niepożądany efekt.
+
+**Działająca konfiguracja, potwierdzona przez właściciela 14.11.2026:**
+
+1. **Settings → Build, Execution, Deployment → Build Tools → Maven → Runner**:
+   odznaczyć **Delegate IDE build/run actions to Maven**.
+2. **Run → Edit Configurations → Application → Puzzler**:
+   klasa główna `demo.Puzzler`, moduł `strategy-kata`, JDK projektu z WSL.
+3. W **Before launch** usunąć **Build/Make** i ewentualne zadanie Maven `install`.
+4. Dodać **+ → Run Maven Goal**, wskazać `pom.xml` tego ćwiczenia,
+   w polu polecenia wpisać wyłącznie **`compile`**.
+5. Zatwierdzić i uruchomić Play przy main.
+
+Wynik: **Maven compile → uruchomienie main**, bez `install` i bez testów.
+Kompilacja przed startem pozostaje włączona, więc main nie korzysta celowo ze
+starych klas. Testy uruchamia się oddzielnie przez `test` lub konfigurację testową.
+Nie dodano globalnego `skipTests` i nie zmieniono zadania ani jego asercji.
+Instrukcję konfiguracji zadań przed startem opisuje również
+[dokumentacja IntelliJ](https://www.jetbrains.com/help/idea/work-with-maven-goals.html).
+
+### Granice ustalenia
+
+PairCoding wykonuje Maven w kontenerze na izolowanej kopii wejścia, z oddzielnym
+cache; IntelliJ używa własnego repozytorium Maven w WSL. W porównaniu zapisów
+przed i po kontrolowanej sekwencji nie zmieniły się POM ani źródła, a poprawiony
+model IDE zachował biblioteki. Późniejsze `clean/install` użytkownika zmieniało
+lokalny `target`; nie przypisujemy tych zmian kontenerowi PairCoding.
+
+Nie naprawiano tym krokiem wewnętrznego błędu IntelliJ — zastosowano sprawdzone
+obejście konfiguracji uruchamiania. Ostrzeżenie Jansi o `noexec` w kontenerze
+jest odrębnym problemem. Czerwony test z `prediction = "I don't know"` oznacza
+niedokończone ćwiczenie, a nie brak JUnit ani błąd kompilacji.
+
+Porównania modelu IDE i logi diagnostyczne zachowano poza repozytorium:
+`\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\paircoach-live-20261114\intellij-coexistence`.
+Końcowe działanie Play potwierdził właściciel; nie wykonywano ponownie pełnego
+suite produktu ani automatyzacji GUI IntelliJ dla tego zapisu.
