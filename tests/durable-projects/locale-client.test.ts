@@ -18,11 +18,11 @@ async function fixture(t:TestContext) {
   const project=path.join(root,'P'),exercise=path.join(root,'A');
   fs.mkdirSync(project);fs.mkdirSync(exercise);
   fs.writeFileSync(path.join(exercise,'challenge.md'),'# Exercise');
-  const app=createPairCoachServer({port:0,token:'locale-test',runtimeEnvironment:{}});
+  const app=createPairCoachServer({port:0,token:'locale-test-token-0123456789',runtimeEnvironment:{}});
   const port=await app.listen();
   let fault:'none'|'reject'|'lost'|'unavailable'|'malformed'='none',posts=0,reads=0;
   let beforePost:(()=>Promise<void>)|undefined;
-  const client=new LiveBackend({baseUrl:`http://127.0.0.1:${port}`,token:'locale-test',socket:url=>new WebSocket(url) as any,fetch:async(url,options)=>{
+  const client=new LiveBackend({baseUrl:`http://127.0.0.1:${port}`,token:'locale-test-token-0123456789',socket:url=>new WebSocket(url) as any,fetch:async(url,options)=>{
     const route=new URL(String(url)).pathname;
     if(route==='/api/durable-project/locale' && options?.method==='POST') {
       posts++;await beforePost?.();
