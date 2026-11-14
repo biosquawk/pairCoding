@@ -128,7 +128,7 @@ export class SessionController extends EventEmitter {
     this.elapsed = saved.timer.elapsedMs;
     this.runningSince = null;
     this.state.lifecycle = saved.lifecycle;
-    this.state.timer = {...saved.timer, manualPaused: saved.lifecycle === 'RUNNING' ? true : saved.timer.manualPaused, serverTime: new Date().toISOString()};
+    this.state.timer = {...saved.timer, serverTime: new Date().toISOString()};
     const path = saved.activeFilePath;
     this.state.activeFilePath = path && this.workspace.listFiles().some(f => f.path === path && f.kind === 'FILE') ? path : null;
     this.state.timer = this.computeTimer();
