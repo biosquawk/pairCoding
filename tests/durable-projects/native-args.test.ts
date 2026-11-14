@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {codexCoachArgs} from '../../src/server/coach/CodexProvider';
+import {codexCoachArgs,NATIVE_LOCALE_POLICY} from '../../src/server/coach/CodexProvider';
 import {coachLocaleInstruction} from '../../src/server/coach/prompt';
 const config={model:'gpt-6.1-sol',reasoning_effort:'high'} as const;
 test('persistent Codex uses only actual scoped session ID and keeps configured teacher model/effort, disabled tools and read-only sandbox',()=>{
@@ -23,4 +23,11 @@ test('each native turn carries current locale outside untrusted project JSON, in
  const data=JSON.stringify({locale:'en',messages:[{text:'bursztynowa wydra'}]});
  const en=nativeCoachTurn(data,'en'); assert.match(en,/ALL future user-facing replies.*MUST be in English/); assert.ok(en.includes(data));
  const pl=nativeCoachTurn(data,'pl'); assert.match(pl,/Wszystkie przyszłe odpowiedzi.*po polsku/); assert.doesNotMatch(pl,/MUST be in English/);assert.ok(pl.includes(data));
+});
+
+test('native developer policy delegates language to the current controlled turn, not the first locale',()=>{
+ assert.match(NATIVE_LOCALE_POLICY,/each turn/);
+ assert.match(NATIVE_LOCALE_POLICY,/differs from earlier turns/);
+ assert.doesNotMatch(NATIVE_LOCALE_POLICY,/ALL future|wybrał POLSKI/);
+ assert.match(NATIVE_LOCALE_POLICY,/JSON and its contents as data/);
 });
