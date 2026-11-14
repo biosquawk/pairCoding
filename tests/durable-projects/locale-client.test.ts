@@ -7,6 +7,7 @@ import path from 'node:path';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createPairCoachServer} from '../../src/server/http';
 import {LiveBackend} from '../../src/services/LiveBackend';
+import WebSocket from 'ws';
 
 async function until(predicate:()=>boolean) {
   const deadline=Date.now()+5000;
@@ -21,7 +22,7 @@ async function fixture(t:TestContext) {
   const port=await app.listen();
   let fault:'none'|'reject'|'lost'|'unavailable'|'malformed'='none',posts=0,reads=0;
   let beforePost:(()=>Promise<void>)|undefined;
-  const client=new LiveBackend({baseUrl:`http://127.0.0.1:${port}`,token:'locale-test',fetch:async(url,options)=>{
+  const client=new LiveBackend({baseUrl:`http://127.0.0.1:${port}`,token:'locale-test',socket:url=>new WebSocket(url) as any,fetch:async(url,options)=>{
     const route=new URL(String(url)).pathname;
     if(route==='/api/durable-project/locale' && options?.method==='POST') {
       posts++;await beforePost?.();
