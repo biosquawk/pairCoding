@@ -30,6 +30,14 @@ import {
   XCircle,
 } from 'lucide-react';
 
+function formatChatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  if (!Number.isFinite(date.getTime())) return '';
+  const twoDigits = (value: number) => String(value).padStart(2, '0');
+  return `${twoDigits(date.getFullYear() % 100)}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())} `
+    + `${twoDigits(date.getHours())}-${twoDigits(date.getMinutes())}-${twoDigits(date.getSeconds())}`;
+}
+
 interface BottomPanelProps {
   activeTab: 'task' | 'chat' | 'console' | 'report';
   taskContent: string;
@@ -208,6 +216,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   const isCoach = entry.sender === 'COACH';
                   const isUser = entry.sender === 'STUDENT';
                   const isSystem = entry.sender === 'SYSTEM';
+                  const sentAt = formatChatTimestamp(entry.timestamp);
 
                   if (isSystem) {
                     return (
@@ -240,7 +249,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                         }`}
                       >
                         <div className="font-semibold text-[10px] text-zinc-400 mb-0.5">
-                          {isUser ? 'Ty (Uczeń)' : 'Trener AI'}
+                          {isUser ? 'Ty' : 'Trener AI'}
+                          {sentAt && <> <time dateTime={new Date(entry.timestamp).toISOString()}>({sentAt})</time></>}
                         </div>
                         <div className="whitespace-pre-wrap">{entry.message}</div>
 
