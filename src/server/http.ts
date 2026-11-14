@@ -826,6 +826,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           value=await listFolders(url.searchParams.get('path')??(startup.core ? path.dirname(workspace.rootPath) : durable?.directory ?? process.env.USERPROFILE ?? process.env.HOME ?? process.cwd()));
         }
         else if(url.pathname==='/api/session') value=session.getSession();
+        // Complete active-project history; the model's context window is independent.
+        else if(url.pathname==='/api/session/chat') value=clone(chat);
         else if(url.pathname==='/api/file') value=workspace.getDocument(url.searchParams.get('path')||'');
         else if(url.pathname==='/api/snapshots') value=workspace.listSnapshots();
         else if(url.pathname==='/api/session/report') {

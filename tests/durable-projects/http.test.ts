@@ -73,3 +73,13 @@ test('locale change aborts/invalidate ignored-abort AI; only new-language reply 
  await f.exercise(f.B);await f.chat('What project rule remains?');await f.wait(m=>m.type==='CHAT_REPLY'&&m.payload.text==='English reply');
  assert.equal(calls.at(-1).context.durableProject.transitions.length,2);assert.ok(calls.at(-1).context.messages.some((m:any)=>m.text.includes('Use Java 21')));
 });
+
+
+test('authenticated HTTP chat returns complete durable history across close and server restart',async t=>{
+ const f=await fixture(t);await f.command('create',{directory:f.P,name:'History',locale:'en'});const file=f.state.durableProject.projectFile;await f.exercise(f.A);
+ for(let i=0;i<105;i++)await f.chat(`history-${i}`);
+ const read=async()=>{const r=await f.request('GET','/api/session/chat');assert.equal(r.status,200);assert.equal(r.body.length,105);assert.deepEqual(r.body.map((x:any)=>x.text),Array.from({length:105},(_,i)=>`history-${i}`));return r.body;};
+ assert.equal((await f.request('GET','/api/session/chat',undefined,false)).status,401);const original=await read();
+ await f.command('close');assert.equal((await f.request('GET','/api/session/chat')).status,409);await f.command('open',{projectFile:file});assert.deepEqual(await read(),original);
+ await f.restart();assert.equal((await f.request('GET','/api/session/chat')).status,409);await f.command('open',{projectFile:file});assert.deepEqual(await read(),original);
+});
