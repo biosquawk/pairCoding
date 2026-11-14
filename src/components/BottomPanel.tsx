@@ -1,3 +1,4 @@
+import { t, problemText, stateText } from '../i18n';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -38,7 +39,8 @@ function formatChatTimestamp(timestamp: number): string {
     + `${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
 }
 
-interface BottomPanelProps {
+interface SessionPanelProps {
+  sidebar?: boolean;
   activeTab: 'task' | 'chat' | 'console' | 'report';
   taskContent: string;
   chatEntries: ChatEntry[];
@@ -58,7 +60,8 @@ interface BottomPanelProps {
   onToggleMaximize: () => void;
 }
 
-export const BottomPanel: React.FC<BottomPanelProps> = ({
+export const SessionPanel: React.FC<SessionPanelProps> = ({
+  sidebar=false,
   activeTab,
   taskContent,
   chatEntries,
@@ -78,6 +81,8 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
   onToggleMaximize,
 }) => {
   const [inputText, setInputText] = useState('');
+  const composerRef=useRef<HTMLTextAreaElement>(null);
+  useEffect(()=>{if(sidebar&&activeTab==='chat')composerRef.current?.focus();},[sidebar,activeTab]);
   const inputRevisionRef = useRef(0);
   const submissionRef = useRef(new EditorChatSubmissionP2());
   const [isSending, setIsSending] = useState(false);
@@ -115,40 +120,13 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
 
   return (
     <div
-      style={{ height: isCollapsed ? '38px' : isMaximized ? '100%' : `min(${height}px, 45vh)` }}
+      style={{ height: sidebar ? '100%' : isCollapsed ? '38px' : isMaximized ? '100%' : `min(${height}px, 45vh)` }}
       className="flex flex-col min-h-0 shrink-0 bg-zinc-950 border-t border-zinc-800 text-zinc-300 transition-all select-none relative"
     >
       {/* Panel Tab Bar & Window Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-1 bg-zinc-950 border-b border-zinc-800 px-3 py-1 select-none">
+      {!sidebar && <div className="flex flex-wrap items-center justify-between gap-1 bg-zinc-950 border-b border-zinc-800 px-3 py-1 select-none">
         {/* Tabs wrap before window controls can horizontally scroll the hidden panel. */}
         <div className="flex flex-wrap min-w-0 items-center gap-1">
-          <button
-            onClick={() => onSelectTab('task')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-all font-medium ${
-              activeTab === 'task'
-                ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5 text-blue-400" />
-            <span>Zadanie</span>
-          </button>
-
-          <button
-            onClick={() => onSelectTab('chat')}
-            className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-all font-medium relative ${
-              activeTab === 'chat'
-                ? 'bg-zinc-800 text-zinc-100 shadow-sm border border-zinc-700'
-                : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-            }`}
-          >
-            <Bot className="w-3.5 h-3.5 text-purple-400" />
-            <span>Czat</span>
-            {activeProposal && (
-              <span className="w-2 h-2 rounded-full bg-purple-500 animate-ping absolute -top-0.5 -right-0.5" />
-            )}
-          </button>
-
           <button
             onClick={() => onSelectTab('console')}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs rounded transition-all font-medium ${
@@ -158,7 +136,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
             }`}
           >
             <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Konsola</span>
+            <span>{t("Konsola")}</span>
             {activeRun && activeRun.status === 'RUNNING' && (
               <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse ml-1" />
             )}
@@ -172,7 +150,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                 : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
             }`}
           >
-            <span>Raport</span>
+            <span>{t("Raport")}</span>
             {report && report.status === 'READY' && (
               <span className="w-2 h-2 rounded-full bg-blue-500 ml-1" />
             )}
@@ -184,32 +162,32 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
           <button
             onClick={onToggleMaximize}
             className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-            title={isMaximized ? 'Przywróć normalną wysokość' : 'Maksymalizuj dolny panel'}
+            title={isMaximized ? t("Przywróć normalną wysokość") : t("Maksymalizuj dolny panel")}
           >
             {isMaximized ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </button>
           <button
             onClick={onToggleCollapse}
             className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200"
-            title={isCollapsed ? 'Rozwiń panel' : 'Zwiń panel'}
+            title={isCollapsed ? t("Rozwiń panel") : t("Zwiń panel")}
           >
             {isCollapsed ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
           </button>
         </div>
-      </div>
+      </div>}
 
       {/* Panel Body (hidden if collapsed) */}
-      {!isCollapsed && (
+      {(sidebar || !isCollapsed) && (
         <div className="flex-1 min-h-0 overflow-hidden select-text">
           {/* TAB 1: Zadanie (Safe Markdown) */}
-          {activeTab === 'task' && (
+          {sidebar && activeTab === 'task' && (
             <div className="h-full overflow-y-auto p-4 max-w-4xl mx-auto">
               <SafeMarkdown content={taskContent} />
             </div>
           )}
 
           {/* TAB 2: Czat */}
-          {activeTab === 'chat' && (
+          {sidebar && activeTab === 'chat' && (
             <div className="h-full flex flex-col">
               <div className="flex-1 overflow-y-auto p-3 space-y-3">
                 {chatEntries.map((entry) => {
@@ -242,24 +220,23 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                       </div>
 
                       <div
-                        className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
+                        className={`min-w-0 rounded-lg px-3 py-2 text-xs leading-relaxed ${
                           isUser
                             ? 'bg-zinc-800 text-zinc-100 border border-zinc-700'
                             : 'bg-zinc-900 text-zinc-200 border border-zinc-800'
                         }`}
                       >
                         <div className="font-semibold text-[10px] text-zinc-400 mb-0.5">
-                          {isUser ? 'Ty' : 'Trener AI'}
+                          {isUser ? t("Ty") : t("Trener AI")}
                           {sentAt && <> <time dateTime={new Date(entry.timestamp).toISOString()}>({sentAt})</time></>}
                         </div>
-                        <div className="pc-message-content whitespace-pre-wrap">{entry.message}</div>
+                        <div className="pc-message-content whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{entry.message}</div>
 
                         {/* Proposal in Chat card */}
                         {entry.proposal && activeProposal && activeProposal.id === entry.proposal.id && (
                           <div className="mt-2.5 p-2.5 bg-purple-950/40 border border-purple-700/80 rounded-md">
                             <div className="font-semibold text-purple-300 text-xs mb-1">
-                              Wymagana szybka decyzja:
-                            </div>
+                              {t("Wymagana szybka decyzja:")}{' '}</div>
                             <div className="pc-message-content text-xs text-zinc-200 mb-2">{entry.proposal.questionText}</div>
                             <div className="flex items-center gap-2">
                               <button
@@ -285,21 +262,21 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               </div>
 
               {/* Chat Input form (Native input/textarea supporting Windows+H dictation) */}
-              {sendError && <p role="alert" className="px-3 py-2 text-xs text-amber-300">{sendError}</p>}
+              {sendError && <p role="alert" className="px-3 py-2 text-xs text-amber-300">{problemText(sendError)}</p>}
               <form aria-busy={isSending} onSubmit={handleSend} className="p-2 border-t border-zinc-800 bg-zinc-950 flex items-center gap-2">
-                <textarea
+                <textarea ref={composerRef}
                   value={inputText}
                   onChange={(e) => { inputRevisionRef.current++; setInputText(e.target.value); }}
                   onKeyDown={handleKeyDown}
-                  placeholder="Napisz do Trenera AI... (Shift+Enter dla nowej linii, w pełni zgodne z dyktowaniem Win+H)"
+                  placeholder={t("Napisz do Trenera AI... (Shift+Enter dla nowej linii, w pełni zgodne z dyktowaniem Win+H)")}
                   rows={1}
-                  className="pc-message-content flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-100 resize-none focus:outline-none focus:border-blue-500"
+                  className="pc-message-content flex-1 min-w-0 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-100 resize-none focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="submit"
                   disabled={isSending || !inputText.trim()}
                   className="p-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-800 disabled:text-zinc-600 text-white rounded transition-colors"
-                  title="Wyślij wiadomość"
+                  title={t("Wyślij wiadomość")}
                 >
                   <Send className="w-3.5 h-3.5" />
                 </button>
@@ -313,7 +290,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               {/* Console Status Bar */}
               <div className="px-3 py-1.5 border-b border-zinc-900 bg-zinc-900/40 flex items-center justify-between text-[11px] text-zinc-400">
                 <div className="flex items-center gap-2">
-                  <span>Profil: <strong className="text-zinc-200">{activeRun?.profileName || 'Brak aktywnego procesu'}</strong></span>
+                  <span>{t("Profil:")}{' '}<strong className="text-zinc-200">{activeRun?.profileName || t("Brak aktywnego procesu")}</strong></span>
                   {activeRun && (
                     <span
                       className={`px-1.5 py-0.2 rounded font-semibold ${
@@ -326,24 +303,24 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                           : 'bg-zinc-800 text-zinc-400'
                       }`}
                     >
-                      {activeRun.status}
+                      {stateText(activeRun.status)}
                     </span>
                   )}
                   {activeRun?.exitCode !== undefined && (
-                    <span>exit: {activeRun.exitCode}</span>
+                    <span>{t("Kod wyjścia:")} {activeRun.exitCode}</span>
                   )}
                 </div>
 
                 <div className="flex items-center gap-2">
                   {activeRun?.testOutcome && (
                     <span className="text-[10px]">
-                      Testy: <strong className={activeRun.testOutcome === 'PASSED' ? 'text-emerald-400' : activeRun.testOutcome === 'FAILED' ? 'text-rose-400' : 'text-zinc-400'}>
-                        {activeRun.testOutcome}
+                      {t("Testy:")}{' '}<strong className={activeRun.testOutcome === 'PASSED' ? 'text-emerald-400' : activeRun.testOutcome === 'FAILED' ? 'text-rose-400' : 'text-zinc-400'}>
+                        {stateText(activeRun.testOutcome)}
                       </strong>
                     </span>
                   )}
                   {activeRun?.workspaceChangedDuringRun && (
-                    <span className="text-amber-400 text-[10px]">⚠️ Pliki zmienione w trakcie</span>
+                    <span className="text-amber-400 text-[10px]">{t("⚠️ Pliki zmienione w trakcie")}</span>
                   )}
                 </div>
               </div>
@@ -367,8 +344,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   ))
                 ) : (
                   <div className="text-zinc-600 italic py-4 text-center">
-                    Brak danych wyjściowych konsoli. Kliknij "▶ Run Main" lub "✔ Run Tests" na górnym pasku, aby uruchomić program.
-                  </div>
+                    {t("Brak danych wyjściowych konsoli. Kliknij \"▶ Run Main\" lub \"✔ Run Tests\" na górnym pasku, aby uruchomić program.")}{' '}</div>
                 )}
                 <div ref={consoleBottomRef} />
               </div>

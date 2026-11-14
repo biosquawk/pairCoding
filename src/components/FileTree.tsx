@@ -1,3 +1,4 @@
+import { t, problemText, stateText } from '../i18n';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -166,7 +167,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       return (
         <div key={node.fullPath}>
           <div
-            role="button" tabIndex={0} aria-expanded={!isCollapsed} aria-label={`Folder ${node.fullPath}`}
+            role="button" tabIndex={0} aria-expanded={!isCollapsed} aria-label={t("Folder {0}",{0:node.fullPath})}
             onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); toggleDir(node.fullPath); } }}
             onClick={() => toggleDir(node.fullPath)}
             style={{ paddingLeft: `${depth * 12 + 8}px` }}
@@ -191,7 +192,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
     return (
       <div
         key={node.fullPath}
-        role="button" tabIndex={0} aria-label={`Otwórz plik ${node.fullPath}`} aria-pressed={isActive}
+        role="button" tabIndex={0} aria-label={t("Otwórz plik {0}",{0: node.fullPath})} aria-pressed={isActive}
         onKeyDown={event => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); if (!isEditing) onSelectFile(node.fullPath); } }}
         style={{ paddingLeft: `${depth * 12 + 10}px` }}
         className={`group h-7 flex items-center justify-between py-1 px-2 text-xs cursor-pointer select-none rounded transition-colors ${
@@ -226,13 +227,11 @@ export const FileTree: React.FC<FileTreeProps> = ({
         <div className="flex items-center gap-1 ml-1 opacity-80 group-hover:opacity-100">
           {isSpecialTask && (
             <span className="text-[9px] px-1 py-0.2 rounded bg-blue-950 text-blue-300 border border-blue-800">
-              Zadanie
-            </span>
+              {t("Zadanie")}{' '}</span>
           )}
           {isSpecialNotes && (
             <span className="text-[9px] px-1 py-0.2 rounded bg-amber-950 text-amber-300 border border-amber-800">
-              Notatki
-            </span>
+              {t("Notatki")}{' '}</span>
           )}
 
           {/* Quick Actions (Rename / Delete) */}
@@ -244,7 +243,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                   setEditingPath(node.fullPath);
                   setEditingNewName(node.fullPath);
                 }}
-                title="Zmień nazwę pliku"
+                title={t("Zmień nazwę pliku")}
                 className="p-1 hover:text-zinc-200 text-zinc-500 hover:bg-zinc-800 rounded"
               >
                 <Edit2 className="w-2.5 h-2.5" />
@@ -254,7 +253,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
                   e.stopPropagation();
                   setDeletingPath(node.fullPath);
                 }}
-                title="Usuń plik"
+                title={t("Usuń plik")}
                 className="p-1 hover:text-red-400 text-zinc-500 hover:bg-zinc-800 rounded"
               >
                 <Trash2 className="w-2.5 h-2.5" />
@@ -267,22 +266,22 @@ export const FileTree: React.FC<FileTreeProps> = ({
   };
 
   return (
-    <div aria-label="Pliki projektu i stan" className="h-full min-h-0 min-w-0 flex flex-col bg-zinc-950 border-r border-zinc-800 text-zinc-300 select-none">
+    <div aria-label={t("Pliki projektu i stan")} className="h-full min-h-0 min-w-0 flex flex-col bg-zinc-950 border-r border-zinc-800 text-zinc-300 select-none">
       {/* File Tree Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-zinc-800 bg-zinc-950">
-        <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">Pliki Projektu</span>
+        <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">{t("Pliki Projektu")}</span>
         <div className="flex items-center gap-1">
           <button
             onClick={() => setIsCreatingFile(!isCreatingFile)}
             className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
-            title="Utwórz nowy plik (np. src/helper.ts)"
+            title={t("Utwórz nowy plik (np. src/helper.ts)")}
           >
             <FilePlus className="w-3.5 h-3.5" />
           </button>
           <button
             onClick={onOpenSettings}
             className="p-1 rounded hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 transition-colors"
-            title="Ustawienia projektu (AI Consent, Task Mode, Profile)"
+            title={t("Ustawienia projektu (AI Consent, Task Mode, Profile)")}
           >
             <Settings className="w-3.5 h-3.5" />
           </button>
@@ -292,20 +291,20 @@ export const FileTree: React.FC<FileTreeProps> = ({
       {/* New File Inline Form */}
       {isCreatingFile && (
         <form onSubmit={handleCreateSubmit} className="p-2 border-b border-zinc-800 bg-zinc-900/60">
-          <div className="text-[11px] text-zinc-400 mb-1">Nowy plik (np. <code>src/utils.ts</code>):</div>
+          <div className="text-[11px] text-zinc-400 mb-1">{t("Nowy plik (np.")}{' '}<code>src/utils.ts</code>):</div>
           <div className="flex items-center gap-1">
             <input
               type="text"
               autoFocus
               value={newFilePath}
               onChange={(e) => setNewFilePath(e.target.value)}
-              placeholder="ścieżka/nazwa_pliku.ext"
+              placeholder={t("ścieżka/nazwa_pliku.ext")}
               className="bg-zinc-950 border border-zinc-700 rounded px-2 py-1 text-xs text-zinc-100 flex-1 focus:border-blue-500 focus:outline-none"
             />
             <button
               type="submit"
               className="p-1 bg-blue-600 hover:bg-blue-500 text-white rounded text-xs"
-              title="Utwórz"
+              title={t("Utwórz")}
             >
               <Check className="w-3.5 h-3.5" />
             </button>
@@ -313,7 +312,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
               type="button"
               onClick={() => setIsCreatingFile(false)}
               className="p-1 hover:bg-zinc-800 text-zinc-400 rounded text-xs"
-              title="Anuluj"
+              title={t("Anuluj")}
             >
               <X className="w-3.5 h-3.5" />
             </button>
@@ -325,26 +324,24 @@ export const FileTree: React.FC<FileTreeProps> = ({
       <div className={`min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable] py-1 px-1 ${details ? 'hidden' : ''}`}>
         {treeRoot.children.map((child) => renderNode(child, 0))}
       </div>
-      {details && <div role="region" aria-label="Szczegóły środowiska" className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [overflow-wrap:anywhere]">{details}</div>}
+      {details && <div role="region" aria-label={t("Szczegóły środowiska")} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2 [overflow-wrap:anywhere]">{details}</div>}
 
       {/* Delete Confirmation Modal */}
       {deletingPath && (
         <div className="p-3 bg-red-950/60 border-t border-red-900/80 text-xs text-red-200">
-          <p className="font-semibold mb-1">Czy na pewno usunąć plik?</p>
+          <p className="font-semibold mb-1">{t("Czy na pewno usunąć plik?")}</p>
           <p className="text-[11px] text-zinc-400 mb-2 truncate">{deletingPath}</p>
           <div className="flex items-center gap-2">
             <button
               onClick={handleDeleteConfirm}
               className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-medium text-xs"
             >
-              Usuń trwale
-            </button>
+              {t("Usuń trwale")}{' '}</button>
             <button
               onClick={() => setDeletingPath(null)}
               className="px-2 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs"
             >
-              Anuluj
-            </button>
+              {t("Anuluj")}{' '}</button>
           </div>
         </div>
       )}
@@ -352,7 +349,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       {footer && <div className="shrink-0 min-w-0 max-h-[45%] overflow-y-auto overflow-x-hidden border-t border-zinc-800 bg-zinc-900/60 p-2 [overflow-wrap:anywhere]">{footer}</div>}
       {/* Footer Info */}
       <div className="p-2 border-t border-zinc-900 bg-zinc-950/80 text-[10px] text-zinc-500 flex justify-between items-center">
-        <span>{files.length} plików</span>
+        <span>{files.length} {' '}{t("plików")}</span>
         <span className="font-mono">{taskMode}</span>
       </div>
     </div>

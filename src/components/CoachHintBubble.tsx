@@ -1,3 +1,4 @@
+import { t, problemText } from '../i18n';
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import { GripHorizontal, X } from 'lucide-react';
 import type { CoachHintBubble as Hint } from '../types/paircoach';
@@ -55,21 +56,21 @@ export function CoachHintBubble({ hint, container, protectedCode, onDismiss, onP
     else setPreferred({ x: placement.x - dx, y: placement.y + dy });
   };
   const severity = hint.severity === 'WARNING' ? 'bg-rose-950 border-rose-600 text-rose-100' : hint.severity === 'POSITIVE' ? 'bg-emerald-950 border-emerald-600 text-emerald-100' : 'bg-yellow-950 border-yellow-600 text-yellow-100';
-  return <div ref={ref} role="region" aria-label="Wskazówka trenera" data-hint-mode={docked ? 'parked' : 'overlay'}
+  return <div ref={ref} role="region" aria-label={t("Wskazówka trenera")} data-hint-mode={docked ? 'parked' : 'overlay'}
     className={`flex flex-col min-h-0 shrink-0 rounded border shadow-xl text-xs overflow-hidden z-30 ${severity}`}
     style={docked ? { position: 'relative', width: '100%', maxHeight: parkedMaxHeight }
       : { position: 'absolute', right: placement.x, top: placement.y, width, maxHeight }}>
     <div className="flex items-center shrink-0 min-w-0 border-b border-white/10" style={{ height: Math.min(32, container.height) }}>
-      <button type="button" aria-label="Przenieś wskazówkę (strzałki)" title={docked ? 'Wskazówka zadokowana poza kodem' : 'Przeciągnij lub użyj strzałek'}
+      <button type="button" aria-label={t("Przenieś wskazówkę (strzałki)")} title={docked ? t("Wskazówka zadokowana poza kodem") : t("Przeciągnij lub użyj strzałek")}
         disabled={docked} onPointerDown={e => begin(e, 'move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}
         onKeyDown={e => arrows(e)} className="shrink-0 p-1 touch-none cursor-move disabled:cursor-default"><GripHorizontal size={16} /></button>
-      <span title={collapsed ? `Powiększ edytor, aby przeczytać wskazówkę: ${hint.text}` : undefined} className="truncate flex-1 min-w-0">{collapsed ? 'Powiększ edytor' : docked ? 'Poza kodem' : hint.severity === 'WARNING' ? 'Uwaga' : hint.severity === 'POSITIVE' ? 'Dobry kierunek' : 'Wskazówka'} · {hint.line}</span>
-      <button type="button" onClick={onDismiss} aria-label="Zamknij dymek" title="Zamknij dymek" className="shrink-0 p-1 hover:bg-black/30"><X size={16} /></button>
+      <span title={collapsed ? t("Powiększ edytor, aby przeczytać wskazówkę: {0}",{0: hint.text}) : undefined} className="truncate flex-1 min-w-0">{collapsed ? t("Powiększ edytor") : docked ? t("Poza kodem") : hint.severity === 'WARNING' ? t("Uwaga") : hint.severity === 'POSITIVE' ? t("Dobry kierunek") : t("Wskazówka")} · {hint.line}</span>
+      <button type="button" onClick={onDismiss} aria-label={t("Zamknij dymek")} title={t("Zamknij dymek")} className="shrink-0 p-1 hover:bg-black/30"><X size={16} /></button>
     </div>
-    <div hidden={collapsed} tabIndex={0} aria-label="Treść wskazówki" className="overflow-auto min-h-0 p-1 whitespace-pre-wrap break-words select-text" style={{ overflowWrap: 'anywhere' }}>
-      {docked && <p className="mb-1 font-semibold">Brak miejsca nad kodem — wskazówka zadokowana. Kod pozostaje odsłonięty.</p>}{hint.text}
+    <div hidden={collapsed} tabIndex={0} aria-label={t("Treść wskazówki")} className="overflow-auto min-h-0 p-1 whitespace-pre-wrap break-words select-text" style={{ overflowWrap: 'anywhere' }}>
+      {docked && <p className="mb-1 font-semibold">{t("Brak miejsca nad kodem — wskazówka zadokowana. Kod pozostaje odsłonięty.")}</p>}{hint.text}
     </div>
-    {!docked && <button type="button" aria-label="Zmień rozmiar wskazówki (strzałki)" title="Przeciągnij lub użyj strzałek, aby zmienić rozmiar"
+    {!docked && <button type="button" aria-label={t("Zmień rozmiar wskazówki (strzałki)")} title={t("Przeciągnij lub użyj strzałek, aby zmienić rozmiar")}
       className="shrink-0 self-end px-2 touch-none cursor-se-resize" onPointerDown={e => begin(e, 'resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} onLostPointerCapture={end}
       onKeyDown={e => arrows(e, true)}>↘</button>}
   </div>;

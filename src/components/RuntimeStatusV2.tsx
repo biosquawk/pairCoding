@@ -1,3 +1,4 @@
+import { t, problemText, stateText } from '../i18n';
 import type { ServicePreparationState } from '../services/ServicePreparationV2';
 import React, { useId } from 'react';
 import type { ExecutionView, RunKind, RunV2 } from '../shared/runtime-v2';
@@ -14,39 +15,39 @@ export function RuntimeStatusV2({ execution, language, diagnostics, run, connect
   const id = useId();
   const active = run && ['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(run.status);
   const disabled = !connected || !canExecute || pending;
-  return <section aria-label="Środowisko wykonania" className="rounded border border-zinc-700 bg-zinc-950 p-3 text-zinc-300 min-w-0 [overflow-wrap:anywhere]">
+  return <section aria-label={t("Środowisko wykonania")} className="rounded border border-zinc-700 bg-zinc-950 p-3 text-zinc-300 min-w-0 [overflow-wrap:anywhere]">
     <div className="flex flex-wrap items-center gap-2">
-      <strong>Profil: {execution?.runtime.label || 'nieustalony'}</strong>
-      <button type="button" onClick={onSettings} className="underline">Ustawienia wykonania</button>
+      <strong>{t("Profil:")}{' '}{execution?.runtime.label || t("nieustalony")}</strong>
+      <button type="button" onClick={onSettings} className="underline">{t("Ustawienia wykonania")}</button>
     </div>
     <div role="status" aria-live="polite">
-      {!connected ? 'Offline — uruchamianie niedostępne. Połącz ponownie; ręczna edycja i draft pozostają dostępne.' : preparation?.pending || preparation?.uncertain ? 'Przygotowanie niepotwierdzone — gotowość wymaga bieżącego odczytu.' : !execution ? 'Ładowanie gotowości środowiska…' : `Środowisko: ${execution.runtime.state}`}
-      {language && <p>Autouzupełnianie: {language.autocomplete} · Diagnostyka: {diagnostics ?? language.state} · Docs: {language.docs}</p>}
-      {diagnostics==='N/A' && <p>Podpowiedzi słów z bieżącego dokumentu (Ctrl+Space). Diagnostyka podczas pisania nie dotyczy tego pliku; błędy wykonania i kompilacji zobaczysz po Run/Test.</p>}
-      {language?.problem && <p>{language.problem.message} {language.problem.recovery} Pisanie pozostaje dostępne.</p>}
-      {execution?.runtime.problem && <p>{execution.runtime.problem.message} {execution.runtime.problem.recovery}</p>}
-      {run && <p>Wykonanie {run.runId}: {run.status} · Testy: {run.testOutcome}{run.testCount !== null ? ` (${run.testCount})` : ''}</p>}
-      {run?.serviceReadiness?.ready && <p>Usługa HTTP gotowa: <a className="underline break-all" href={run.serviceReadiness.url!} target="_blank" rel="noreferrer">{run.serviceReadiness.url}</a> — wykonanie nadal trwa.</p>}
-      {run?.workspaceChangedDuringRun && <p>Kod zmienił się od uruchomienia. Wynik dotyczy wejścia w wersji {run.workspaceVersionAtStart}.</p>}
-      {run?.processProblem && <p>{run.processProblem.message} {run.processProblem.recovery}</p>}
-      {run?.status === 'STOPPING' && <p>Oczekiwanie na potwierdzenie zatrzymania. Nowe uruchomienie zablokowane.</p>}
-      {run?.status === 'PROCESS_STOP_UNCONFIRMED' && <p>Brak potwierdzenia zatrzymania. Ponów Stop dla tego samego wykonania; nowe uruchomienie zablokowane. Edycja pozostaje dostępna.</p>}
+      {!connected ? t("Offline — uruchamianie niedostępne. Połącz ponownie; ręczna edycja i draft pozostają dostępne.") : preparation?.pending || preparation?.uncertain ? t("Przygotowanie niepotwierdzone — gotowość wymaga bieżącego odczytu.") : !execution ? t("Ładowanie gotowości środowiska…") : t("Środowisko: {0}",{0: stateText(execution.runtime.state)})}
+      {language && <p>{t("Autouzupełnianie:")}{' '}{stateText(language.autocomplete)} {' '}{t("· Diagnostyka:")}{' '}{stateText(diagnostics ?? language.state)} · {t("Dokumentacja:")} {stateText(language.docs)}</p>}
+      {diagnostics==='N/A' && <p>{t("Podpowiedzi słów z bieżącego dokumentu (Ctrl+Space). Diagnostyka podczas pisania nie dotyczy tego pliku; błędy wykonania i kompilacji zobaczysz po Run/Test.")}</p>}
+      {language?.problem && <p>{problemText(language.problem.message)} {problemText(language.problem.recovery)} {' '}{t("Pisanie pozostaje dostępne.")}</p>}
+      {execution?.runtime.problem && <p>{problemText(execution.runtime.problem.message)} {problemText(execution.runtime.problem.recovery)}</p>}
+      {run && <p>{t("Wykonanie")}{' '}{run.runId}: {stateText(run.status)} {' '}{t("· Testy:")}{' '}{stateText(run.testOutcome)}{run.testCount !== null ? ` (${run.testCount})` : ''}</p>}
+      {run?.serviceReadiness?.ready && <p>{t("Usługa HTTP gotowa:")}{' '}<a className="underline break-all" href={run.serviceReadiness.url!} target="_blank" rel="noreferrer">{run.serviceReadiness.url}</a> {' '}{t("— wykonanie nadal trwa.")}</p>}
+      {run?.workspaceChangedDuringRun && <p>{t("Kod zmienił się od uruchomienia. Wynik dotyczy wejścia w wersji")}{' '}{run.workspaceVersionAtStart}.</p>}
+      {run?.processProblem && <p>{problemText(run.processProblem.message)} {problemText(run.processProblem.recovery)}</p>}
+      {run?.status === 'STOPPING' && <p>{t("Oczekiwanie na potwierdzenie zatrzymania. Nowe uruchomienie zablokowane.")}</p>}
+      {run?.status === 'PROCESS_STOP_UNCONFIRMED' && <p>{t("Brak potwierdzenia zatrzymania. Ponów Stop dla tego samego wykonania; nowe uruchomienie zablokowane. Edycja pozostaje dostępna.")}</p>}
     </div>
-    {error && <p role="alert">{error}</p>}
-    <p id={`${id}-network-policy`} className="text-sm mt-2">HTTP Main: port publikowany tylko na 127.0.0.1; program może łączyć się z siecią zewnętrzną oraz osiągalnymi usługami hosta/LAN i współuczestnikami sieci. Testy i programy bez HTTP działają bez sieci. Maven offline nie blokuje połączeń programu.</p>
+    {error && <p role="alert">{problemText(error)}</p>}
+    <p id={`${id}-network-policy`} className="text-sm mt-2">{t("HTTP Main: port publikowany tylko na 127.0.0.1; program może łączyć się z siecią zewnętrzną oraz osiągalnymi usługami hosta/LAN i współuczestnikami sieci. Testy i programy bez HTTP działają bez sieci. Maven offline nie blokuje połączeń programu.")}</p>
     {onPrepare && <div className="mt-2">
       <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={!connected || !canExecute || pending || Boolean(active) || !(preparation?.uncertain?preparation.canReconcile:preparation?.canPrepare)}
         aria-describedby={`${id}-prepare`} onClick={()=>onPrepare(!!preparation?.uncertain)}>
-        {preparation?.pending?'Przygotowanie / uzgadnianie…':preparation?.uncertain?'Dokończ przygotowanie':'Przygotuj środowisko'}
+        {preparation?.pending?t("Przygotowanie / uzgadnianie…"):preparation?.uncertain?t("Dokończ przygotowanie"):t("Przygotuj środowisko")}
       </button>
-      <p id={`${id}-prepare`} role="status" aria-live="polite" className="text-sm mt-1">{preparation?.message ?? 'Jawne przygotowanie środowiska. Nie uruchamia programu ani testów. Ręczna edycja pozostaje dostępna.'}</p>
+      <p id={`${id}-prepare`} role="status" aria-live="polite" className="text-sm mt-1">{preparation?.message ? problemText(preparation.message) : t("Jawne przygotowanie środowiska. Nie uruchamia programu ani testów. Ręczna edycja pozostaje dostępna.")}</p>
     </div>}
     <div className="flex flex-wrap gap-3 mt-2">
       {(['RUN_MAIN','RUN_TESTS'] as const).map(mode => <div key={mode} className="min-w-0 flex-1 basis-40">
-        <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || Boolean(active) || preparation?.blocked || !execution?.modes[mode].canRun} aria-describedby={mode === 'RUN_MAIN' ? `${id}-network-policy ${id}-${mode}-reason` : `${id}-${mode}-reason`} onClick={() => onRun(mode)}>{mode === 'RUN_MAIN' ? 'Uruchom program' : 'Uruchom testy'}</button>
-        <p id={`${id}-${mode}-reason`} className="text-sm break-words">{execution?.modes[mode].problem ? `${execution.modes[mode].problem.message} ${execution.modes[mode].problem.recovery}` : !canExecute ? 'Brak uprawnienia do uruchamiania.' : ''}</p>
+        <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || Boolean(active) || preparation?.blocked || !execution?.modes[mode].canRun} aria-describedby={mode === 'RUN_MAIN' ? `${id}-network-policy ${id}-${mode}-reason` : `${id}-${mode}-reason`} onClick={() => onRun(mode)}>{mode === 'RUN_MAIN' ? t("Uruchom program") : t("Uruchom testy")}</button>
+        <p id={`${id}-${mode}-reason`} className="text-sm break-words">{execution?.modes[mode].problem ? problemText(`${execution.modes[mode].problem.message} ${execution.modes[mode].problem.recovery}`) : !canExecute ? t("Brak uprawnienia do uruchamiania.") : ''}</p>
       </div>)}
-      <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || !active || run?.status === 'STOPPING'} onClick={() => run && onStop(run.runId)}>{run?.status === 'PROCESS_STOP_UNCONFIRMED' ? 'Ponów Stop' : 'Stop'}</button>
+      <button type="button" className="border rounded px-3 py-1 disabled:opacity-50" disabled={disabled || !active || run?.status === 'STOPPING'} onClick={() => run && onStop(run.runId)}>{run?.status === 'PROCESS_STOP_UNCONFIRMED' ? t("Ponów Stop") : t('Zatrzymaj')}</button>
     </div>
   </section>;
 }

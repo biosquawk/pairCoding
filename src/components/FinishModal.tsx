@@ -1,3 +1,4 @@
+import { t, problemText } from '../i18n';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -34,7 +35,7 @@ export const FinishModal: React.FC<FinishModalProps> = ({
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div className="flex items-center gap-2 font-bold text-sm text-zinc-100">
             <Flag className="w-4 h-4 text-blue-400" />
-            <span>Zakończenie Sesji Treningowej</span>
+            <span>{t("Zakończenie Sesji Treningowej")}</span>
           </div>
           <button onClick={onClose} className="p-1 rounded hover:bg-zinc-800 text-zinc-400">
             <X className="w-4 h-4" />
@@ -43,8 +44,7 @@ export const FinishModal: React.FC<FinishModalProps> = ({
 
         <div className="py-4 space-y-3 text-xs">
           <p className="text-zinc-300 leading-relaxed">
-            Wybierz powód zakończenia bieżącej sesji. Po potwierdzeniu czas zostanie zatrzymany, a Trener AI wygeneruje dla Ciebie szczegółowy raport z metrykami i oceną.
-          </p>
+            {t("Wybierz powód zakończenia bieżącej sesji. Po potwierdzeniu czas zostanie zatrzymany, a Trener AI wygeneruje dla Ciebie szczegółowy raport z metrykami i oceną.")}{' '}</p>
 
           <div className="space-y-2">
             <label
@@ -63,10 +63,9 @@ export const FinishModal: React.FC<FinishModalProps> = ({
                 className="mt-0.5 text-blue-500 focus:ring-0"
               />
               <div>
-                <div className="font-semibold text-zinc-200">Zadanie ukończone (COMPLETED)</div>
+                <div className="font-semibold text-zinc-200">{t("Zadanie ukończone (COMPLETED)")}</div>
                 <div className="text-[11px] text-zinc-400 mt-0.5">
-                  Rozwiązanie jest gotowe, testy przeszły lub notatki z przeglądu są kompletne.
-                </div>
+                  {t("Rozwiązanie jest gotowe, testy przeszły lub notatki z przeglądu są kompletne.")}{' '}</div>
               </div>
             </label>
 
@@ -86,10 +85,9 @@ export const FinishModal: React.FC<FinishModalProps> = ({
                 className="mt-0.5 text-amber-500 focus:ring-0"
               />
               <div>
-                <div className="font-semibold text-zinc-200">Przegląd po limicie czasu (TIME_LIMIT_REVIEW)</div>
+                <div className="font-semibold text-zinc-200">{t("Przegląd po limicie czasu (TIME_LIMIT_REVIEW)")}</div>
                 <div className="text-[11px] text-zinc-400 mt-0.5">
-                  Czas na sesję upłynął — chcesz ocenić stan kodu osiągnięty w wyznaczonym limicie.
-                </div>
+                  {t("Czas na sesję upłynął — chcesz ocenić stan kodu osiągnięty w wyznaczonym limicie.")}{' '}</div>
               </div>
             </label>
 
@@ -109,10 +107,9 @@ export const FinishModal: React.FC<FinishModalProps> = ({
                 className="mt-0.5 text-rose-500 focus:ring-0"
               />
               <div>
-                <div className="font-semibold text-zinc-200">Porzucenie próby (ABANDONED)</div>
+                <div className="font-semibold text-zinc-200">{t("Porzucenie próby (ABANDONED)")}</div>
                 <div className="text-[11px] text-zinc-400 mt-0.5">
-                  Chcesz przerwać bez zaliczenia próby i sprawdzić dotychczasowe uwagi.
-                </div>
+                  {t("Chcesz przerwać bez zaliczenia próby i sprawdzić dotychczasowe uwagi.")}{' '}</div>
               </div>
             </label>
           </div>
@@ -123,14 +120,12 @@ export const FinishModal: React.FC<FinishModalProps> = ({
             onClick={onClose}
             className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs"
           >
-            Anuluj
-          </button>
+            {t("Anuluj")}{' '}</button>
           <button
             onClick={() => onConfirm(reason)}
             className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition-colors shadow-sm"
           >
-            Potwierdź i Wygeneruj Raport
-          </button>
+            {t("Potwierdź i Wygeneruj Raport")}{' '}</button>
         </div>
       </div>
     </div>

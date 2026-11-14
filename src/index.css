@@ -58,6 +58,7 @@
   --color-zinc-200: #073642;
   --color-zinc-100: #002b36;
   --color-zinc-50: #002b36;
+  --color-blue-200: #1b5875;
   --color-blue-300: #1b5875;
   --color-blue-400: #1e6e9a;
   --color-blue-700: #39758c;
@@ -71,6 +72,7 @@
   --color-purple-950: #e7eddf;
   --color-emerald-100: #364a16;
   --color-emerald-200: #465916;
+  --color-emerald-300: #4e621b;
   --color-emerald-400: #65730f;
   --color-emerald-700: #8d9d57;
   --color-emerald-900: #e3e8c8;
@@ -81,20 +83,49 @@
   --color-amber-800: #bba15e;
   --color-amber-900: #eddebc;
   --color-amber-950: #f8edd2;
+  --color-red-200: #923e35;
   --color-red-300: #923e35;
   --color-red-400: #a84942;
   --color-red-700: #c39a8e;
   --color-red-950: #f8e0d6;
   --color-rose-100: #7b302c;
+  --color-rose-200: #7b302c;
   --color-rose-300: #8e4239;
   --color-rose-400: #a84942;
   --color-rose-700: #b77d70;
   --color-rose-950: #f9e5dc;
   --color-yellow-100: #6b5200;
+  --color-yellow-300: #806300;
+  --color-yellow-400: #806300;
   --color-yellow-950: #f7edcf;
   background: #fdf6e3;
   color: #657b83;
 }
+:root[data-theme="darcula"] {
+  color-scheme: dark;
+  --pc-menu-background: #3c3f41; --pc-selection: #214283;
+  --pc-pointer-background: rgb(204 120 50 / 12%); --pc-pointer-border: rgb(204 120 50 / 55%);
+  --color-zinc-950: #2b2b2b; --color-zinc-900: #313335; --color-zinc-800: #3c3f41;
+  --color-zinc-700: #555555; --color-zinc-600: #777777; --color-zinc-500: #909090;
+  --color-zinc-400: #a9b7c6; --color-zinc-300: #bbbbbb; --color-zinc-200: #c7c7c7;
+  --color-zinc-100: #e0e0e0; --color-zinc-50: #eeeeee;
+  --color-blue-300: #a0c7ed; --color-blue-400: #6897bb; --color-blue-500: #4b8cba;
+  --color-blue-600: #365880; --color-blue-700: #355575; --color-blue-800: #30445c;
+  --color-blue-900: #293a4b; --color-blue-950: #26303a;
+  --color-purple-300: #c4a5c4; --color-purple-400: #b295b2; --color-purple-500: #9876aa;
+  --color-purple-600: #805f8c; --color-purple-700: #664e70; --color-purple-900: #3d3342;
+  --color-purple-950: #332d36;
+  --color-emerald-400: #a4bc8e; --color-emerald-500: #86a56e;
+  --color-amber-400: #ffc66d; --color-cyan-400: #7fb5b5;
+  background: #2b2b2b; color: #a9b7c6;
+}
+/* Literal high-contrast accents need semantic ink on reversed Solarized surfaces. */
+:root[data-theme="light"] .text-white { color: #fffdf5; }
+:root[data-theme="light"] .text-amber-200 { color: #715616; }
+:root[data-theme="light"] .text-cyan-300, :root[data-theme="light"] .text-cyan-400 { color: #236c69; }
+:root[data-theme="light"] .text-purple-200 { color: #5f4c70; }
+:root[data-theme="light"] .bg-blue-600 { background-color: #216b85; }
+:root[data-theme="light"] .bg-blue-700 { background-color: #23596b; color: #fffdf5; }
 .app-menu { background: var(--pc-menu-background); }
 .monaco-editor .coach-pointer-line { background-color: var(--pc-pointer-background); border-left: 2px solid var(--pc-pointer-border); }
 .monaco-editor .coach-pointer-glyph { background-color: var(--pc-pointer-border); }

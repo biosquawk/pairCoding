@@ -1,3 +1,4 @@
+import { t, problemText } from '../i18n';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -85,50 +86,50 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault(); setSettingsError('');
-    if(saving || !connected || !canSave || openingVersion.current!==settingsVersion) {setSettingsError('Sesja, uprawnienia lub wersja zmieniły się. Zachowano formularz.');return;}
+    if(saving || !connected || !canSave || openingVersion.current!==settingsVersion) {setSettingsError(t("Sesja, uprawnienia lub wersja zmieniły się. Zachowano formularz."));return;}
     try {
       const wireRunProfiles = onOpenRuntimeSettings ? settings.wireRunProfiles : parseRunProfiles(profilesJson);
       const contextPatterns = parseContextPatterns(patternsJson);
       setSaving(true);
       const accepted = await onSave({ ...settings, aiConsent, taskMode, taskFilePath, reviewNotesPath, wireRunProfiles, contextPatterns });
-      if (accepted === false) setSettingsError('Serwer nie potwierdził ustawień. Sprawdź błąd połączenia u góry; formularz pozostaje otwarty.');
+      if (accepted === false) setSettingsError(t("Serwer nie potwierdził ustawień. Sprawdź błąd połączenia u góry; formularz pozostaje otwarty."));
       else onClose();
-    } catch (error) { setSettingsError(error instanceof Error ? error.message : 'Niepoprawne ustawienia.'); }
+    } catch (error) { setSettingsError(error instanceof Error ? error.message : t("Niepoprawne ustawienia.")); }
     finally { setSaving(false); }
   };
 
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-xs flex items-center justify-center z-50 p-4 select-none">
-      <div ref={dialogRef} aria-busy={saving} role="dialog" aria-modal="true" aria-label="Ustawienia Projektu i Trenera AI" className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg max-h-[90vh] overflow-y-auto w-full shadow-2xl p-5 text-zinc-200">
+      <div ref={dialogRef} aria-busy={saving} role="dialog" aria-modal="true" aria-label={t("Ustawienia Projektu i Trenera AI")} className="bg-zinc-900 border border-zinc-800 rounded-xl max-w-lg max-h-[90vh] overflow-y-auto w-full shadow-2xl p-5 text-zinc-200">
         <div className="flex items-center justify-between pb-3 border-b border-zinc-800">
           <div className="flex items-center gap-2 font-bold text-sm text-zinc-100">
             <Settings className="w-4 h-4 text-blue-400" />
-            <span>Ustawienia Projektu i Trenera AI</span>
+            <span>{t("Ustawienia Projektu i Trenera AI")}</span>
           </div>
-          <button aria-label="Zamknij ustawienia" onClick={onClose} className="p-1 rounded hover:bg-zinc-800 text-zinc-400">
+          <button aria-label={t("Zamknij ustawienia")} onClick={onClose} className="p-1 rounded hover:bg-zinc-800 text-zinc-400">
             <X className="w-4 h-4" />
           </button>
         </div>
 
         <form onSubmit={handleSubmit} className="py-4 space-y-4 text-xs">
           {onOpenProject && <fieldset disabled={opening || saving || !connected || !canSave || openingVersion.current!==settingsVersion} className="p-3 rounded bg-zinc-950 border border-zinc-800 space-y-2">
-            <label htmlFor="project-folder" className="block font-semibold">Lokalny folder zadania</label>
+            <label htmlFor="project-folder" className="block font-semibold">{t("Lokalny folder zadania")}</label>
             <input id="project-folder" value={folderPath} onChange={event => setFolderPath(event.target.value)} className="w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1" placeholder="C:/Zadania/kata" />
-            <p className="text-zinc-400">Pełna ścieżka na komputerze serwera. Nowy folder: plik challenge.md, zgoda AI wyłączona, bez odziedziczonych poleceń uruchamiania. Najpierw potwierdzimy autosave; konflikt blokuje otwarcie.</p>
+            <p className="text-zinc-400">{t("Pełna ścieżka na komputerze serwera. Nowy folder: plik challenge.md, zgoda AI wyłączona, bez odziedziczonych poleceń uruchamiania. Najpierw potwierdzimy autosave; konflikt blokuje otwarcie.")}</p>
             <button type="button" className="px-3 py-1.5 bg-blue-700 rounded" onClick={async () => {
-              if (!folderPath.trim()) { setFolderError('Podaj ścieżkę lokalnego folderu.'); return; }
+              if (!folderPath.trim()) { setFolderError(t("Podaj ścieżkę lokalnego folderu.")); return; }
               setOpening(true); setFolderError('');
-              try { if (await onOpenProject(folderPath.trim())) onClose(); else setFolderError('Nie otwarto folderu. Sprawdź błąd połączenia lub rozstrzygnij draft.'); }
+              try { if (await onOpenProject(folderPath.trim())) onClose(); else setFolderError(t("Nie otwarto folderu. Sprawdź błąd połączenia lub rozstrzygnij draft.")); }
               finally { setOpening(false); }
-            }}>{opening ? 'Otwieranie…' : 'Otwórz wskazany folder'}</button>
-            {folderError && <p role="alert" className="text-amber-300">{folderError}</p>}
+            }}>{opening ? t("Otwieranie…") : t("Otwórz wskazany folder")}</button>
+            {folderError && <p role="alert" className="text-amber-300">{problemText(folderError)}</p>}
           </fieldset>}
           {/* AI Consent */}
           <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="flex items-center justify-between">
               <label htmlFor="ai-consent" className="font-semibold text-zinc-200 flex items-center gap-1.5 cursor-pointer">
                 <Bot className="w-4 h-4 text-purple-400" />
-                <span>Zgoda na asystę Trenera AI (aiConsent)</span>
+                <span>{t("Zgoda na asystę Trenera AI (aiConsent)")}</span>
               </label>
               <input
                 id="ai-consent"
@@ -139,13 +140,12 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
               />
             </div>
             <p className="text-[11px] text-zinc-400">
-              Umożliwia trenerowi monitorowanie pisania w czasie rzeczywistym, wyświetlanie dymków wskazówek oraz autonomiczny pokaz w edytorze.
-            </p>
+              {t("Umożliwia trenerowi monitorowanie pisania w czasie rzeczywistym, wyświetlanie dymków wskazówek oraz autonomiczny pokaz w edytorze.")}{' '}</p>
           </div>
 
           {/* Task Mode */}
           <div className="space-y-1">
-            <label className="font-semibold text-zinc-300">Tryb Zadania (taskMode):</label>
+            <label className="font-semibold text-zinc-300">{t("Tryb Zadania (taskMode):")}</label>
             <div className="grid grid-cols-2 gap-2">
               <button
                 type="button"
@@ -159,7 +159,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                 <Code2 className="w-4 h-4 text-cyan-400 shrink-0" />
                 <div>
                   <div className="font-semibold text-xs">IMPLEMENTATION</div>
-                  <div className="text-[10px] opacity-75">Pisanie algorytmu / Code Kata</div>
+                  <div className="text-[10px] opacity-75">{t("Pisanie algorytmu / Code Kata")}</div>
                 </div>
               </button>
 
@@ -175,7 +175,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                 <FileCheck className="w-4 h-4 text-amber-400 shrink-0" />
                 <div>
                   <div className="font-semibold text-xs">CODE_REVIEW</div>
-                  <div className="text-[10px] opacity-75">Przegląd kodu w review.md</div>
+                  <div className="text-[10px] opacity-75">{t("Przegląd kodu w review.md")}</div>
                 </div>
               </button>
             </div>
@@ -184,7 +184,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
           {/* Paths */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="task-file" className="block text-zinc-400 mb-1">Ścieżka pliku zadania:</label>
+              <label htmlFor="task-file" className="block text-zinc-400 mb-1">{t("Ścieżka pliku zadania:")}</label>
               <input
                 id="task-file"
                 type="text"
@@ -194,7 +194,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
               />
             </div>
             <div>
-              <label htmlFor="review-file" className="block text-zinc-400 mb-1">Ścieżka notatek z review:</label>
+              <label htmlFor="review-file" className="block text-zinc-400 mb-1">{t("Ścieżka notatek z review:")}</label>
               <input
                 id="review-file"
                 type="text"
@@ -205,39 +205,39 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
             </div>
           </div>
 
-          {onOpenRuntimeSettings && <button type="button" className="underline" onClick={onOpenRuntimeSettings}>Ustawienia wykonania V2</button>}
+          {onOpenRuntimeSettings && <button type="button" className="underline" onClick={onOpenRuntimeSettings}>{t("Ustawienia wykonania V2")}</button>}
           {/* Run Profiles Info */}
           <div className="p-2.5 rounded bg-zinc-950/60 border border-zinc-800/80 text-[11px] text-zinc-400">
-            <p>{onOpenRuntimeSettings ? 'Uruchomienia wymagają jawnej konfiguracji V2 i gotowego środowiska. Brak gotowości nie blokuje ręcznej edycji.' : 'Jawny tryb developerskiej symulacji.'}</p><span className="font-semibold text-zinc-300">Profile wykonawcze: </span>
+            <p>{onOpenRuntimeSettings ? t("Uruchomienia wymagają jawnej konfiguracji V2 i gotowego środowiska. Brak gotowości nie blokuje ręcznej edycji.") : t("Jawny tryb developerskiej symulacji.")}</p><span className="font-semibold text-zinc-300">{t("Profile wykonawcze:")}{' '}</span>
             {settings.runProfiles.map((p) => p.name).join(', ')}
           </div>
 
           <details className="p-3 rounded bg-zinc-950 border border-zinc-800">
-            <summary className="cursor-pointer font-semibold">Konfiguracja Run/Test i kontekstu AI</summary>
-            {!onOpenRuntimeSettings ? <><label htmlFor="run-profiles" className="block mb-1">Profile symulacji (JSON)</label>
+            <summary className="cursor-pointer font-semibold">{t("Konfiguracja Run/Test i kontekstu AI")}</summary>
+            {!onOpenRuntimeSettings ? <><label htmlFor="run-profiles" className="block mb-1">{t("Profile symulacji (JSON)")}</label>
             <textarea id="run-profiles" value={profilesJson} onChange={event=>setProfilesJson(event.target.value)} spellCheck={false} className="w-full h-48 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" /></> :
-              <p>Program i testy edytuj przez „Ustawienia wykonania V2”. Stare lub nieznane ustawienia zachowujemy bez automatycznego przenoszenia poleceń. Jeśli serwer nie dostarczył szkicu migracji, zachowaj kopię istniejącego pliku ustawień i przygotuj jawny plik schemaVersion 2 zgodnie z dokumentacją profilu, następnie uruchom ponownie projekt.</p>}
-            <label htmlFor="context-patterns" className="block mb-1 mt-3">Wzorce plików kontekstu AI (JSON)</label>
+              <p>{t("Program i testy edytuj przez „Ustawienia wykonania V2”. Stare lub nieznane ustawienia zachowujemy bez automatycznego przenoszenia poleceń. Jeśli serwer nie dostarczył szkicu migracji, zachowaj kopię istniejącego pliku ustawień i przygotuj jawny plik schemaVersion 2 zgodnie z dokumentacją profilu, następnie uruchom ponownie projekt.")}</p>}
+            <label htmlFor="context-patterns" className="block mb-1 mt-3">{t("Wzorce plików kontekstu AI (JSON)")}</label>
             <textarea id="context-patterns" value={patternsJson} onChange={event => setPatternsJson(event.target.value)} spellCheck={false} className="w-full h-24 bg-zinc-900 border border-zinc-700 rounded p-2 font-mono text-xs" />
-            <p className="text-zinc-500">Np. ["**/*.ts", "**/*.md"]. Bez zgody AI nic nie jest wysyłane. Sekrety są wykluczone niezależnie od wzorców.</p>
+            <p className="text-zinc-500">{t("Np. [\"**/*.ts\", \"**/*.md\"]. Bez zgody AI nic nie jest wysyłane. Sekrety są wykluczone niezależnie od wzorców.")}</p>
           </details>
-          {settingsError && <p role="alert" className="text-amber-300">{settingsError}</p>}
+          {settingsError && <p role="alert" className="text-amber-300">{problemText(settingsError)}</p>}
 
           {/* Kopie odzyskiwania (Snapshots) */}
           <div className="p-3 rounded-lg bg-zinc-950 border border-zinc-800 space-y-2">
             <div className="flex items-center justify-between">
               <label className="font-semibold text-zinc-200 flex items-center gap-1.5">
                 <RotateCcw className="w-3.5 h-3.5 text-blue-400" />
-                <span>Kopie odzyskiwania (Snapshots)</span>
+                <span>{t("Kopie odzyskiwania (Snapshots)")}</span>
               </label>
               <span className="text-[10px] text-zinc-500 font-mono">
-                {snapshots.length} {snapshots.length === 1 ? 'kopia' : 'kopii'}
+                {snapshots.length} {snapshots.length === 1 ? t("kopia") : t("kopii")}
               </span>
             </div>
 
-            {snapshotsError && <p role="alert" className="text-amber-300">Nie można pobrać kopii: {snapshotsError}</p>}
+            {snapshotsError && <p role="alert" className="text-amber-300">{t("Nie można pobrać kopii:")}{' '}{problemText(snapshotsError)}</p>}
             {snapshots.length === 0 ? (
-              <p className="text-[11px] text-zinc-500 italic">Brak zapisanych migawek stanu projektu.</p>
+              <p className="text-[11px] text-zinc-500 italic">{t("Brak zapisanych migawek stanu projektu.")}</p>
             ) : (
               <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
                 {snapshots.map((snap) => (
@@ -248,8 +248,7 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                     <div className="min-w-0 flex-1 pr-2">
                       <div className="font-medium text-zinc-200 truncate">{snap.label}</div>
                       <div className="text-[10px] text-zinc-500 font-mono">
-                        {new Date(snap.timestamp).toLocaleTimeString()} · {snap.files.length} plików
-                      </div>
+                        {new Date(snap.timestamp).toLocaleTimeString()} · {snap.files.length} {' '}{t("plików")}{' '}</div>
                     </div>
                     <button
                       type="button"
@@ -260,29 +259,27 @@ export const ProjectSettingsModal: React.FC<ProjectSettingsModalProps> = ({
                       className="px-2.5 py-1 rounded text-xs font-semibold shrink-0 bg-zinc-800 hover:bg-blue-600 text-zinc-200 border border-zinc-700"
                     >
                       <RotateCcw className="w-3 h-3" />
-                      Poproś o przywrócenie
-                    </button>
+                      {t("Poproś o przywrócenie")}{' '}</button>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {(!connected || !canSave || openingVersion.current!==settingsVersion) && <p role="alert">Zapis niedostępny: offline, brak uprawnienia lub konflikt wersji. Zachowano formularz; skopiuj pola przed odświeżeniem.</p>}
+          {(!connected || !canSave || openingVersion.current!==settingsVersion) && <p role="alert">{t("Zapis niedostępny: offline, brak uprawnienia lub konflikt wersji. Zachowano formularz; skopiuj pola przed odświeżeniem.")}</p>}
           <div className="flex items-center justify-end gap-2 pt-3 border-t border-zinc-800">
             <button
               type="button"
               onClick={onClose}
               className="px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs"
             >
-              Anuluj
-            </button>
+              {t("Anuluj")}{' '}</button>
             <button
               type="submit"
               disabled={opening || saving || !connected || !canSave || openingVersion.current!==settingsVersion}
               className="px-4 py-1.5 rounded bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-sm"
             >
-              {saving ? 'Zapisywanie…' : 'Zapisz Ustawienia'}
+              {saving ? t("Zapisywanie…") : t("Zapisz Ustawienia")}
             </button>
           </div>
         </form>

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { BottomPanel } from '../../src/components/BottomPanel';
+import { SessionPanel } from '../../src/components/BottomPanel';
 import { EditorChatSubmissionP2, type EditorChatSenderP2 } from '../../src/services/editorChatP2';
 
 function form(send: EditorChatSenderP2) {
@@ -44,12 +44,20 @@ test('editing and returning to identical text is a new revision; legacy void/boo
   const empty = form(() => assert.fail('blank input sent')); empty.edit('  '); assert.equal(await empty.submit(), false); assert.equal(empty.busy, false);
 });
 
-test('BottomPanel real form renders textarea/submit semantics and preserves stage4 wrapped tabbar', () => {
-  const html = renderToStaticMarkup(React.createElement(BottomPanel, {
+// HUMAN84069cc5/LAYOUT_ANNEX moves the real composer to the left sidebar; bottom keeps its wrapped tabbar.
+test('left real form retains textarea/submit semantics and bottom retains wrapped tabbar', () => {
+  const html = renderToStaticMarkup(React.createElement(SessionPanel, {
+    sidebar:true,
     activeTab: 'chat', taskContent: '', chatEntries: [], activeProposal: null, activeRun: null, report: null,
     height: 260, isMaximized: false, isCollapsed: false, onSelectTab() {}, onSendMessage: async () => false,
     onProposalResponse() {}, onRetryReport() {}, onToggleCollapse() {}, onToggleMaximize() {},
   }));
   assert.match(html, /<form aria-busy="false"/); assert.match(html, /<textarea/); assert.match(html, /type="submit" disabled/);
-  assert.match(html, /flex flex-wrap items-center justify-between gap-1/);
+  const bottom = renderToStaticMarkup(React.createElement(SessionPanel, {
+    activeTab: 'console', taskContent: '', chatEntries: [], activeProposal: null, activeRun: null, report: null,
+    height: 260, isMaximized: false, isCollapsed: false, onSelectTab() {}, onSendMessage: async () => false,
+    onProposalResponse() {}, onRetryReport() {}, onToggleCollapse() {}, onToggleMaximize() {},
+  }));
+  assert.match(bottom, /flex flex-wrap items-center justify-between gap-1/);
+  assert.doesNotMatch(bottom, /<textarea|type="submit"/);
 });

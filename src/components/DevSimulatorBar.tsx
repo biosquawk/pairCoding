@@ -1,3 +1,4 @@
+import { t, problemText } from '../i18n';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -55,13 +56,11 @@ export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
         <div className="flex items-center gap-2">
           <span className="font-bold text-[11px] tracking-wider uppercase text-amber-400 flex items-center gap-1">
             <Zap className="w-3.5 h-3.5 fill-amber-400" />
-            Dev Simulator (Faza 1):
-          </span>
+            {t("Dev Simulator (Faza 1):")}{' '}</span>
 
-          <label>Transport (zmiana przeładuje stronę):
-            <select aria-label="Tryb transportu" value={transportMode} onChange={event => onTransportMode(event.target.value as TransportMode)} className="bg-zinc-900 border border-amber-700 rounded ml-2">
-              <option value="LIVE_BACKEND">LIVE — rzeczywisty backend</option>
-              <option value="MOCK_SIMULATOR">MOCK — jawny symulator</option>
+          <label>{t("Transport (zmiana przeładuje stronę):")}{' '}<select aria-label={t("Tryb transportu")} value={transportMode} onChange={event => onTransportMode(event.target.value as TransportMode)} className="bg-zinc-900 border border-amber-700 rounded ml-2">
+              <option value="LIVE_BACKEND">{t("LIVE — rzeczywisty backend")}</option>
+              <option value="MOCK_SIMULATOR">{t("MOCK — jawny symulator")}</option>
             </select>
           </label>
           {/* Scenario Selector */}
@@ -88,61 +87,61 @@ export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
           <button
             onClick={onStartCoachDemo}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-blue-900/80 hover:bg-blue-800 text-blue-200 border border-blue-700 font-medium"
-            title="Rozpocznij autonomiczny pokaz trenera (pisanie na żywo w edytorze)"
+            title={t("Rozpocznij autonomiczny pokaz trenera (pisanie na żywo w edytorze)")}
           >
             <Bot className="w-3 h-3" />
-            <span>Pokaz Trenera (Live Typing)</span>
+            <span>{t("Pokaz Trenera (Live Typing)")}</span>
           </button>
 
           {/* Bubbles */}
           <button
-            onClick={() => onShowBubble('POSITIVE', 'Świetny krok! Prawidłowo przewidujesz potrzebę optymalizacji struktury.', 4)}
+            onClick={() => onShowBubble('POSITIVE', t("Świetny krok! Prawidłowo przewidujesz potrzebę optymalizacji struktury."), 4)}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-700"
-            title="Dymek: Dobry kierunek (POSITIVE)"
+            title={t("Dymek: Dobry kierunek (POSITIVE)")}
           >
             <CheckCircle className="w-3 h-3 text-emerald-400" />
-            <span>Dymek +</span>
+            <span>{t("Dymek +")}</span>
           </button>
 
           <button
-            onClick={() => onShowBubble('NEUTRAL', 'Wskazówka: Zastanów się, czy tablica asocjacyjna Map nie zmniejszy złożoności do O(N).', 8)}
+            onClick={() => onShowBubble('NEUTRAL', t("Wskazówka: Zastanów się, czy tablica asocjacyjna Map nie zmniejszy złożoności do O(N)."), 8)}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-yellow-950 hover:bg-yellow-900 text-yellow-300 border border-yellow-700"
-            title="Dymek: Wskazówka (NEUTRAL)"
+            title={t("Dymek: Wskazówka (NEUTRAL)")}
           >
             <Lightbulb className="w-3 h-3 text-yellow-400" />
-            <span>Dymek ?</span>
+            <span>{t("Dymek ?")}</span>
           </button>
 
           <button
             onClick={() => {
               onShowPointer(6, 12);
-              onShowBubble('WARNING', 'Uwaga: Ta podwójna pętla ma złożoność O(N²). Testy wydajnościowe na 10k elementów zwrócą Timeout!', 7);
+              onShowBubble('WARNING', t("Uwaga: Ta podwójna pętla ma złożoność O(N²). Testy wydajnościowe na 10k elementów zwrócą Timeout!"), 7);
             }}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-red-950 hover:bg-red-900 text-red-300 border border-red-700"
-            title="Wskaźnik kodu + Dymek ostrzegawczy (WARNING)"
+            title={t("Wskaźnik kodu + Dymek ostrzegawczy (WARNING)")}
           >
             <AlertCircle className="w-3 h-3 text-red-400" />
-            <span>Wskaźnik + Dymek !</span>
+            <span>{t("Wskaźnik + Dymek !")}</span>
           </button>
 
           {/* Proposal trigger */}
           <button
             onClick={() => onTriggerProposal('RESTORE_SNAPSHOT')}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-700"
-            title="Wyślij kartę propozycji Tak/Nie (ACTION_PROPOSAL)"
+            title={t("Wyślij kartę propozycji Tak/Nie (ACTION_PROPOSAL)")}
           >
             <HelpCircle className="w-3 h-3 text-purple-400" />
-            <span>Karta Propozycji</span>
+            <span>{t("Karta Propozycji")}</span>
           </button>
 
           {/* External conflict */}
           <button
             onClick={onExternalFileSync}
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border border-zinc-700"
-            title="Symuluj zewnętrzną zmianę pliku na dysku (EXTERNAL_FILE_SYNC)"
+            title={t("Symuluj zewnętrzną zmianę pliku na dysku (EXTERNAL_FILE_SYNC)")}
           >
             <RefreshCw className="w-3 h-3" />
-            <span>Zewnętrzny plik</span>
+            <span>{t("Zewnętrzny plik")}</span>
           </button>
 
           {/* Offline toggle */}
@@ -153,20 +152,19 @@ export const DevSimulatorBar: React.FC<DevSimulatorBarProps> = ({
                 ? 'bg-red-900/80 text-red-200 border-red-600'
                 : 'bg-zinc-900 hover:bg-zinc-800 text-zinc-300 border-zinc-700'
             }`}
-            title="Włącz/wyłącz symulację braku połączenia (status szary)"
+            title={t("Włącz/wyłącz symulację braku połączenia (status szary)")}
           >
             {isOffline ? <WifiOff className="w-3 h-3" /> : <Wifi className="w-3 h-3" />}
-            <span>{isOffline ? 'Offline (Szary)' : 'Online'}</span>
+            <span>{isOffline ? t("Offline (Szary)") : t("Online")}</span>
           </button>
 
           {/* Report failure */}
           <button
             onClick={onSimulateReportFailure}
             className="px-2 py-0.5 rounded bg-zinc-900 hover:bg-zinc-800 text-zinc-400 border border-zinc-700 text-[11px]"
-            title="Zakończ z błędem generowania raportu (test przycisku Ponów)"
+            title={t("Zakończ z błędem generowania raportu (test przycisku Ponów)")}
           >
-            Błąd Raportu
-          </button>
+            {t("Błąd Raportu")}{' '}</button>
         </div>}
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { t, problemText } from '../i18n';
 import '../shared/monacoSetup';
 /**
  * @license
@@ -6,6 +7,7 @@ import '../shared/monacoSetup';
 
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Editor, { Monaco, OnMount } from '@monaco-editor/react';
+import type {ProjectWorkspace} from '../shared/durable-project';
 import type * as monacoType from 'monaco-editor';
 import { MonacoLspBridge, SAFE_SUGGEST_OPTIONS, disableNativeCompletionProviders, toModelUri, fromModelUri, normalizeContent, type EditorLanguageBinding } from '../services/monacoLspBridge';
 import { createBuiltinLanguageRegistry, languageForPath } from '../services/builtinLanguageRegistry';
@@ -31,8 +33,10 @@ import {
 } from 'lucide-react';
 
 export interface EditorPanelProps {
-  theme?: 'dark'|'light';
+  theme?: 'darcula'|'dark'|'light';
   contentFontSize?: number;
+  initialEditorViews?:ProjectWorkspace['editorViews'];
+  onEditorViewChange?:(path:string,view:NonNullable<ProjectWorkspace['editorViews']>[string])=>void;
   /** Optional wave1 injection; transport owner must provide the synchronous pre-CONTROL_PREPARE hook. */
   languageBinding?: EditorLanguageBinding;
   projectId: string;
@@ -48,6 +52,7 @@ export interface EditorPanelProps {
   activeHintBubble: CoachHintBubble | null;
   activeProposal: ActionProposal | null;
   isBottomPanelVisible: boolean;
+  onOpenChat?:()=>void;
   activeBottomTab: string;
   onSelectTab: (path: string) => void;
   onCloseTab: (path: string) => void;
@@ -59,8 +64,9 @@ export interface EditorPanelProps {
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
-  theme='dark',
+  theme='darcula',
   contentFontSize=13,
+  initialEditorViews,onEditorViewChange,
   projectId,
   languageBinding,
   files,
@@ -75,6 +81,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   activeHintBubble,
   activeProposal,
   isBottomPanelVisible,
+  onOpenChat,
   activeBottomTab,
   onSelectTab,
   onCloseTab,
@@ -84,6 +91,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
   onProposalResponse,
   onResolveConflict,
 }) => {
+  const durableViewCallback=useRef(onEditorViewChange);durableViewCallback.current=onEditorViewChange;
   const retiredModelsRef=useRef(new Set<monacoType.editor.ITextModel>());
   const [retiredDrafts,setRetiredDrafts]=useState<{path:string;content:string}[]>([]);
   const languageBridgeRef = useRef<MonacoLspBridge | null>(null);
@@ -125,6 +133,31 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
     });
 
     // Define custom themes or subtle decorations
+    monaco.editor.defineTheme('paircoach-darcula', {
+      base:'vs-dark', inherit:true,
+      rules:[
+        {token:'',foreground:'A9B7C6',background:'2B2B2B'},
+        {token:'comment',foreground:'808080',fontStyle:'italic'},
+        {token:'keyword',foreground:'CC7832'},
+        {token:'string',foreground:'6A8759'},
+        {token:'number',foreground:'6897BB'},
+        {token:'type',foreground:'A9B7C6'},
+        {token:'type.identifier',foreground:'A9B7C6'},
+        {token:'identifier',foreground:'A9B7C6'},
+        {token:'delimiter',foreground:'A9B7C6'},
+        {token:'annotation',foreground:'BBB529'},
+      ],
+      colors:{
+        'editor.background':'#2B2B2B','editor.foreground':'#A9B7C6',
+        'editorLineNumber.foreground':'#808080','editorLineNumber.activeForeground':'#A9B7C6',
+        'editor.selectionBackground':'#214283','editor.inactiveSelectionBackground':'#323232',
+        'editor.lineHighlightBackground':'#323232','editorCursor.foreground':'#BBBBBB',
+        'editorWidget.background':'#3C3F41','editorWidget.foreground':'#A9B7C6',
+        'editorSuggestWidget.background':'#3C3F41','editorSuggestWidget.foreground':'#A9B7C6',
+        'editorSuggestWidget.border':'#555555','editorHoverWidget.background':'#3C3F41',
+        'editorHoverWidget.foreground':'#A9B7C6','editorGutter.background':'#2B2B2B',
+      },
+    });
     monaco.editor.defineTheme('paircoach-solarized-dark', {
       base: 'vs-dark',
       inherit: true,
@@ -150,6 +183,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         'editorCursor.foreground': '#93a1a1',
         'editorWidget.background': '#073642',
         'editorSuggestWidget.background': '#073642',
+        'editorSuggestWidget.foreground':'#93a1a1','editorHoverWidget.background':'#073642','editorHoverWidget.foreground':'#93a1a1',
         'editorGutter.background': '#002b36',
         'editorBracketHighlight.foreground1': '#839496',
         'editorBracketHighlight.foreground2': '#839496',
@@ -179,17 +213,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         'editorLineNumber.foreground':'#93a1a1','editorLineNumber.activeForeground':'#586e75',
         'editor.selectionBackground':'#d8dfd4','editor.inactiveSelectionBackground':'#eee8d5',
         'editor.lineHighlightBackground':'#eee8d5','editorCursor.foreground':'#586e75',
-        'editorWidget.background':'#eee8d5','editorSuggestWidget.background':'#eee8d5',
+        'editorWidget.background':'#eee8d5','editorWidget.foreground':'#586e75','editorSuggestWidget.background':'#eee8d5',
+        'editorHoverWidget.background':'#eee8d5','editorHoverWidget.foreground':'#586e75',
         'editorSuggestWidget.foreground':'#586e75','editorSuggestWidget.border':'#c9c2b0',
         'editorGutter.background':'#fdf6e3',
       },
     });
-    monaco.editor.setTheme('paircoach-solarized-'+theme);
+    monaco.editor.setTheme(theme==='darcula'?'paircoach-darcula':'paircoach-solarized-'+theme);
     setEditorGeneration(generation => generation + 1);
   };
 
   useLayoutEffect(()=>{
-    monacoRef.current?.editor.setTheme('paircoach-solarized-'+theme);
+    monacoRef.current?.editor.setTheme(theme==='darcula'?'paircoach-darcula':'paircoach-solarized-'+theme);
   },[theme,editorGeneration]);
 
   // Switch before paint: never reveal an old project's model in a new workspace.
@@ -241,9 +276,32 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
       const savedState = viewStatesRef.current.get(uri.toString());
       if (savedState) {
         editor.restoreViewState(savedState);
+      } else {
+        const durable=initialEditorViews?.[activeFile.path];
+        if(durable) {
+          editor.setPosition(model.validatePosition(durable.position));
+          editor.setSelection(model.validateRange(durable.selection));
+          editor.setScrollPosition({scrollTop:durable.scrollTop,scrollLeft:durable.scrollLeft});
+        }
       }
     }
   }, [projectId, activePath, editorGeneration, activeFile?.loaded]);
+
+  // Observe the one real editor, not a second model/autosave path. Restoring occurs above
+  // before these listeners attach, so default mount coordinates cannot overwrite saved views.
+  useLayoutEffect(()=>{
+    const editor=editorRef.current;if(!editor)return;
+    const capture=()=>{
+      const model=editor.getModel(),position=editor.getPosition(),selection=editor.getSelection();
+      const path=pathForModel(model);
+      if(!path||path!==activePath||!position||!selection)return;
+      durableViewCallback.current?.(path,{position:{lineNumber:position.lineNumber,column:position.column},
+        selection:{startLineNumber:selection.startLineNumber,startColumn:selection.startColumn,endLineNumber:selection.endLineNumber,endColumn:selection.endColumn},
+        scrollTop:Math.min(1e8,Math.max(0,editor.getScrollTop())),scrollLeft:Math.min(1e8,Math.max(0,editor.getScrollLeft()))});
+    };
+    const listeners=[editor.onDidChangeCursorPosition(capture),editor.onDidChangeCursorSelection(capture),editor.onDidScrollChange(capture)];
+    return()=>listeners.forEach(listener=>listener.dispose());
+  },[projectId,activePath,editorGeneration,activeFile?.loaded]);
 
   // Closing/deleting retires old URI/lifetime. Rename deliberately creates a new model/undo
   // lifetime; preserve old view by authenticated FILE_OPERATION below, never reuse old callbacks.
@@ -394,7 +452,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         if (monaco.Range.intersectRanges(currentSelection, stepRange)) {
           // Clear outdated selection & show subtle note
           editor.setSelection(new monaco.Selection(step.range.endLine, 1, step.range.endLine, 1));
-          setSelectionNotice('Trener AI zaktualizował czytany przez Ciebie fragment kodu.');
+          setSelectionNotice(t("Trener AI zaktualizował czytany przez Ciebie fragment kodu."));
           setTimeout(() => setSelectionNotice(null), 3500);
         }
       }
@@ -468,7 +526,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             isWholeLine: true,
             className: 'coach-pointer-line',
             glyphMarginClassName: 'coach-pointer-glyph rounded-full',
-            hoverMessage: { value: '**Wskaźnik Trenera AI**' },
+            hoverMessage: { value: t("**Wskaźnik Trenera AI**") },
           },
         },
       ];
@@ -519,10 +577,10 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
 
   return (
     <div className={`h-full flex flex-col bg-zinc-950 border-[4px] ${getBorderColor()} transition-colors duration-200 relative`}>
-      {retiredDrafts.length>0 && <details className="shrink-0 max-h-32 overflow-auto border border-amber-700 bg-zinc-950 p-2 text-xs"><summary>Odzyskane modele przed ponownym użyciem ścieżki ({retiredDrafts.length})</summary>{retiredDrafts.map((d,i)=><div key={i}><label htmlFor={`retired-${i}`}>{d.path} — tylko kopia odzyskiwania; bez publikacji</label><textarea id={`retired-${i}`} readOnly value={d.content} className="w-full bg-zinc-900" /></div>)}</details>}
+      {retiredDrafts.length>0 && <details className="shrink-0 max-h-32 overflow-auto border border-amber-700 bg-zinc-950 p-2 text-xs"><summary>{t("Odzyskane modele przed ponownym użyciem ścieżki (")}{retiredDrafts.length})</summary>{retiredDrafts.map((d,i)=><div key={i}><label htmlFor={`retired-${i}`}>{d.path} {' '}{t("— tylko kopia odzyskiwania; bez publikacji")}</label><textarea id={`retired-${i}`} readOnly value={d.content} className="w-full bg-zinc-900" /></div>)}</details>}
       {/* Tabs Header */}
       <div className="flex items-center justify-between bg-zinc-950 border-b border-zinc-800 px-2 py-1 select-none overflow-x-auto">
-        <div role="tablist" aria-label="Otwarte pliki" className="flex items-center gap-1 min-w-0">
+        <div role="tablist" aria-label={t("Otwarte pliki")} className="flex items-center gap-1 min-w-0">
           {openTabs.map((tabPath) => {
             const isActive = tabPath === activePath;
             const fileName = tabPath.split('/').pop() || tabPath;
@@ -547,7 +605,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
                     onCloseTab(tabPath);
                   }}
                   className="p-0.5 rounded hover:bg-zinc-800 text-zinc-500 hover:text-zinc-300"
-                  title="Zamknij zakładkę (plik pozostaje w projekcie)"
+                  title={t("Zamknij zakładkę (plik pozostaje w projekcie)")}
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -566,22 +624,21 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           {writeOwner === 'COACH' ? (
             <span className="text-blue-400 font-semibold animate-pulse flex items-center gap-1">
               <Bot className="w-3.5 h-3.5" />
-              Pisze Trener AI
-            </span>
+              {t("Pisze Trener AI")}{' '}</span>
           ) : writeOwner === 'STUDENT' ? (
             <div className="flex items-center gap-1.5">
-              <span className="text-red-400 font-medium">Tryb ucznia (Piszesz Ty)</span>
+              <span className="text-red-400 font-medium">{t("Tryb ucznia (Piszesz Ty)")}</span>
               <span className="text-zinc-600">·</span>
               {pendingPaths.includes(activePath) ? (
-                <span className="text-amber-400 font-normal">Zapis oczekuje na ACK</span>
+                <span className="text-amber-400 font-normal">{t("Zapis oczekuje na ACK")}</span>
               ) : isOffline ? (
-                <span className="text-amber-400 font-normal">Niezapisany draft (Offline)</span>
+                <span className="text-amber-400 font-normal">{t("Niezapisany draft (Offline)")}</span>
               ) : (
-                <span className="text-emerald-400 font-normal">Zapisano</span>
+                <span className="text-emerald-400 font-normal">{t("Zapisano")}</span>
               )}
             </div>
           ) : (
-            <span className="text-zinc-400">{isOffline ? 'Offline — lokalny draft' : 'Synchronizacja / Zapis niepotwierdzony'}</span>
+            <span className="text-zinc-400">{isOffline ? t("Offline — lokalny draft") : t("Synchronizacja / Zapis niepotwierdzony")}</span>
           )}
         </div>
       </div>
@@ -592,14 +649,14 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
             <span>
-              <strong>Konflikt synchronizacji:</strong> {fileConflict.diskDeleted ? 'Plik usunięto na dysku; lokalny draft zachowano. Zachowanie draftu odtworzy plik po Twojej decyzji.' : 'Plik na dysku uległ zmianie, ale posiadasz lokalny niepotwierdzony draft.'}
+              <strong>{t("Konflikt synchronizacji:")}</strong> {fileConflict.diskDeleted ? t("Plik usunięto na dysku; lokalny draft zachowano. Zachowanie draftu odtworzy plik po Twojej decyzji.") : t("Plik na dysku uległ zmianie, ale posiadasz lokalny niepotwierdzony draft.")}
             </span>
           </div>
           <details className="w-full">
-            <summary className="cursor-pointer">Porównaj zachowane wersje</summary>
+            <summary className="cursor-pointer">{t("Porównaj zachowane wersje")}</summary>
             <div className="grid sm:grid-cols-2 gap-2 mt-2">
-              <label>Draft lokalny<textarea aria-label="Draft lokalny konfliktu" readOnly value={fileConflict.localDraftContent} className="w-full h-28 bg-zinc-900 text-zinc-100" /></label>
-              <label>Wersja z dysku<textarea aria-label="Wersja z dysku konfliktu" readOnly value={fileConflict.diskContent} className="w-full h-28 bg-zinc-900 text-zinc-100" /></label>
+              <label>{t("Draft lokalny")}<textarea aria-label={t("Draft lokalny konfliktu")} readOnly value={fileConflict.localDraftContent} className="w-full h-28 bg-zinc-900 text-zinc-100" /></label>
+              <label>{t("Wersja z dysku")}<textarea aria-label={t("Wersja z dysku konfliktu")} readOnly value={fileConflict.diskContent} className="w-full h-28 bg-zinc-900 text-zinc-100" /></label>
             </div>
           </details>
           <div className="flex items-center gap-2">
@@ -607,14 +664,12 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               onClick={() => onResolveConflict('KEEP_LOCAL')}
               className="px-3 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-100 border border-zinc-600 font-medium text-xs transition-colors"
             >
-              Zachowaj mój lokalny draft
-            </button>
+              {t("Zachowaj mój lokalny draft")}{' '}</button>
             <button
               onClick={() => onResolveConflict('LOAD_DISK')}
               className="px-3 py-1 rounded bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs shadow transition-colors"
             >
-              Załaduj wersję z dysku
-            </button>
+              {t("Załaduj wersję z dysku")}{' '}</button>
           </div>
         </div>
       )}
@@ -630,7 +685,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             height="100%"
             defaultLanguage={activeFile ? languageForPath(activeFile.path) : 'plaintext'}
             defaultValue={activeFile?.content ?? ''}
-            theme={'paircoach-solarized-'+theme}
+            theme={theme==='darcula'?'paircoach-darcula':'paircoach-solarized-'+theme}
             onMount={handleEditorMount}
             onChange={(newVal) => {
               if (!isApplyingCoachStepRef.current && newVal !== undefined) {
@@ -643,7 +698,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
             options={{
               ...SAFE_SUGGEST_OPTIONS,
               readOnly: !editorRef.current || writeOwner === 'COACH' || (writeOwner === 'SYNCING' && !isOffline) || !activeFile || activeFile.loaded === false || !!activeFile.readOnly,
-              ariaLabel: activeFile && activeFile.loaded !== false ? `Edytor pliku ${activeFile.path}` : 'Edytor bez otwartego pliku',
+              ariaLabel: activeFile && activeFile.loaded !== false ? t("Edytor pliku {0}",{0: activeFile.path}) : t("Edytor bez otwartego pliku"),
               quickSuggestions: false,
               suggestOnTriggerCharacters: false,
               wordBasedSuggestions: 'off',
@@ -667,7 +722,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         </div>
         {(!editorRef.current || !activeFile || activeFile.loaded === false) && (
           <div className="h-full flex items-center justify-center text-zinc-500 text-sm">
-            {activeFile?.loadError ? `Nie można otworzyć pliku: ${activeFile.loadError}. Wybierz inny plik.` : activeFile?.loaded === false ? 'Wczytywanie pliku…' : activeFile ? 'Uruchamianie edytora…' : 'Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.'}
+            {activeFile?.loadError ? t("Nie można otworzyć pliku: {0}. Wybierz inny plik.",{0: problemText(activeFile.loadError)}) : activeFile?.loaded === false ? t("Wczytywanie pliku…") : activeFile ? t("Uruchamianie edytora…") : t("Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.")}
           </div>
         )}
 
@@ -675,16 +730,18 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
         {selectionNotice && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-amber-950/90 border border-amber-600 text-amber-200 text-xs px-3 py-1.5 rounded shadow-lg flex items-center gap-2 animate-fade-in z-20">
             <Info className="w-4 h-4 text-amber-400" />
-            <span>{selectionNotice}</span>
+            <span>{problemText(selectionNotice)}</span>
           </div>
         )}
 
+        {activeProposal && onOpenChat && <button type="button" onClick={onOpenChat}
+          className="absolute bottom-2 left-2 z-40 rounded border border-purple-700 bg-purple-950 px-3 py-2 text-xs text-purple-200">{t('Otwórz czat')}</button>}
         {/* Floating Action Proposal (if bottom panel collapsed or not on Chat) */}
         {shouldShowFloatingProposal && (
           <div className="absolute bottom-4 right-4 max-w-md bg-zinc-900 border-2 border-purple-500 rounded-lg p-3 shadow-2xl z-30 animate-in fade-in slide-in-from-bottom-2 text-zinc-100">
             <div className="flex items-center gap-2 mb-1.5 text-purple-400 font-bold text-xs">
               <Bot className="w-4 h-4" />
-              <span>Szybka Decyzja Trenera</span>
+              <span>{t("Szybka Decyzja Trenera")}</span>
             </div>
             <p className="text-xs text-zinc-200 mb-3">{activeProposal.questionText}</p>
             <div className="flex items-center gap-2">
