@@ -54,8 +54,8 @@ const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))
 export function allowedSource(name) {
   const parts = name.toLowerCase().split('/');
   if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
-  if (parts.some(p => ['.git', '.paircoach', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
-      p.startsWith('.env') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
+  if (parts.some(p => ['.git', '.paircoach', '.paircoding', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
+      p.startsWith('.env') || p.endsWith('.paircoding.json') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
   return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || ['scripts/coverage.mjs', 'scripts/coverage-policy.mjs'].includes(name) || name === runtimeTestSupport || runtimeSource(name) || /^java-puzzlers\/[A-Za-z0-9._/-]+\.(?:java|xml|json|md|mjs)$/.test(name) || /^characters\/[A-Za-z0-9._/-]+\.(?:md|txt|json|ya?ml|py|mjs|js|sh)$/.test(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }

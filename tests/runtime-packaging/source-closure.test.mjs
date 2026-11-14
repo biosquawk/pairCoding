@@ -186,3 +186,41 @@ for (const required of ['scripts/runtime-prepare-control.mjs','src/server/runtim
     assert.equal(fs.existsSync(destination),false);
   });
 }
+
+// Forced tracked data models an accidental commit; ignore rules alone are insufficient.
+test('tracked durable project data is excluded from list, manifest, ZIP and verified copy',t=>{
+  const f=fixture(t);
+  const privateFiles=[
+    'examples/x/.pairCoding/codex/state.json', 'examples/x/.pairCoding/codex/resume.json',
+    'examples/x/.pairCoding/codex/notes.md', 'java-puzzlers/x/.pairCoding/codex/state.json',
+    'src/x/.pairCoding/codex/notes.md', 'examples/upper/.PAIRCODING/codex/resume.json',
+    'examples/x/book.paircoding.json', 'java-puzzlers/x/book.paircoding.json',
+    'src/x/book.PAIRCODING.JSON',
+  ];
+  write(f.root,'.gitignore',fs.readFileSync(path.join(repo,'.gitignore')));
+  for(const name of privateFiles)write(f.root,name,'SYNTHETIC_PRIVATE_PROJECT_DATA');
+  for(const name of ['examples/x/.pairCoding/codex/state.json','examples/x/book.paircoding.json']) {
+    assert.equal(spawnSync('git',['check-ignore','--no-index',name],{cwd:f.root}).status,0,name);
+  }
+  f.revision=f.commit();
+  const tracked=git(f.root,'ls-tree','-r','--name-only',f.revision).split('\n');
+  for(const name of privateFiles)assert.ok(tracked.includes(name),'negative input must actually be tracked: '+name);
+  const list=pack(f,['--list']).stdout.trim().split('\n');
+  const plan=JSON.parse(pack(f,['--dry-run']).stdout);
+  const out=path.join(f.base,'private-data-negative');pack(f,['--output',out]);
+  const manifest=JSON.parse(fs.readFileSync(path.join(out,'manifest.json')));
+  const zip=readZip(fs.readFileSync(path.join(out,manifest.archive.name)));
+  const dest=path.join(f.base,'verified-no-private');verifyAndCopy({source:f.root,revision:f.revision,destination:dest});
+  for(const name of privateFiles) {
+    assert.equal(list.includes(name),false,name);
+    assert.equal(plan.files.some(file=>file.path===name),false,name);
+    assert.equal(manifest.files.some(file=>file.path===name),false,name);
+    assert.equal(zip.has(manifest.prefix+name),false,name);
+    assert.equal(fs.existsSync(path.join(dest,name)),false,name);
+    assert.equal(allowedSource(name),false,name);
+  }
+  for(const name of [...oldRequired,...runtimeRequired,...extraSources]) {
+    assert.ok(list.includes(name),'public source closure preserved: '+name);
+    assert.ok(zip.has(manifest.prefix+name),name);
+  }
+});

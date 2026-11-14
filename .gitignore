@@ -14,6 +14,8 @@ playwright-report/
 test-results/
 .paircoach/
 .paircoach-runtime/
+.pairCoding/
+*.paircoding.json
 .metrics/
 target/
 .env
