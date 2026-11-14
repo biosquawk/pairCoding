@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 
 export interface EditorPanelProps {
+  emptyWorkspaceLabel?: string;
   theme?: 'darcula'|'dark'|'light';
   contentFontSize?: number;
   initialEditorViews?:ProjectWorkspace['editorViews'];
@@ -64,6 +65,7 @@ export interface EditorPanelProps {
 }
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
+  emptyWorkspaceLabel,
   theme='darcula',
   contentFontSize=13,
   initialEditorViews,onEditorViewChange,
@@ -621,7 +623,9 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               v{activeFile.version}
             </span>
           )}
-          {writeOwner === 'COACH' ? (
+          {emptyWorkspaceLabel ? (
+            <span className="text-zinc-400">{t(emptyWorkspaceLabel)}</span>
+          ) : writeOwner === 'COACH' ? (
             <span className="text-blue-400 font-semibold animate-pulse flex items-center gap-1">
               <Bot className="w-3.5 h-3.5" />
               {t("Pisze Trener AI")}{' '}</span>

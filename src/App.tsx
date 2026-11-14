@@ -113,6 +113,7 @@ export default function App() {
   const isLive=state.transportMode==='LIVE_BACKEND';
   const hasProject=!isLive||!!state.durableProject;
   const hasExercise=!isLive||!!state.durableProject?.exercisePath;
+  const emptyWorkspaceLabel=!hasProject?'Brak otwartego projektu':!hasExercise?'Brak otwartego ćwiczenia':undefined;
   async function changeLocale() {
     const next=locale==='pl'?'en':'pl', request=++localeChange.current;
     setProjectActionError('');
@@ -336,6 +337,7 @@ export default function App() {
       style={{'--pc-reading-scale':contentFontSize/13} as React.CSSProperties}>
       {/* Top Header Bar */}
       <HeaderBar
+        emptyWorkspaceLabel={emptyWorkspaceLabel}
         theme={theme}
         onToggleTheme={()=>setTheme(value=>value==='darcula'?'dark':value==='dark'?'light':'darcula')}
         locale={locale}
@@ -456,6 +458,7 @@ export default function App() {
           {/* Middle: Shared Monaco Editor */}
           <div className="flex-1 min-h-0 overflow-hidden relative">
             <EditorPanel
+              emptyWorkspaceLabel={emptyWorkspaceLabel}
               theme={theme}
               contentFontSize={contentFontSize}
               initialEditorViews={state.durableProject?.workspace.editorViews}

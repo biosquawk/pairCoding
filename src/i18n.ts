@@ -12,6 +12,8 @@ export const uiMessages: Readonly<Record<string,string>> = {
   "Utwórz projekt": "Create project",
   "Otwórz projekt": "Open project",
   "Zamknij projekt": "Close project",
+  "Brak otwartego projektu": "No project is open",
+  "Brak otwartego ćwiczenia": "No exercise is open",
   "Nie ma otwartego projektu.": "No project is open.",
   "Utwórz lub otwórz projekt, a następnie wybierz folder ćwiczenia.": "Create or open a project, then choose an exercise folder.",
   "Nazwa projektu": "Project name",

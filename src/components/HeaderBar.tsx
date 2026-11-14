@@ -36,6 +36,8 @@ import {
 } from 'lucide-react';
 
 interface HeaderBarProps {
+  /** Presentation only: an empty durable workspace has no source save to confirm. */
+  emptyWorkspaceLabel?: string;
   locale?: 'pl'|'en'; onToggleLocale?:()=>void;
   theme?: 'darcula'|'dark'|'light'; onToggleTheme?:()=>void;
   contentFontSize?: number;
@@ -65,6 +67,7 @@ interface HeaderBarProps {
 }
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
+  emptyWorkspaceLabel,
   theme='darcula',onToggleTheme,
   locale='pl',onToggleLocale,
   contentFontSize=13,onDecreaseContentFont,onIncreaseContentFont,
@@ -141,7 +144,11 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
 
           {/* Write Owner Indicator */}
           <div className="flex items-center gap-2">
-            {writeOwner === 'STUDENT' ? (
+            {emptyWorkspaceLabel ? (
+              <div className="px-2.5 py-1 rounded-md text-xs font-semibold bg-zinc-800 text-zinc-400 border border-zinc-700">
+                {t(emptyWorkspaceLabel)}
+              </div>
+            ) : writeOwner === 'STUDENT' ? (
               <div
                 title={t("Masz potwierdzone prawo zapisu w edytorze")}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-red-950/80 text-red-300 border border-red-700 shadow-sm"
