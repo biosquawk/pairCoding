@@ -30,7 +30,17 @@ an explicit trusted fixture/embedding seam; it is not automatic product startup.
    explicit locale tags and are rejected by the client. Retry a cancelled report in
    the newly selected language. Existing completed reports remain historical.
 
-The theme and left-sidebar UI implementation is integrated separately by K.
+## Theme and panel controls
+
+The theme button cycles **Darcula** (default when no theme was previously selected),
+**Solarized Dark**, and **Solarized Light**. The PL/EN flag immediately after A−/A+
+selects the application and future coach language. The left sidebar contains
+**Project files** (fresh-start default), **Task**, **Chat**, and **Environment**;
+the bottom panel contains only **Console** and **Report**. Existing theme/font
+preferences remain separate from exercise source files.
+
+For the shortest launch path see [README](../README.md#projekt-treningowy-wygląd-i-język)
+and the [Windows guide](windows-start.md#3-start-pusty--utwórzotwórz-projekt--ćwiczenie--zgoda-ai).
 
 ## Backend and typed client contract
 

@@ -173,9 +173,23 @@ hasłem użytkownika do wpisania. Serwer ma pozostać wyłącznie na loopback.
 
 ## Model Codex
 
-W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-sol` i `reasoning_effort: "medium"`. Trener i raport uruchamiają lokalną instancję `codex exec --ephemeral --model gpt-6.1-sol` z `model_reasoning_effort="medium"`, używając własnego logowania ChatGPT. ComputerUse jest jawnie wyłączone (`features.computer_use=false`); aplikacja nie dopuszcza wykonywania narzędzi modelu ani interakcji z komputerem. `--ephemeral` dotyczy plików sesji CLI, nie usuwa danych raportu aplikacji. Po edycji pliku zrestartuj serwer. Opcjonalne nadpisania to `PAIRCOACH_CODEX_MODEL`, `PAIRCOACH_CODEX_REASONING_EFFORT` oraz `PAIRCOACH_CONFIG` (pełna ścieżka innego JSON). Nie są potrzebne dodatkowy klucz ani URL API.
+W katalogu aplikacji znajduje się `paircoach.config.json`, z modelem `gpt-6.1-sol` i `reasoning_effort: "medium"`. Trener i raport używają lokalnego Codex CLI z tym modelem i poziomem rozumowania oraz własnego logowania ChatGPT. ComputerUse jest jawnie wyłączone (`features.computer_use=false`); aplikacja nie dopuszcza wykonywania narzędzi modelu ani interakcji z komputerem. Trener trwałego projektu nie używa `--ephemeral`: zapisuje rzeczywiste ID sesji i wznawia je przy kolejnych wywołaniach. Raport jest osobnym wywołaniem. Po edycji pliku zrestartuj serwer. Opcjonalne nadpisania to `PAIRCOACH_CODEX_MODEL`, `PAIRCOACH_CODEX_REASONING_EFFORT` oraz `PAIRCOACH_CONFIG` (pełna ścieżka innego JSON). Nie są potrzebne dodatkowy klucz ani URL API.
 
-## 3. Start → zgoda AI → edytuj/czat
+## 3. Start pusty → utwórz/otwórz projekt → ćwiczenie → zgoda AI
+
+Start nie otwiera ćwiczenia z konfiguracji ani ostatniego projektu.
+Wybierz **Utwórz projekt**, wskaż istniejący folder dostępny dla backendu i nazwę;
+albo **Otwórz projekt** i wybierz swój `NAZWA.paircoding.json`.
+W nowym projekcie nadal nie ma ćwiczenia: wybierz **Otwórz folder…** i prywatny
+folder `$project` z §2. To dwie odrębne rzeczy: projekt treningowy zachowuje
+historię i kontekst także po przejściu do innego folderu ćwiczenia.
+
+Motyw przełączysz przyciskiem **Darcula / Solarized Dark / Solarized Light**;
+Darcula jest domyślna przy braku wcześniejszego wyboru. Flaga **PL/EN** za
+**A−/A+** zmienia GUI i język przyszłych odpowiedzi AI, nie stare wiadomości,
+kod ani surowe logi. Po lewej wybierasz **Pliki projektu** (domyślne), **Zadanie**,
+**Czat** lub **Środowisko**; dolny panel zawiera tylko **Konsola** i **Raport**.
+[Szczegóły projektu, reguł i resume](projects-native-locale-20261114.md).
 
 1. Otwórz `src/main/java/demo/StrategyDemo.java` w drzewie prywatnego projektu z §2.
    Poczekaj na LIVE i prawo pisania; szary/offline nie jest gotowością.
@@ -235,7 +249,18 @@ i PAIRCOACH_HTTP_PORT=18120 jak wyżej, sprawdź wolny port, a następnie wykona
 Dane są w `<projekt>/.paircoach`; zachowaj też wygenerowany config, cache/receipty
 i `.paircoach-runtime` obok config. Nie kopiuj ich między instalacjami/projektami.
 **Nie wykonuj ponownie tworzenia plików/settings ani prepare tylko dla restartu.**
-Po restarcie sprawdź zgodę AI; nie zakładaj trwałości sesji/timera lub ustawień.
+Stan treningowy zapisuje się automatycznie, a kod nadal wymaga ACK.
+Przed **Zamknij projekt** poczekaj na potwierdzony zapis i zatrzymaj własny Run;
+zamknięcie czyści otwarte ćwiczenie/czat z GUI, nie pliki z dysku.
+Po ponownym uruchomieniu serwera wybierz **Otwórz projekt** i ten sam
+`NAZWA.paircoding.json`: wrócą ostatnie ćwiczenie, zakładki, historia i kontekst;
+timer wraca wstrzymany. Sprawdź też zgodę AI i bieżącą gotowość Run.
+Oprócz danych wykonania zachowaj **cały folder projektu treningowego** z
+`.pairCoding/codex/`, nawet jeśli ćwiczenia znajdują się poza nim.
+Po rzeczywistym wywołaniu trenera `.pairCoding/codex/resume.json` podaje dokładne
+ID, bezpieczny cwd i tablice argumentów do wznowienia w terminalu z tego samego
+konta/CODEX_HOME; użyj zapisanych argumentów i poprawnego cytowania PowerShell.
+Plik nie zawiera logowania i nie zastępuje prywatnego magazynu sesji Codexa.
 Po zakończeniu usuń tylko lokalne nadpisanie:
 `Remove-Item Env:PAIRCOACH_HTTP_PORT -ErrorAction SilentlyContinue`.
 
@@ -357,7 +382,7 @@ READY dotyczy zamrożonego materiału i faktycznie wykonanych uruchomień,
 nie przyszłych edycji. Przy FAILED zachowane są pliki/fakty; wybierz jawnie
 **Ponów generowanie raportu** (ponawiasz raport, nie finish i nie snapshot).
 Przy `PAIRCOACH_COACH_PROVIDER=codex` **zarówno trener, jak i raport używają Codexa**:
-`gpt-6.1-sol` / `medium`, lokalne `codex exec --ephemeral`, własne logowanie
+`gpt-6.1-sol` / `medium`, lokalny Codex CLI (raport jako odrębne wywołanie), własne logowanie
 ChatGPT, bez dodatkowego klucza lub URL API; ComputerUse wyłączone.
 Zgoda AI jest utrwalona w faktach; bez niej lub bez generatora powstaje jawne lokalne
 podsumowanie faktów, nie odpowiedź AI. Błąd wybranego dostawcy daje FAILED,

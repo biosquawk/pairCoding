@@ -1,6 +1,6 @@
 # PairCoach
 
-> Bieżąca linia rozwojowa zawiera kompaktowy GUI, motywy Solarized, otwieranie folderów, natywnego trenera Codex z kartami/skilami oraz wykonanie zadań w Dockerze. [Aktualny zakres i wyniki kontroli](docs/development-20261113.md) rozdzielają sprawdzone funkcje od niezaliczonej pełnej bramki i odbioru całego Zadania 9.
+> Bieżąca linia rozwojowa zawiera kompaktowy GUI, domyślną Darculę i dwa motywy Solarized, przełącznik PL/EN, trwałe projekty treningowe oraz natywnego trenera Codex z kartami/skilami i wykonanie zadań w Dockerze. [Aktualny zakres i wyniki kontroli](docs/development-20261113.md) rozdzielają sprawdzone funkcje od niezaliczonej pełnej bramki i odbioru całego Zadania 9.
 
 Lokalny trener programowania: edytor Monaco, czat z AI, uruchamianie programu i testów, snapshoty oraz raport końcowy. Interfejs i backend znajdują się w tym repozytorium.
 
@@ -24,17 +24,43 @@ Otwórz **http://127.0.0.1:8080/**. `npm start` uruchamia backend REST/WebSocket
 
 Backend nasłuchuje lokalnie. Standardowy start developerski korzysta z lokalnego bootstrapu tokenu; nie ustawiaj `NODE_ENV=production` bez skonfigurowania sposobu przekazania tokenu klientowi.
 
+## Projekt treningowy, wygląd i język
+
+Po starcie aplikacja jest **pusta**, także przy skonfigurowanym workspace.
+Najpierw wybierz **Utwórz projekt** (nazwa i istniejący folder dostępny dla backendu)
+albo **Otwórz projekt** i wskaż zapisany `NAZWA.paircoding.json`.
+Dopiero w otwartym projekcie użyj **Otwórz folder…**, aby wybrać ćwiczenie.
+Jeden projekt treningowy może obejmować kolejne foldery ćwiczeń; nie kopiuje ich źródeł.
+
+Stan projektu zapisuje się automatycznie: ostatnie ćwiczenie, zakładki/widok,
+historia czatu i kontekst trenera. Zapis kodu nadal wymaga ACK.
+Przed **Zamknij projekt** poczekaj na potwierdzenie zapisu; aplikacja wraca do pustego widoku.
+Po zamknięciu strony lub restarcie serwera wybierz ponownie **Otwórz projekt**
+i ten sam plik, aby wrócić do zapisanej pracy (timer jest przywracany jako wstrzymany).
+Zachowaj cały folder projektu, w tym `.pairCoding/codex/`; po rzeczywistym wywołaniu
+Codexa plik `.pairCoding/codex/resume.json` zawiera ID i argumenty wznowienia
+z terminala, wymagające tego samego konta/CODEX_HOME. Nie kopiuj danych logowania.
+
+Przycisk motywu przełącza **Darcula** (domyślna dla nowego wyboru),
+**Solarized Dark** i **Solarized Light**. Flaga **PL/EN** za **A−/A+** zmienia
+język GUI i przyszłych odpowiedzi AI, nie treść ćwiczeń ani stare wiadomości.
+Po lewej są cztery zakładki: **Pliki projektu** (domyślna), **Zadanie**, **Czat**,
+**Środowisko**; na dole wyłącznie **Konsola** i **Raport**.
+
+[Szczegóły projektów, reguł i natywnego resume](docs/projects-native-locale-20261114.md).
+To instrukcja obsługi kandydata, nie deklaracja zakończenia odbioru LIVE.
+
 ## Trener AI i folder zadania
 
 Dostęp do AI wymaga konfiguracji dostawcy oraz zaznaczenia zgody w ustawieniach projektu w interfejsie.
 
 Przed rozpoczęciem pracy skonfigurowany trener ma status „Gotowy”. Pierwsza potwierdzona edycja kodu albo pytanie na czacie uruchamia sesję i obserwowanie przez trenera — nie wymaga wcześniejszego kliknięcia Start. Ręczna pauza, wyciszenie i brak zgody AI nadal obowiązują.
 
-Przycisk **Otwórz folder…** nad drzewem plików pozwala wyklikać inne ćwiczenie bez restartu. Wybór zaczyna się w katalogu nadrzędnym obecnego zadania; dostępne są podfoldery, **Poziom wyżej**, **Otwórz ten folder** i **Anuluj**. Są to rzeczywiste katalogi backendu (przy backendzie w WSL — ścieżki WSL), bez importowania ani kopiowania plików. Zapis musi uzyskać ACK; aktywny program należy zatrzymać, a pisanie trenera przerwać przed przełączeniem. Profil języka/JDK pozostaje ten sam; jego zmiana nadal wymaga konfiguracji i restartu.
+W otwartym projekcie treningowym przycisk **Otwórz folder…** nad drzewem plików pozwala wyklikać inne ćwiczenie bez restartu. Wybór zaczyna się w katalogu nadrzędnym obecnego zadania; dostępne są podfoldery, **Poziom wyżej**, **Otwórz ten folder** i **Anuluj**. Są to rzeczywiste katalogi backendu (przy backendzie w WSL — ścieżki WSL), bez importowania ani kopiowania plików. Zapis musi uzyskać ACK; aktywny program należy zatrzymać, a pisanie trenera przerwać przed przełączeniem. Profil języka/JDK pozostaje ten sam; jego zmiana nadal wymaga konfiguracji i restartu.
 
 - **Codex:** ustaw `PAIRCOACH_COACH_PROVIDER=codex` i `PAIRCOACH_CODEX_EXE` na pełną ścieżkę do lokalnego, zalogowanego programu Codex. W Windows wymagany jest natywny `codex.exe`, nie plik `.cmd`. Raport końcowy korzysta z tego samego dostawcy. Nie dodawaj plików logowania do repozytorium.
 - **Gemini:** ustaw `GEMINI_API_KEY` w środowisku serwera. Bez skonfigurowanego dostawcy aplikacja działa z wyłączonym trenerem.
-- `PAIRCOACH_WORKSPACE_DIR` wskazuje folder ćwiczenia, a `PAIRCOACH_DATA_DIR` osobny folder danych sesji. Bez wskazanego workspace serwer tworzy tymczasowy przykład.
+- `PAIRCOACH_WORKSPACE_DIR` i `PAIRCOACH_DATA_DIR` nie otwierają automatycznie ćwiczenia przy starcie produktu; wybierz projekt i folder w GUI. Konfiguracja środowiska wykonania pozostaje odrębna.
 - Run Main i Run Tests wymagają skonfigurowanych profili uruchamiania w ustawieniach projektu.
 
 Szczegółowe polecenia PowerShell, konfiguracja Codexa i przebieg pierwszego zadania: [instrukcja Windows](docs/windows-start.md).
@@ -57,7 +83,7 @@ Plik [paircoach.config.json](paircoach.config.json) w katalogu aplikacji:
 }
 ```
 
-Trener i raport końcowy uruchamiają lokalną instancję `codex exec --ephemeral --model gpt-6.1-sol` z `model_reasoning_effort="medium"`. Używają własnego logowania ChatGPT w Codex CLI. Aplikacja jawnie wyłącza ComputerUse (`features.computer_use=false`); model nie wykonuje narzędzi ani interakcji z komputerem. Konfiguracja nie wymaga klucza API ani URL API.
+Trener i raport końcowy korzystają z lokalnego Codex CLI z modelem `gpt-6.1-sol` i `model_reasoning_effort="medium"`. Trener trwałego projektu zapisuje rzeczywiste ID sesji bez `--ephemeral` i następnie wznawia dokładnie tę sesję; raport pozostaje odrębnym wywołaniem. Używają własnego logowania ChatGPT w Codex CLI. Aplikacja jawnie wyłącza ComputerUse (`features.computer_use=false`); model nie wykonuje narzędzi ani interakcji z komputerem. Konfiguracja nie wymaga klucza API ani URL API.
 
 Po zmianie pliku zrestartuj serwer. `PAIRCOACH_CONFIG` może wskazać inny plik JSON pełną ścieżką. Opcjonalne nadpisania: `PAIRCOACH_CODEX_MODEL` i `PAIRCOACH_CODEX_REASONING_EFFORT`. Ustawienia zapisane w konfiguracji użytkownika Codexa nie zmieniają tych wartości — aplikacja przekazuje je jawnie. Błędny plik lub niepoprawna wartość zatrzymuje konfigurację dostawcy zamiast wybierać inny model.
 
