@@ -107,7 +107,7 @@ export class PairCoachClient {
   // Getters
   public getState():ClientState {
     if (this.transportMode === 'LIVE_BACKEND') return this.live.getState();
-    return { ...simulator.getFullState(), transportMode: this.transportMode, connectionError: null, taskReadError: null, storageError: null, snapshotsError: null, pendingPaths: [] } satisfies ClientState;
+    return { ...simulator.getFullState(), durableProject:null, projectError:null,locale:'pl', transportMode: this.transportMode, connectionError: null, taskReadError: null, storageError: null, snapshotsError: null, pendingPaths: [] } satisfies ClientState;
   }
 
   // Scenario loading
@@ -269,6 +269,11 @@ export class PairCoachClient {
     simulator.restoreSnapshotById(snapshotId);
   }
 
+  public createDurableProject(directory:string,name:string) {return this.live.createDurableProject(directory,name);}
+  public openDurableProject(projectFile:string) {return this.live.openDurableProject(projectFile);}
+  public closeDurableProject() {return this.live.closeDurableProject();}
+  public saveProjectWorkspace(workspace:import('../shared/durable-project').ProjectWorkspace) {return this.live.saveProjectWorkspace(workspace);}
+  public setLocale(locale:import('../shared/durable-project').Locale) {return this.live.setLocale(locale);}
   public async openProject(rootPath: string) { return this.transportMode === 'LIVE_BACKEND' ? this.live.openProject(rootPath) : false; }
   public folderOpenProblem() { return this.transportMode==='LIVE_BACKEND' ? this.live.folderOpenProblem() : 'Wybór folderu wymaga lokalnego backendu.'; }
   public listFolders(path?:string,signal?:AbortSignal) { return this.live.listFolders(path,signal); }

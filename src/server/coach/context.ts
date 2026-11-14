@@ -13,6 +13,8 @@ export interface ContextWorkspace {
 }
 export const ALLOWED_PROPOSAL_KINDS = ['RETRY_FROM_SNAPSHOT', 'RESTORE_SNAPSHOT', 'FINISH_EXERCISE'] as const;
 export interface CoachContext {
+  locale?: import("../../shared/durable-project").Locale;
+  durableProject?: {projectId:string;rules:string[];notes:string[];transitions:unknown[];observations:unknown[]};
   availableSnapshots?: {snapshotId:string;label:string;workspaceVersion:number;paths:string[]}[];
   capabilities?: { canGenerateTests: false };
   allowedProposalKinds?: (typeof ALLOWED_PROPOSAL_KINDS)[number][];
@@ -35,10 +37,12 @@ export interface CoachContext {
 
 // Deny before any file read. Case-insensitive on every host, not just Windows.
 export function isContextPathAllowed(path: string): boolean {
+  if (!path) return false;
+  if (path.toLowerCase().endsWith('.paircoding.json')) return false;
   if (!path || path.startsWith('/') || /[\\:\x00-\x1f]/.test(path)) return false;
   return path.split('/').every(part => part !== '' && part !== '.' && part !== '..' &&
     !/[. ]$/.test(part) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(part) &&
-    !/^(\.env.*|\.git|\.idea|\.vscode|\.gitignore|\.paircoach|node_modules|target|__pycache__|\.venv|dist|\.ssh|\.aws|\.docker|\.kube|\.azure|\.config|\.npmrc|\.netrc|\.pypirc)$/i.test(part) &&
+    !/^(\.env.*|\.git|\.idea|\.vscode|\.gitignore|\.paircoach|\.paircoding|node_modules|target|__pycache__|\.venv|dist|\.ssh|\.aws|\.docker|\.kube|\.azure|\.config|\.npmrc|\.netrc|\.pypirc)$/i.test(part) &&
     !/(?:^|[._-])(?:credentials?|secrets?|tokens?|passwords?|keystore|id_rsa|id_ed25519)(?:[._-]|$)/i.test(part) &&
     !/\.(pem|key|pfx|p12|jks|kdbx|der|crt|iml|ipr|iws)$/i.test(part));
 }

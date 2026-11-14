@@ -2,5 +2,6 @@
 export interface FolderListing {
   path: string;
   parent: string | null;
+  projectFiles?: {name:string;path:string}[];
   directories: {name: string; path: string}[];
 }

@@ -83,7 +83,7 @@ export function privateWrite(absolute: string, bytes: Buffer, mode = 0o600): Ide
 
 export function snapshotAllowed(relative: string): boolean {
   return !relative.toLowerCase().split('/').some(part =>
-    /^(\.git|\.idea|\.vscode|\.gitignore|target)$/.test(part) || /\.(iml|ipr|iws)$/.test(part) ||
+    /^(\.git|\.idea|\.vscode|\.gitignore|\.paircoding|\.paircoach|target)$/.test(part) || /\.(iml|ipr|iws)$/.test(part) || part.endsWith('.paircoding.json') ||
     /^(\.env.*|\.aws|\.ssh|\.azure|\.kube|\.npmrc|\.pypirc|\.netrc|\.git-credentials|credentials?(?:[._-].*)?|secrets?(?:[._-].*)?|id_rsa|id_ed25519|.*\.(pem|key|pfx|p12|keystore))$/.test(part) ||
     /(?:^|[._-])credentials?(?:[._-]|$)/.test(part));
 }
@@ -255,7 +255,7 @@ export class SnapshotStorage {
       if (typeof p !== 'string' || !p || p.length > 1024 || /[\\:\x00-\x1f<>"|?*]/.test(p) || p.startsWith('/') ||
           p.split('/').some(c => !c || c === '.' || c === '..' || /[. ]$/.test(c) ||
             /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(c) ||
-            /^(\.git|node_modules|target|__pycache__|\.venv|dist|\.paircoach)$/i.test(c) || c.toLowerCase().startsWith('.paircoach-write-'))) {
+            /^(\.git|node_modules|target|__pycache__|\.venv|dist|\.paircoach|\.paircoding)$/i.test(c) || c.toLowerCase().startsWith('.paircoach-write-'))) {
         throw snapshotFailure('Invalid relative snapshot path.');
       }
       if (inspectDisk) this.safePath(p, true);

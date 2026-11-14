@@ -159,6 +159,7 @@ export interface SnapshotItem {
 }
 
 export interface ChatEntry {
+  locale?: import('../shared/durable-project').Locale;
   id: string;
   sender: 'STUDENT' | 'COACH' | 'SYSTEM';
   message: string;

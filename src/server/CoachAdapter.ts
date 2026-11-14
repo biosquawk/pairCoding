@@ -24,6 +24,8 @@ export interface CoachOptions {
   /** Admit the full synchronous context read after the bound workspace/source capture releases. */
   readContext?: <T>(read: () => T, signal: AbortSignal) => Promise<T>;
   sensitiveValues?: readonly string[];
+  restoredMessages?: readonly ChatEntry[];
+  contextExtras?: () => Pick<CoachContext, 'locale'|'durableProject'>;
 }
 type Ready = { requestId: string; workspaceVersion: number; ready: boolean };
 type Rendered = { stepId: string; interventionId: string; documentVersion: number };
@@ -52,6 +54,7 @@ export class CoachAdapter {
   private fallbackAnnounced = false;
 
   constructor(private readonly options: CoachOptions) {
+    this.messages.push(...structuredClone(options.restoredMessages?.slice(-100) ?? []));
     this.provider = options.provider ?? defaultCoachProvider();
     this.sensitive = [...(options.sensitiveValues ?? []), ...(process.env.GEMINI_API_KEY ? [process.env.GEMINI_API_KEY] : [])];
     options.session.on('veto', this.onVeto);
@@ -93,7 +96,7 @@ export class CoachAdapter {
       if (!this.fallbackAnnounced) {
         this.fallbackAnnounced = true;
         this.options.emit('CHAT_REPLY', { replyTo: message?.messageId ?? null,
-          text: 'Trener AI wyłączony: brak GEMINI_API_KEY. Edytor działa; lokalny fallback nie analizuje kodu ani nie udaje Gemini.' });
+          text: this.options.contextExtras?.().locale === 'en' ? 'AI coach disabled: no provider configured. The editor remains available; the local fallback does not analyze your code.' : 'Trener AI wyłączony: brak GEMINI_API_KEY. Edytor działa; lokalny fallback nie analizuje kodu ani nie udaje Gemini.' });
       }
       return;
     }
@@ -185,8 +188,8 @@ export class CoachAdapter {
       if (generation !== this.generation || !this.allowed() ||
           epoch !== this.options.session.getSession().controlEpoch || version !== this.options.workspace.workspaceVersion)
         throw new Error('COACH_CONTEXT_REVOKED');
-      return buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
-        this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView());
+      return {...buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
+        this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView()), ...this.options.contextExtras?.()};
     };
   }
 

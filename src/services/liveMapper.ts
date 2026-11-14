@@ -26,7 +26,7 @@ export function mapRun(run: Wire.Run | RunV2, previous: ExecutionRun | null): Ex
 }
 export function emptyLiveState(): ClientState {
   const capabilities = { canRunMain: false, canRunTests: false, docsPlugin: 'NOT_INSTALLED', autocompletePlugin: 'NOT_INSTALLED' } as const;
-  return { transportMode: 'LIVE_BACKEND', connectionError: null, taskReadError: null, pendingPaths: [], storageError: null, snapshotsError: null,
+  return { durableProject:null,projectError:null,locale:'pl',transportMode: 'LIVE_BACKEND', connectionError: null, taskReadError: null, pendingPaths: [], storageError: null, snapshotsError: null,
     scenario: { id: 'live', title: 'Lokalny projekt', category: 'Algorytmy', taskMode: 'IMPLEMENTATION', description: '', defaultTimeLimitMs: 0, files: [], taskFilePath: '', reviewNotesPath: 'review.md', capabilities },
     files: [], activePath: '', writeOwner: 'SYNCING', coachMode: 'UNAVAILABLE', aiStatus: 'OFF', sessionStatus: 'STOPPED', elapsedMs: 0, limitMs: 0,
     pauseOnHidden: true, windowPresence: 'FOCUSED', capabilities, activePointer: null, activeHintBubble: null, activeProposal: null,

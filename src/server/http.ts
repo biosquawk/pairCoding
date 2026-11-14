@@ -1,3 +1,8 @@
+import {localizeDiagnostic} from '../shared/localizeDiagnostic';
+import { DurableProjectStore } from './DurableProjectStore';
+import { isLocale, validProjectWorkspace, type Locale, type DurableProjectState } from '../shared/durable-project';
+import { defaultCoachProvider } from './coach/provider';
+import { coachLocaleInstruction } from './coach/prompt';
 import { CodexCoachProvider } from './coach/CodexProvider';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
@@ -75,7 +80,7 @@ export interface CoachService {
 }
 export interface ExecutionServices {
   runner: { setApprovedProfiles(profiles: any[]):void; start(profile: any): Run; get(id: string): Run; stop(id:string): Promise<Run>; stopAll():Promise<void>; list():Run[] };
-  reports: { finish(reason: Report['reason'],facts:any):Report; get(sessionId:string):Report; retry(sessionId:string):Report; list?():ReportSummary[]; close():void };
+  reports: { finish(reason: Report['reason'],facts:any):Report; get(sessionId:string):Report; retry(sessionId:string):Report; list?():ReportSummary[]; cancelLocale?():void; close():void };
 }
 function fail(status: number, code: string, message: string): never { throw new TransportError(status,code,message); }
 const clone = <T>(value:T):T => structuredClone(value);
@@ -91,13 +96,13 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   const startupOptions = { argv: [...(options.runtimeArguments ?? [])],
     environment: options.runtimeEnvironment, dataDir:options.dataDir };
   const startupTransports = new WeakMap<RuntimeStartup, { transport: DockerTransport; install(transport: DockerTransport): void }>();
-  const constructStartup = async (root?: string) => {
+  const constructStartup = async (root?: string, empty=false) => {
     let installed: DockerTransport | undefined = options.runtimeTransport;
     const transport: DockerTransport = { run: (args, bounds) => {
       if(!installed) throw new TransportError(503, 'DOCKER_CLI_UNAVAILABLE', 'Canonical runtime transport is not available. Manual editing remains available.');
       return installed.run(args, bounds);
     } };
-    const value = await createRuntimeStartup({ ...startupOptions, explicitWorkspaceRoot: root, transport });
+    const value = await createRuntimeStartup({ ...startupOptions, explicitWorkspaceRoot: root, transport, empty });
     startupTransports.set(value, { transport, install(value) { installed = value; } });
     return value;
   };
@@ -115,6 +120,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   // OpenProjectRequest has no old sessionId: never forget an open receipt on adoption.
   const openLedger=new CommandLedger({...options.openLedgerOptions,
     limitMessage:options.openLedgerOptions?.limitMessage ?? 'Osiągnięto budżet otwarć projektów tego serwera. Zachowaj dane i uruchom ponownie lokalny serwer.'});
+  let durable:DurableProjectStore|null=null, locale:Locale='pl', projectError:string|null=null;
   let chat:ChatEntry[] = [], proposals:Proposal[] = [], report:Report|null = null, lastRun:Run|null = null;
   const facts:unknown[] = [];
   let seq = 0, closing = false, transitioning = false, persistingFinish = false;
@@ -139,14 +145,16 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if (type==='SESSION_REPORT' && (payload as Report).sessionId!==session.state.sessionId) return;
     if(type==='CONTROL_PREPARE')controlPreparing=true;
     if(type==='CONTROL_STATE')controlPreparing=false;
+    if(['CHAT_REPLY','COACH_HINT_BUBBLE','COACH_POINTER','ACTION_PROPOSAL','COACH_STEP_EDIT','CONTROL_PREPARE'].includes(type))payload={...(payload as object),locale,...(['CHAT_REPLY','COACH_HINT_BUBBLE'].includes(type)?{createdAt:new Date().toISOString()}:{})};
     const message = envelope(type,payload,messageId), encoded = JSON.stringify(message);
     if (['COACH_STEP_EDIT','CONTROL_STATE'].includes(type)) facts.push(clone(message));
+    if(durable && ['COACH_STEP_EDIT','RUN_STATE'].includes(type))observeProject(type,(payload as {path?:string}).path??null);
     if (type==='RUN_STATE') {
       lastRun = clone(payload as Run);
       if (lastRun.finishedAt) facts.push({type:'RUN',run:clone(lastRun)});
     }
     if (type==='SESSION_REPORT') report = clone(payload as Report);
-    if (type==='CHAT_REPLY' || type==='COACH_HINT_BUBBLE') { chat.push({messageId:message.messageId,author:'COACH',text:(payload as {text:string}).text,createdAt:new Date().toISOString()});chat=chat.slice(-100); }
+    if (type==='CHAT_REPLY' || type==='COACH_HINT_BUBBLE' || type==='ACTION_PROPOSAL') { chat.push({messageId:type==='COACH_HINT_BUBBLE'?(payload as {id:string}).id:message.messageId,author:'COACH',text:type==='ACTION_PROPOSAL'?(payload as Proposal).questionText:(payload as {text:string}).text,createdAt:(payload as {createdAt?:string}).createdAt??new Date().toISOString(),locale});if(!durable)chat=chat.slice(-100); persistProject(); }
     for (const [ws,p] of peers) if (p.authenticated && ws.readyState===WebSocket.OPEN) {
       if (ws.bufferedAmount > 8*1024*1024) { ws.close(1013,'Slow consumer'); continue; }
       ws.send(encoded);
@@ -394,12 +402,12 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       emit('ERROR',{code:'COACH_RESPONSE_REJECTED',message:'Generowanie testów jest niedostępne; zachowano pracę.',retryable:false,requestId:null,currentVersion:null});
       return;
     }
-    const proposal:Proposal = {proposalId:randomUUID(),kind:decision.proposalKind,questionText:decision.questionText,yesLabel:'Tak, wykonaj',noLabel:'Nie, pracuję dalej',basedOnWorkspaceVersion:workspace.workspaceVersion,expiresAt:new Date(Date.now()+60000).toISOString(),paths:decision.paths,snapshotId:decision.snapshotId,resetTimer:false};
+    const proposal:Proposal = {proposalId:randomUUID(),kind:decision.proposalKind,questionText:decision.questionText,yesLabel:locale==='en'?'Yes, proceed':'Tak, wykonaj',noLabel:locale==='en'?'No, keep working':'Nie, pracuję dalej',basedOnWorkspaceVersion:workspace.workspaceVersion,expiresAt:new Date(Date.now()+60000).toISOString(),paths:decision.paths,snapshotId:decision.snapshotId,resetTimer:false};
     proposals=proposals.filter(p=>Date.parse(p.expiresAt)>Date.now()).slice(-9); proposals.push(proposal); emit('ACTION_PROPOSAL',proposal);
   }
   type Core = ReturnType<typeof currentCore>;
   // Preparation owns its core, listeners and services. Nothing may publish to the old binding.
-  async function prepareBinding(core:Core, owner:RuntimeStartup) {
+  async function prepareBinding(core:Core, owner:RuntimeStartup, desk:DurableProjectStore|null=durable) {
     const {workspace:boundWorkspace,session:boundSession}=core;
     let active=false, disposed=false;
     let boundCoach:CoachService|undefined, boundExecution:ExecutionServices|undefined;
@@ -480,15 +488,16 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if(options.executionFactory) { boundExecution=options.executionFactory(boundContext); boundReports=boundExecution.reports; }
       else if(options.enableExecution) {
         // Reports are independent from Run availability; NEVER instantiate the legacy host Runner.
-        boundReports=new ReportService({dataDir:boundWorkspace.dataDir,projectId:boundWorkspace.projectId,emit:(type,payload)=>{
+        boundReports=new ReportService({dataDir:desk ? desk.desk : boundWorkspace.dataDir,projectId:boundWorkspace.projectId,emit:(type,payload)=>{
           if(!persistingFinish)publish(type,payload);
-        },generate:reportGenerator()});
+        },generate:reportGenerator(),locale:()=>locale});
       }
       boundCoach=options.enableCoach ? (options.coachFactory?.(boundContext) ??
-        new CoachAdapter({...boundContext,provider:options.coachProvider,sensitiveValues:[token,process.env.GEMINI_API_KEY||'']})) : undefined;
+        new CoachAdapter({...boundContext,provider:options.coachProvider ?? defaultCoachProvider(desk ? key=>desk.nativeSession(key) : undefined),restoredMessages:desk?.snapshot().chat,contextExtras:()=>({locale, ...(desk ? {durableProject:desk.coachContext()} : {})}),sensitiveValues:[token,process.env.GEMINI_API_KEY||'']})) : undefined;
       on(boundWorkspace,'external',(payload:unknown)=>{boundCoach?.abort();publish('EXTERNAL_FILE_SYNC',payload);publish('SESSION_STATE',boundSession.getSession());});
-      on(boundSession,'state',()=>publish('SESSION_STATE',boundSession.getSession()));
-      on(boundSession,'overtime',()=>{publish('CHAT_REPLY',{replyTo:null,text:'Limit czasu minął. Możesz dalej pisać i samodzielnie zakończyć próbę.'});if(active)boundCoach?.trigger('OVERTIME');});
+      on(boundSession,'state',()=>{publish('SESSION_STATE',boundSession.getSession());if(active) scheduleProjectSave();});
+      on(boundWorkspace,'changed',(change:{actor?:string;path?:string})=>{if(active) {observeProject('EDIT_'+(change.actor??'UNKNOWN'),change.path??null);scheduleProjectSave();}});
+      on(boundSession,'overtime',()=>{publish('CHAT_REPLY',{replyTo:null,text:locale==='en'?'Time limit reached. You can continue editing and finish the attempt yourself.':'Limit czasu minął. Możesz dalej pisać i samodzielnie zakończyć próbę.'});if(active)boundCoach?.trigger('OVERTIME');});
       on(boundWorkspace,'watcherError',(error:unknown)=>publish('ERROR',apiError(error)));
       on(boundSession,'control',(payload:unknown)=>publish('CONTROL_STATE',payload));
       on(boundSession,'veto',()=>boundCoach?.abort());
@@ -502,7 +511,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   }
   let binding:Awaited<ReturnType<typeof prepareBinding>>|undefined;
   // Catch immediately to avoid an unhandled rejection if the caller has not called listen yet.
-  const initialized = constructStartup(options.rootPath).then(async value => {
+  const initialized = constructStartup(options.rootPath,options.rootPath===undefined).then(async value => {
     startup=value;
     try {
       if(closing) {value.close();return {error:new TransportError(503,'SESSION_CLOSED','Server closed during recovery.')};}
@@ -521,6 +530,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(!configured && !useCodex && !apiKey) return undefined; // ReportService's explicit local-facts fallback.
     const codexProvider=!configured && useCodex ? new CodexCoachProvider() : undefined;
     return async (frozen,signal)=>{
+      const reportLocale=locale;
       if(frozen.aiConsent!==true) throw new Error('AI_CONSENT_REQUIRED');
       const settings=frozen.settings as Settings;
       const allowed=(p:string)=>isContextPathAllowed(p) && settings.contextPatterns.some(pattern=>matchesContextPattern(p,pattern));
@@ -545,17 +555,17 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       const safe:ReportAIFacts={session:clone(frozen.session),snapshot:{...clone(frozen.snapshot),paths:frozen.snapshot.paths.filter(allowed)},
         runs:frozen.runs.map(projectRunFacts),
         chat:clone(frozen.chat),events,aiConsent:true,
-        taskMode:settings.taskMode,documents,omittedPaths,systemPrompt:REPORT_SYSTEM_PROMPT};
+        taskMode:settings.taskMode,documents,omittedPaths,locale:reportLocale,systemPrompt:REPORT_SYSTEM_PROMPT+coachLocaleInstruction(reportLocale)};
       // Metadata and pasted chat can contain the API token too. Raw process output is never projected.
       const projected=JSON.parse(JSON.stringify(safe,(_key,value)=>typeof value==='string'?redactSecrets(value,[token,apiKey||'']):value)) as ReportAIFacts;
       signal.throwIfAborted();
       if(configured) return configured(projected,signal);
-      if(codexProvider) return codexProvider.generateReport(projected, REPORT_SYSTEM_PROMPT, signal);
+      if(codexProvider) return codexProvider.generateReport(projected, REPORT_SYSTEM_PROMPT, signal, reportLocale);
       const {GoogleGenAI}=await import('@google/genai');
       signal.throwIfAborted();
       const ai=new GoogleGenAI({apiKey:apiKey!});
       const response=await ai.models.generateContent({model:process.env.GEMINI_MODEL||'gemini-2.5-flash',contents:JSON.stringify(projected),
-        config:{systemInstruction:REPORT_SYSTEM_PROMPT,abortSignal:signal}});
+        config:{systemInstruction:REPORT_SYSTEM_PROMPT+coachLocaleInstruction(reportLocale),abortSignal:signal}});
       signal.throwIfAborted();
       if(!response.text) throw new Error('REPORT_EMPTY_RESPONSE');
       return response.text;
@@ -610,6 +620,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     });
   }
   async function stopRuntimeForTransition(requireNoPendingAdmission=true) {
+    if(!startup.core)return;
     if(options.enableExecution && !options.executionFactory && (!runtimeExecution || binding?.runtimeError))
       fail(409,'RUN_RECOVERY_REQUIRED','Runtime ownership could not be recovered; finish/project replacement cannot forget retained Runs. Editing remains available.');
     await runtimeExecution?.stopAll();
@@ -631,12 +642,155 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       finalSession.lifecycle='FINISHED';finalSession.controlEpoch++;finalSession.writeOwner='STUDENT';
       finalSession.interventionId=null;finalSession.coachMode='UNAVAILABLE';finalSession.timer.status='STOPPED';
       const frozen:FrozenFacts={session:finalSession,snapshot:clone(finalSnapshot),finalMaterial:clone(finalMaterial),
-        settings:clone(workspace.settings),aiConsent:workspace.settings.aiConsent,
+        settings:clone(workspace.settings),aiConsent:workspace.settings.aiConsent,locale,
         runs:clone(execution?.runner.list() ?? runtimeExecution?.runner.list(session.state.sessionId) ?? []),chat:clone(chat),events:clone(facts)};
       persistingFinish=true;
       try { report=reports.finish(reason,frozen); } finally {persistingFinish=false;}
       session.finish();emit('SESSION_REPORT',report);return clone(report);
     } finally { transitioning=false; }
+  }
+  const pendingProjectObservations:{kind:string;path:string|null;workspaceVersion:number|null;at:string}[]=[];
+  let projectSaveTimer:ReturnType<typeof setTimeout>|undefined;
+  const durableState = ():DurableProjectState => ({durableProject:durable?.view()??null,locale,projectError});
+  function persistProject():void {
+    clearTimeout(projectSaveTimer);projectSaveTimer=undefined;
+    if(!durable)return;
+    try {durable.capture(chat,startup?.core ? session.getSession() : null,pendingProjectObservations);pendingProjectObservations.length=0;projectError=null;}
+    catch(error){projectError='PROJECT_SAVE_FAILED: '+((error as {code?:string}).code??'STORAGE_UNAVAILABLE');throw error;}
+  }
+  function saveProjectVisible():void {try {persistProject();} catch {if(startup?.core)emit('ERROR',{code:'PROJECT_SAVE_FAILED',message:locale==='en'?'Project autosave failed. Keep the application open and preserve your work.':'Nie udało się zapisać projektu. Nie zamykaj aplikacji; zachowaj pracę.',retryable:true,requestId:null,currentVersion:null});}}
+  function scheduleProjectSave():void {if(durable && !projectSaveTimer)projectSaveTimer=setTimeout(saveProjectVisible,250);}
+  function observeProject(kind:string,p:string|null):void {
+    if(!durable)return;
+    pendingProjectObservations.push({kind,path:p,workspaceVersion:startup?.core?.workspace.workspaceVersion??null,at:new Date().toISOString()});
+    if(pendingProjectObservations.length>1000)pendingProjectObservations.shift();
+    scheduleProjectSave();
+  }
+  function transitionAdmission(clientId:string):void {
+    if(transitioning || closing)fail(409,'SESSION_TRANSITION','Another project operation is in progress.');
+    if(!startup.core)return;
+    if(session.leaseClientId && session.leaseClientId!==clientId)fail(409,'LEASE_CONFLICT','Another browser owns this exercise.');
+    binding!.mutations.assertNoPendingRuns();
+    if(controlPreparing || session.state.writeOwner!=='STUDENT')fail(409,'CONTROL_UNAVAILABLE','Veto the coach before changing project.');
+    if([...(execution?.runner.list()??[]),...(runtimeExecution?.runner.list()??[])].some(r=>['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(r.status)))
+      fail(409,'RUN_IN_PROGRESS','Stop and settle the current Run before changing project.');
+    if(persistingFinish)fail(409,'SESSION_TRANSITION','Session finish is still pending.');
+  }
+  function closePeers():void {for(const [ws,p] of peers){p.authenticated=false;p.handshakeGeneration=null;ws.close(1012,'Project changed; reconnect');}}
+  async function clearExercise():Promise<void> {
+    const empty=await constructStartup(undefined,true);
+    const prior=binding,old=startup;
+    if(prior)await prior.dispose();else old.close();
+    startup=empty;binding=undefined;coach=undefined;execution=undefined;reports=undefined;runtimeExecution=undefined;
+    ledger.retire();proposalOutcomes.retire();({ledger,proposalOutcomes}=makeLedgers());
+    chat=[];proposals=[];report=null;lastRun=null;facts.length=0;controlPreparing=false;closePeers();
+  }
+  async function durableHttp(req:IncomingMessage,res:ServerResponse,url:URL):Promise<void> {
+    if(req.method==='GET' && url.pathname==='/api/durable-project'){respond(res,200,durableState());return;}
+    if(req.method!=='POST')fail(404,'NOT_FOUND','Unknown project command.');
+    const b=await readBody(req),action=url.pathname.slice('/api/durable-project/'.length);
+    if(!b || typeof b.clientId!=='string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(b.clientId) || typeof b.requestId!=='string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(b.requestId))fail(400,'VALIDATION_ERROR','Valid requestId and clientId required.');
+    if(!['create','open','close','workspace','locale'].includes(action))fail(404,'NOT_FOUND','Unknown project command.');
+    const allowed=['clientId','requestId','projectId','sessionId',...({create:['directory','name','locale'],open:['projectFile'],close:[],workspace:['workspace'],locale:['locale']}[action]??[])];
+    if(Object.keys(b).some(k=>!allowed.includes(k)))fail(400,'VALIDATION_ERROR','Unknown project command fields.');
+    const operation=openLedger.run('DURABLE:'+b.requestId,{action,body:b},async()=>{
+      if(b.projectId!==(durable?.view().id??null))fail(409,'PROJECT_STATE_CHANGED','Training project changed. Synchronize before applying this command.');
+      if(startup.core){session.assertClient(b.clientId,b.sessionId);binding!.clients.assertBound(b.clientId,b.sessionId);}
+      else if(b.sessionId!==null)fail(409,'SESSION_MISMATCH','There is no exercise session.');
+      if(action==='workspace') {
+        if(!durable)fail(409,'DURABLE_PROJECT_REQUIRED','Create/open a project first.');
+        if(!validProjectWorkspace(b.workspace))fail(400,'INVALID_PROJECT_WORKSPACE','Invalid tabs/active file.');
+        const files=startup.core?.workspace.listFiles()??[];
+        if(b.workspace.openTabs.some((p:string)=>!files.some(f=>f.path===p&&f.kind==='FILE')))fail(409,'PROJECT_STATE_CHANGED','A selected tab no longer exists.');
+        durable.setWorkspace(b.workspace);persistProject();respondState();return durableState();
+      }
+      if(action==='locale') {
+        if(!isLocale(b.locale))fail(400,'INVALID_LOCALE','Choose pl or en.');
+        if(transitioning || closing)fail(409,'SESSION_TRANSITION','Project transition in progress.');
+        // Cut off stale answers BEFORE saving or awaiting anything, also when abort is ignored.
+        coach?.abort();if(startup.core)session.releaseCoach();proposals=[];reports?.cancelLocale?.();
+        durable?.setLocale(b.locale);locale=b.locale;
+        if(startup.core){emit('COACH_POINTER',{id:randomUUID(),path:session.state.activeFilePath??'unused',documentVersion:1,range:null,clear:true});emit('CONTROL_STATE',{writeOwner:session.state.writeOwner,controlEpoch:session.state.controlEpoch,coachMode:session.state.coachMode,cooldownAfterVeto:session.state.cooldownAfterVeto,interventionId:session.state.interventionId,purpose:null});}
+        respondState();return durableState();
+      }
+      transitionAdmission(b.clientId);persistProject();
+      if(action==='close') {
+        transitioning=true;
+        try {coach?.abort();await clearExercise();const old=durable;durable=null;old?.close();projectError=null;return durableState();}
+        finally {transitioning=false;}
+      }
+      if(action==='open' && b.projectFile===durable?.projectFile)return durableState();
+      let next:DurableProjectStore|undefined;
+      try {
+        if(action==='create' && b.locale!==undefined && !isLocale(b.locale))fail(400,'INVALID_LOCALE','Choose pl or en.');
+        next=action==='create'?DurableProjectStore.create(b.directory,b.name,b.locale??locale):DurableProjectStore.open(b.projectFile);
+        const saved=next.snapshot(),old=durable;
+        if(startup.core && saved.exercisePath===startup.core.workspace.rootPath)fail(409,'CLOSE_PROJECT_FIRST','Close the current project before opening another project with the same exercise.');
+        if(saved.exercisePath)await adoptExercise(saved.exercisePath,b.clientId,next,true);
+        else {
+          transitioning=true;
+          try {coach?.abort();await clearExercise();durable=next;locale=saved.locale;chat=saved.chat;}
+          finally {transitioning=false;}
+        }
+        old?.close();next=undefined;projectError=null;return durableState();
+      } finally {next?.close();}
+    });
+    respond(res,200,await operation.result);
+  }
+  function respondState():void {if(startup?.core)emit('DURABLE_PROJECT_STATE',durableState());}
+  async function adoptExercise(rootPath:string,clientId:string,desk:DurableProjectStore|null=durable,restore=false):Promise<ProjectV2> {
+          if(typeof rootPath!=='string'||path.resolve(rootPath).split(path.sep).some(p=>/^\.pair(?:coding|coach)$/i.test(p)))fail(403,'PROTECTED_PROJECT_PATH','Project metadata cannot be opened as an exercise.');
+          if(startup.core?.session.leaseClientId && startup.core.session.leaseClientId!==clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
+          if(transitioning) fail(409,'SESSION_TRANSITION','Project transition is already in progress.');
+          if(startup.core) {
+            binding!.mutations.assertNoPendingRuns();
+            if(controlPreparing || session.state.writeOwner!=='STUDENT')fail(409,'CONTROL_UNAVAILABLE','Przerwij pisanie trenera przed zmianą folderu.');
+            if([...(execution?.runner.list()??[]),...(runtimeExecution?.runner.list()??[])].some(run=>
+              ['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(run.status)))
+              fail(409,'RUN_IN_PROGRESS','Zatrzymaj bieżące wykonanie przed zmianą folderu.');
+          }
+          persistProject();
+          transitioning=true;
+          let next:RuntimeStartup|undefined, prepared:Awaited<ReturnType<typeof prepareBinding>>|undefined, adopted=false;
+          try {
+            // Reserve transition BEFORE awaiting construction/recovery. GET/snapshot refuses mixed bindings.
+            if(startup.core && path.resolve(rootPath)===startup.core.workspace.rootPath) {
+              session.claimLease(clientId); binding!.clients.bind(clientId,session.state.sessionId); transitioning=false; return await getProject(false);
+            }
+            next=await makeCore(rootPath);
+            const nextCore=requireRuntimeWorkspace(next);
+            const saved=desk?.snapshot();
+            if(restore && saved?.session)nextCore.session.restoreProgress({...saved.session,activeFilePath:saved.workspace.activePath});
+            else if(saved?.workspace.activePath && saved.exercisePath===nextCore.workspace.rootPath)nextCore.session.state.activeFilePath=saved.workspace.activePath;
+            // Open is NOT a settings SAVE. Its opening form is never authority or persisted.
+            nextCore.session.claimLease(clientId);
+            // Reject an unsafe/unaccounted old owner before the next binding can
+            // create runtime state (its config parent may be the old workspace).
+            await execution?.runner.stopAll();
+            await stopRuntimeForTransition();
+            prepared=await prepareBinding(nextCore,next,desk);
+            prepared.clients.bind(clientId,nextCore.session.state.sessionId);
+            if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
+            const nextChat=desk?.snapshot().chat??[];
+            // Commit durable metadata BEFORE adopting the prepared core. No await or fallible
+            // IO between this commit and swapping the authority references below.
+            desk?.commitExercise(nextCore.workspace.rootPath,nextChat,nextCore.session.getSession());
+            const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
+            startup=next;({workspace,session,gate}=nextCore);binding=prepared;controlPreparing=false;
+            ({ledger,proposalOutcomes}=makeLedgers());adopted=true;
+            previousLedger.retire();previousProposals.retire();
+            chat=nextChat;proposals=[];report=null;lastRun=null;facts.length=0;
+            if(desk){durable=desk;locale=desk.view().locale;}
+            // ONE global sequence, including project changes; never reuse old sequence numbers.
+            try {if(previous)await previous.dispose();else previousStartup.close();} catch { /* adopted authority is not rolled back */ }
+            binding.activate();
+            for(const [ws,p] of peers) {p.authenticated=false;p.handshakeGeneration=null;ws.close(1012,'Project changed; reconnect');}
+            transitioning=false;
+            return await getProject(false);
+          } finally {
+            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.stopAll();await prepared.dispose();}else next.close();}}
+            finally {transitioning=false;}
+          }
   }
   async function handleHttp(req:IncomingMessage,res:ServerResponse) {
     let requestId:string|null=null;
@@ -656,7 +810,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       if (!url.pathname.startsWith('/api/')) { serveStatic(url,res,req.method);return; }
       authorize(req);
       // UNBOUND keeps auth/static/bootstrap available, but never publishes a fictitious project/session.
-      if(url.pathname!=='/api/project/open') currentCore();
+      if(url.pathname.startsWith('/api/durable-project')) {await durableHttp(req,res,url);return;}
+      if(url.pathname!=='/api/project/open' && url.pathname!=='/api/folders') currentCore();
       if(req.method==='GET') {
         let value:unknown;
         if(url.pathname==='/api/project') {
@@ -668,7 +823,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         else if(url.pathname==='/api/folders') {
           if(url.searchParams.size>1 || (url.searchParams.size===1&&!url.searchParams.has('path')))
             fail(400,'VALIDATION_ERROR','Użyj wyłącznie parametru path albo katalogu startowego.');
-          value=await listFolders(url.searchParams.get('path')??path.dirname(workspace.rootPath));
+          value=await listFolders(url.searchParams.get('path')??(startup.core ? path.dirname(workspace.rootPath) : durable?.directory ?? process.env.USERPROFILE ?? process.env.HOME ?? process.cwd()));
         }
         else if(url.pathname==='/api/session') value=session.getSession();
         else if(url.pathname==='/api/file') value=workspace.getDocument(url.searchParams.get('path')||'');
@@ -734,48 +889,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(url.pathname!=='/api/project/open') session.assertClient(body.clientId,body.sessionId);
         if(transitioning && !stopMatch) fail(409,'SESSION_TRANSITION','Trwa bezpieczna zmiana sesji; zachowaj draft.');
         if(url.pathname==='/api/project/open') {
-          if(startup.core?.session.leaseClientId && startup.core.session.leaseClientId!==body.clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
-          if(transitioning) fail(409,'SESSION_TRANSITION','Project transition is already in progress.');
-          if(startup.core) {
-            binding!.mutations.assertNoPendingRuns();
-            if(controlPreparing || session.state.writeOwner!=='STUDENT')fail(409,'CONTROL_UNAVAILABLE','Przerwij pisanie trenera przed zmianą folderu.');
-            if([...(execution?.runner.list()??[]),...(runtimeExecution?.runner.list()??[])].some(run=>
-              ['QUEUED','RUNNING','STOPPING','PROCESS_STOP_UNCONFIRMED'].includes(run.status)))
-              fail(409,'RUN_IN_PROGRESS','Zatrzymaj bieżące wykonanie przed zmianą folderu.');
-          }
-          transitioning=true;
-          let next:RuntimeStartup|undefined, prepared:Awaited<ReturnType<typeof prepareBinding>>|undefined, adopted=false;
-          try {
-            // Reserve transition BEFORE awaiting construction/recovery. GET/snapshot refuses mixed bindings.
-            if(startup.core && path.resolve(body.rootPath)===startup.core.workspace.rootPath) {
-              session.claimLease(body.clientId); binding!.clients.bind(body.clientId,session.state.sessionId); transitioning=false; return await getProject(false);
-            }
-            next=await makeCore(body.rootPath);
-            const nextCore=requireRuntimeWorkspace(next);
-            // Open is NOT a settings SAVE. Its opening form is never authority or persisted.
-            nextCore.session.claimLease(body.clientId);
-            // Reject an unsafe/unaccounted old owner before the next binding can
-            // create runtime state (its config parent may be the old workspace).
-            await execution?.runner.stopAll();
-            await stopRuntimeForTransition();
-            prepared=await prepareBinding(nextCore,next);
-            prepared.clients.bind(body.clientId,nextCore.session.state.sessionId);
-            if(closing) fail(503,'SESSION_CLOSED','Server is closing; project was not adopted.');
-            const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
-            startup=next;({workspace,session,gate}=nextCore);binding=prepared;controlPreparing=false;
-            ({ledger,proposalOutcomes}=makeLedgers());adopted=true;
-            previousLedger.retire();previousProposals.retire();
-            chat=[];proposals=[];report=null;lastRun=null;facts.length=0;
-            // ONE global sequence, including project changes; never reuse old sequence numbers.
-            try {if(previous)await previous.dispose();else previousStartup.close();} catch { /* adopted authority is not rolled back */ }
-            binding.activate();
-            for(const [ws,p] of peers) {p.authenticated=false;p.handshakeGeneration=null;ws.close(1012,'Project changed; reconnect');}
-            transitioning=false;
-            return await getProject(false);
-          } finally {
-            try {if(!adopted && next){if(prepared){await prepared.execution?.runner.stopAll();await prepared.runtime?.stopAll();await prepared.dispose();}else next.close();}}
-            finally {transitioning=false;}
-          }
+          if(!durable && options.rootPath===undefined)fail(409,'DURABLE_PROJECT_REQUIRED','Create or open a training project before selecting an exercise.');
+          return adoptExercise(body.rootPath,body.clientId);
         }
         if(url.pathname==='/api/file') { await gate.mutateAsync({...body,actor:'STUDENT'});await snapshot();return getProject(false); }
         if(url.pathname==='/api/session/start') { const state=session.start(body.limitMs,body.pauseOnHidden);coach?.trigger('START');return clone(state); }
@@ -786,7 +901,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       });
       respond(res,route[1],await operation.result);
     } catch(error) {
-      if(!res.headersSent) respond(res,(error as any)?.status || 500,apiError(error,requestId)); else res.end();
+      if(!res.headersSent) {const problem=apiError(error,requestId);problem.message=localizeDiagnostic(problem.code+': '+problem.message,locale).replace(problem.code+': ','');respond(res,(error as any)?.status || 500,problem);} else res.end();
     }
   }
   function serveStatic(url:URL,res:ServerResponse,method?:string) {
@@ -970,7 +1085,8 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             // second model call before answering the actual question.
             if(workspace.settings.aiConsent && session.state.lifecycle==='READY')
               session.start(session.state.timer.limitMs,session.state.timer.pauseOnHidden);
-            const entry:ChatEntry={messageId:command.messageId,author:'STUDENT',text:p.text,createdAt:new Date().toISOString()};chat.push(entry);chat=chat.slice(-100);session.noteNewFact('CHAT');coach?.trigger('CHAT',entry);return null;
+            const entry:ChatEntry={messageId:command.messageId,author:'STUDENT',text:redactSecrets(p.text,[token,process.env.GEMINI_API_KEY||'']),createdAt:new Date().toISOString(),locale};
+            const nextChat=[...chat,entry];durable?.capture(nextChat,session.getSession());chat=durable?nextChat:nextChat.slice(-100);session.noteNewFact('CHAT');coach?.trigger('CHAT',entry);return null;
           }
           case 'PROPOSAL_REQUEST': {
             const stored=workspace.listSnapshots().find(s=>s.snapshotId===p.snapshotId);
@@ -1018,6 +1134,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     }
   }
   const heartbeat=setInterval(()=>{
+    if(durable)saveProjectVisible();
     for(const [ws,p] of peers) {if(!p.alive) {ws.terminate();continue;}p.alive=false;ws.ping();}
   },5000);heartbeat.unref();
   let listenPromise:Promise<number>|undefined, closePromise:Promise<void>|undefined, socketAttempt:Promise<void>|undefined;
@@ -1049,7 +1166,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
   };
   const close=():Promise<void> => {
     if(closePromise)return closePromise;
-    closing=true;clearInterval(heartbeat);
+    saveProjectVisible();closing=true;clearInterval(heartbeat);clearTimeout(projectSaveTimer);
     return closePromise=(async()=>{
       const result=await initialized;
       await socketAttempt?.catch(()=>{});
@@ -1058,7 +1175,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         await execution?.runner.stopAll();await stopRuntimeForTransition(false);
       } finally {
         try {if(binding)await binding.dispose();else if(!result.error)startup.close();} finally {
-          for(const [ws,p] of peers){p.authenticated=false;ws.terminate();}wss.close();
+          durable?.close();for(const [ws,p] of peers){p.authenticated=false;ws.terminate();}wss.close();
           if(server.listening)await new Promise<void>((resolve,reject)=>server.close(err=>err?reject(err):resolve()));
         }
       }

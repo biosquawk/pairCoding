@@ -19,6 +19,7 @@ export async function listFolders(directory: string): Promise<FolderListing> {
       throw new TransportError(409,'FOLDER_CHANGED','Folder zmienił się podczas odczytu. Wybierz go ponownie.');
     const parent=path.dirname(canonical);
     return {path:canonical,parent:parent===canonical?null:parent,
+      projectFiles:entries.filter(entry=>entry.isFile()&&!entry.isSymbolicLink()&&entry.name.endsWith('.paircoding.json')).sort((a,b)=>a.name.localeCompare(b.name)).map(entry=>({name:entry.name,path:path.join(canonical,entry.name)})),
       directories:entries.filter(entry=>entry.isDirectory()&&!entry.isSymbolicLink())
         .sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)
         .map(entry=>({name:entry.name,path:path.join(canonical,entry.name)}))};

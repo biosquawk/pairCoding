@@ -28,7 +28,7 @@ export interface CopyInputOptions {
 export const INPUT_LIMITS = Object.freeze({
   files:4096, directories:4096, depth:32, fileBytes:4*1024*1024, totalBytes:32*1024*1024
 });
-const excluded = (s: string) => /^(?:TEST-.+\.xml|junit(?:[-_.].*)?\.xml)$/i.test(s) || /^(\.git|\.gitignore|\.paircoach|\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.ssh|\.aws|\.azure|\.docker|\.config|\.kube|\.gnupg|\.credentials|credentials(?:\..*)?|secrets?(?:\..*)?|id_rsa|id_ed25519|node_modules|target|build|dist|coverage|reports?|test-results|surefire-reports|__pycache__|\.pytest_cache|\.mypy_cache|\.venv|venv|\.m2|\.cache|\.gradle|\.idea|\.vscode)$/i.test(s) || /\.(pem|key|p12|pfx|keystore|token|password|class|pyc|iml|ipr|iws|junit\.xml)$/i.test(s);
+const excluded = (s: string) => s.toLowerCase().endsWith('.paircoding.json') || /^(?:TEST-.+\.xml|junit(?:[-_.].*)?\.xml)$/i.test(s) || /^(\.git|\.gitignore|\.paircoach|\.paircoding|\.env(?:\..*)?|\.npmrc|\.pypirc|\.netrc|\.ssh|\.aws|\.azure|\.docker|\.config|\.kube|\.gnupg|\.credentials|credentials(?:\..*)?|secrets?(?:\..*)?|id_rsa|id_ed25519|node_modules|target|build|dist|coverage|reports?|test-results|surefire-reports|__pycache__|\.pytest_cache|\.mypy_cache|\.venv|venv|\.m2|\.cache|\.gradle|\.idea|\.vscode)$/i.test(s) || /\.(pem|key|p12|pfx|keystore|token|password|class|pyc|iml|ipr|iws|junit\.xml)$/i.test(s);
 interface Entry {
   path:string;
   sha256:string;

@@ -122,6 +122,18 @@ export class SessionController extends EventEmitter {
     return structuredClone(this.state);
   }
 
+  /** Restore learning progress, never an old lease, writer, epoch or in-flight operation. */
+  restoreProgress(saved: {lifecycle: Session['lifecycle']; timer: Session['timer']; activeFilePath: string | null}): void {
+    if (this.leaseClientId !== null || this.state.lifecycle !== 'READY') throw new AppError(409, 'SESSION_RESTORE_UNAVAILABLE', 'Restore before claiming a browser lease.');
+    this.elapsed = saved.timer.elapsedMs;
+    this.runningSince = null;
+    this.state.lifecycle = saved.lifecycle;
+    this.state.timer = {...saved.timer, manualPaused: saved.lifecycle === 'RUNNING' ? true : saved.timer.manualPaused, serverTime: new Date().toISOString()};
+    const path = saved.activeFilePath;
+    this.state.activeFilePath = path && this.workspace.listFiles().some(f => f.path === path && f.kind === 'FILE') ? path : null;
+    this.state.timer = this.computeTimer();
+  }
+
   start(limitMs: number | null, pauseOnHidden: boolean): Session {
     if (this.closed) throw new AppError(503, 'SESSION_CLOSED', 'Session is closed.');
     if (this.state.lifecycle !== 'READY') throw new AppError(409, 'SESSION_ALREADY_STARTED', 'Start requires a READY session.');

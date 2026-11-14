@@ -1,3 +1,4 @@
+import {isLocale,validProjectWorkspace,type DurableProjectState,type Locale,type ProjectWorkspace} from '../shared/durable-project';
 import { ServicePreparationV2 } from './ServicePreparationV2';
 import type { RunV2, SettingsV2, RunRequestV2, UpdateSettingsRequestV2 } from '../shared/runtime-v2';
 import type { MutationIdentity } from '../shared/runtime-mutation-v2';
@@ -90,6 +91,11 @@ export class LiveBackend {
   private latestPresence: WindowPresence | null = null;
   private connecting = false;
   private openingProject = false;
+  private shellAuthenticated=false;
+  private localeSwitching=false;
+  private localeGeneration=0;
+  private projectCommandPending=false;
+  private workspaceSaveGeneration=0;
   private stopped = false;
   private retries = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -328,6 +334,7 @@ export class LiveBackend {
     this.fetcher = options.fetch ?? globalThis.fetch.bind(globalThis);
     this.socketFactory = options.socket ?? (url => new WebSocket(url));
     this.storage = options.storage;
+    try {const saved=this.storage?.getItem('paircoach:locale');if(isLocale(saved))this.state.locale=saved;}catch { /* browser preference is not durable project state */ }
     const maintenanceKey=`paircoach:service-prepare:v1:${this.baseUrl}`;
     this.clientId = options.clientId ?? id();
     this.servicePreparation.initialize(this.storage,maintenanceKey,this.clientId,options.maintenanceIdentityError);
@@ -347,7 +354,7 @@ export class LiveBackend {
   private emit(event: string, value: any) { this.listeners.get(event)?.forEach(fn => fn(value)); }
   private publish() {
     this.state.runtime={...this.wiring.runtime.snapshot(),maintenance:this.servicePreparation.snapshot()};
-    this.state = { ...this.state, pendingPaths: [...this.saves.keys()], isOffline: !this.synced,
+    this.state = { ...this.state, pendingPaths: [...this.saves.keys()], isOffline: this.project ? !this.synced : !this.shellAuthenticated,
       writeOwner: !this.synced ? 'SYNCING' : this.vetoPending ? 'STUDENT' : this.preparing ? 'SYNCING' : this.session?.writeOwner ?? 'SYNCING' };
     this.emit('state', this.state);
   }
@@ -356,7 +363,7 @@ export class LiveBackend {
     if (this.finishAttempt && message !== this.finishAttempt.notice && message !== this.proposalDecision?.notice) this.finishAttempt.previousError = message;
     this.state.connectionError = message; this.publish();
   }
-  private key() { return `paircoach:draft:v3:${this.baseUrl}:${this.project?.rootPath}`; }
+  private key() { return `paircoach:draft:v3:${this.baseUrl}:${this.state.durableProject?.id??'legacy'}:${this.project?.rootPath}`; }
   private persist() {
     if (!this.project || !this.storage) return;
     try {
@@ -418,6 +425,11 @@ export class LiveBackend {
     try {
       if (!this.token) this.token = (await this.http<{ token: string }>('/dev/bootstrap', 'GET', undefined, false)).token;
       if (!this.token) throw new Error('Brak tokenu lokalnego serwera. Otwórz URL launchera lub uruchom backend.');
+      const metadata=await this.http<DurableProjectState>('/api/durable-project');
+      this.shellAuthenticated=true;
+      if(metadata.durableProject)this.acceptDurableState(metadata);
+      else {const selected=this.state.locale;this.acceptDurableState({...metadata,locale:selected});
+        if(metadata.locale!==selected)await this.http('/api/durable-project/locale','POST',{requestId:id(),clientId:this.clientId,sessionId:null,projectId:null,locale:selected});}
       const [project, session] = await Promise.all([this.http<ProjectSnapshot>('/api/project'), this.http<Wire.Session>('/api/session')]);
       if (this.stopped) return;
       if (this.session && this.session.sessionId !== session.sessionId) {
@@ -450,7 +462,10 @@ export class LiveBackend {
           : undefined;
         this.disconnected(problem);
       } };
-    } catch (error) { this.fail(error); this.disconnected(); }
+    } catch (error) {
+      if(error instanceof HttpRejectedError && error.code==='PROJECT_OPEN_REQUIRED'){this.installEmptyShell();this.state.connectionError=null;this.publish();}
+      else {this.shellAuthenticated=false;this.fail(error);this.disconnected();}
+    }
     finally { this.connecting = false; }
   }
   reconnect() { this.retries = 0; this.stopped = false; clearTimeout(this.reconnectTimer); this.resync(); }
@@ -640,7 +655,7 @@ export class LiveBackend {
       this.lastSeq=seq;this.projectState(bundle.project);this.sessionState(bundle.session);
       this.proposals=new Map(bundle.proposals.map(p=>[p.proposalId,p]));
       this.state.activeProposal=bundle.proposals[0]?mapProposal(bundle.proposals[0]):null;
-      this.state.chatEntries=bundle.chat.map(c=>({id:c.messageId,sender:c.author,message:c.text,timestamp:Date.parse(c.createdAt)}));
+      this.state.chatEntries=bundle.chat.map(c=>({id:c.messageId,sender:c.author,message:c.text,timestamp:Date.parse(c.createdAt),locale:c.locale}));
       this.state.activeRun=bundle.lastRun?mapRun(bundle.lastRun,null):null;
       this.state.report=bundle.report?mapReport(bundle.report):null;
       this.applyRuntimeProject(bundle.lastRun);this.publish();return;
@@ -676,7 +691,7 @@ export class LiveBackend {
     if (bundle.activeDocument?.path === this.state.activePath) this.installDocument(bundle.activeDocument, false);
     this.proposals = new Map(bundle.proposals.map(p => [p.proposalId, p]));
     this.state.activeProposal = bundle.proposals[0] ? mapProposal(bundle.proposals[0]) : null;
-    this.state.chatEntries = bundle.chat.map(c => ({ id: c.messageId, sender: c.author, message: c.text, timestamp: Date.parse(c.createdAt) }));
+    this.state.chatEntries = bundle.chat.map(c => ({ id: c.messageId, sender: c.author, message: c.text, timestamp: Date.parse(c.createdAt),locale:c.locale }));
     this.state.activeRun = bundle.lastRun ? mapRun(bundle.lastRun, null) : null;
     this.state.report = bundle.report ? mapReport(bundle.report) : null;
     this.pendingSteps.clear(); this.preparing = null; this.readySent = false;
@@ -749,6 +764,10 @@ export class LiveBackend {
     if (message.seq <= this.lastSeq) return; // duplicate never reapplies
     if (message.seq !== this.lastSeq + 1) { this.fail(new Error('Luka w sekwencji serwera. Wymagana synchronizacja.')); this.resync(); return; }
     this.lastSeq = message.seq;
+    if(['CHAT_REPLY','COACH_HINT_BUBBLE','COACH_POINTER','ACTION_PROPOSAL','COACH_STEP_EDIT','CONTROL_PREPARE'].includes(message.type)) {
+      const outputLocale=(message.payload as {locale?:Locale}).locale;
+      if(this.localeSwitching || outputLocale && outputLocale!==this.state.locale)return;
+    }
     if(message.type==='COMPLETE_RESULT'||message.type==='DIAGNOSTICS'||message.type==='LANGUAGE_STATUS') {
       if(!validateLanguageServerMessage(message)) throw new Error('Niepoprawna odpowiedź językowa V2.');
       this.wiring.receive(message); return;
@@ -808,14 +827,15 @@ export class LiveBackend {
         const p = message.payload;
         if (p.path && (this.documents.get(p.path)?.version !== p.documentVersion || this.saves.has(p.path))) break;
         this.state.activeHintBubble = { id: p.id, path: p.path ?? this.state.activePath, documentVersion: p.documentVersion ?? 0, line: p.range?.startLine ?? 1, text: p.text.slice(0, 400), severity: p.severity, createdAt: Date.now() };
-        this.state.chatEntries = [...this.state.chatEntries, { id: p.id, sender: 'COACH', message: p.text, timestamp: Date.now() }]; break;
+        this.state.chatEntries = [...this.state.chatEntries, { id: p.id, sender: 'COACH', message: p.text, timestamp: message.payload.createdAt ? Date.parse(message.payload.createdAt) : Date.now(),locale:message.payload.locale }]; break;
       }
       case 'ACTION_PROPOSAL': {
         this.proposals.set(message.payload.proposalId, message.payload);
         const proposal = mapProposal(message.payload); this.state.activeProposal = proposal;
         this.state.chatEntries = [...this.state.chatEntries, { id: proposal.id, sender: 'COACH', message: proposal.questionText, timestamp: Date.now(), proposal }]; break;
       }
-      case 'CHAT_REPLY': this.state.chatEntries = [...this.state.chatEntries, { id: message.messageId, sender: 'COACH', message: message.payload.text, timestamp: Date.now() }]; break;
+      case 'DURABLE_PROJECT_STATE': this.acceptDurableState(message.payload);break;
+      case 'CHAT_REPLY': this.state.chatEntries = [...this.state.chatEntries, { id: message.messageId, sender: 'COACH', message: message.payload.text, timestamp: message.payload.createdAt ? Date.parse(message.payload.createdAt) : Date.now(),locale:message.payload.locale }]; break;
       case 'RUN_STATE':
         if(!validateRunV2(message.payload)) { this.state.connectionError='Odrzucono wykonanie spoza kontraktu V2; bez uruchamiania na hoście.'; break; }
         if(this.project && this.session)this.latestRuntimeRun={run:structuredClone(message.payload),seq:message.seq,projectId:this.project.projectId,sessionId:this.session.sessionId};
@@ -831,7 +851,8 @@ export class LiveBackend {
       case 'SESSION_REPORT':
         if (message.payload.sessionId !== this.session?.sessionId) break;
         this.state.report = mapReport(message.payload); this.observeFinishReport(message.payload); break;
-      case 'ERROR': this.fail(new Error(`${message.payload.code}: ${message.payload.message}`)); break;
+      case 'ERROR':
+        if(message.payload.code==='PROJECT_SAVE_FAILED')this.state.projectError=message.payload.message; this.fail(new Error(`${message.payload.code}: ${message.payload.message}`)); break;
     }
     this.publish();
   }
@@ -1065,7 +1086,68 @@ export class LiveBackend {
       await new Promise(resolve => setTimeout(resolve, 20));
     }
   }
+  private acceptDurableState(value:DurableProjectState) {
+    this.state.durableProject=value.durableProject;this.state.locale=value.locale;this.state.projectError=value.projectError;
+    try {this.storage?.setItem('paircoach:locale',value.locale);}catch { /* server project is authoritative */ }
+  }
+  private installEmptyShell() {
+    const metadata:DurableProjectState={durableProject:this.state.durableProject,locale:this.state.locale,projectError:this.state.projectError};
+    const ws=this.ws;this.ws=null;ws?.close();
+    clearTimeout(this.reconnectTimer);clearTimeout(this.connectionTimer);clearInterval(this.tick);
+    this.wiring.invalidate('SCOPE');this.invalidateEditorView();this.languageScope=null;
+    this.project=null;this.session=null;this.synced=false;this.documents.clear();this.loadErrors.clear();this.selectedView=null;
+    this.selectionRequest++;this.generation++;this.lastSeq=0;this.preparing=null;this.pendingSteps.clear();this.proposals.clear();
+    this.helloSnapshot=null;this.recoveryKey='';this.state={...emptyLiveState(),...metadata};
+    this.publish();
+  }
+  private durableBody(extra:object={}) {return {requestId:id(),clientId:this.clientId,projectId:this.state.durableProject?.id??null,sessionId:this.session?.sessionId??null,...extra};}
+  private async projectCommand(action:'create'|'open'|'close',extra:object={}):Promise<boolean> {
+    if(this.projectCommandPending || this.openingProject)return false;
+    this.projectCommandPending=true;
+    const priorId=this.state.durableProject?.id,priorSession=this.session?.sessionId;
+    const current=()=>this.state.durableProject?.id===priorId && this.session?.sessionId===priorSession;
+    try {
+      if(!this.token)await this.connect();
+      const problem=this.folderOpenProblem();if(problem)throw Error(problem);
+      if(this.finishAttempt || this.finishStarting || this.proposalDecision || this.chatSending)throw Error('SESSION_TRANSITION: Settle the current operation first.');
+      if(this.project)await this.flushAll(current);
+      if(!current())throw Error('PROJECT_STATE_CHANGED');
+      const value=await this.http<DurableProjectState>('/api/durable-project/'+action,'POST',this.durableBody(extra));
+      this.acceptDurableState(value);this.installEmptyShell();this.state.connectionError=null;
+      if(value.durableProject?.exercisePath) {this.retries=0;void this.connect();}
+      this.publish();return true;
+    } catch(error) {this.state.projectError=error instanceof Error?error.message:String(error);this.publish();return false;}
+    finally {this.projectCommandPending=false;}
+  }
+  createDurableProject(directory:string,name:string) {return this.projectCommand('create',{directory,name,locale:this.state.locale});}
+  openDurableProject(projectFile:string) {return this.projectCommand('open',{projectFile});}
+  closeDurableProject() {return this.projectCommand('close');}
+  async saveProjectWorkspace(workspace:ProjectWorkspace):Promise<boolean> {
+    if(!validProjectWorkspace(workspace)||!this.state.durableProject||this.projectCommandPending||this.openingProject)return false;
+    const projectId=this.state.durableProject.id,sessionId=this.session?.sessionId,requestGeneration=++this.workspaceSaveGeneration,languageGeneration=this.localeGeneration;
+    try {
+      const value=await this.http<DurableProjectState>('/api/durable-project/workspace','POST',this.durableBody({workspace}));
+      if(this.state.durableProject?.id!==projectId||this.session?.sessionId!==sessionId||requestGeneration!==this.workspaceSaveGeneration)return false;
+      if(languageGeneration!==this.localeGeneration){value.locale=this.state.locale;if(value.durableProject)value.durableProject.locale=this.state.locale;}
+      this.acceptDurableState(value);this.publish();return true;
+    }catch(error){this.state.projectError=error instanceof Error?error.message:String(error);this.publish();return false;}
+  }
+  async setLocale(locale:Locale):Promise<boolean> {
+    if(!isLocale(locale))return false;
+    const priorLocale=this.state.locale;
+    const generation=++this.localeGeneration;
+    this.localeSwitching=true;this.state.locale=locale;this.state.activeHintBubble=null;this.state.activePointer=null;this.state.activeProposal=null;
+    this.pendingSteps.clear();this.wiring.invalidate('SCOPE');this.publish();
+    try {
+      if(!this.token)await this.connect();
+      const value=await this.http<DurableProjectState>('/api/durable-project/locale','POST',this.durableBody({locale}));
+      if(generation!==this.localeGeneration)return false;
+      this.acceptDurableState(value);this.state.projectError=null;return true;
+    }catch(error){if(generation===this.localeGeneration){this.state.locale=priorLocale;this.state.projectError=error instanceof Error?error.message:String(error);}return false;}
+    finally {if(generation===this.localeGeneration){this.localeSwitching=false;this.publish();}}
+  }
   folderOpenProblem(): string|null {
+    if(!this.project && this.shellAuthenticated && !this.stopped)return null;
     if(!this.synced || this.stopped)return 'Połącz się z backendem przed zmianą folderu.';
     if(this.preparing || this.session?.writeOwner!=='STUDENT')return 'Przerwij pisanie trenera przed zmianą folderu.';
     const runtime=this.wiring.runtime.snapshot();
@@ -1086,10 +1168,11 @@ export class LiveBackend {
     if(this.openingProject){this.fail(Error('Trwa otwieranie folderu. Poczekaj na wynik.'));return false;}
     this.openingProject=true;
     try {
+      if(!this.state.durableProject)throw Error('DURABLE_PROJECT_REQUIRED: Create or open a project first.');
       const problem=this.folderOpenProblem();if(problem)throw Error(problem);
       const projectId=this.project?.projectId,sessionId=this.session?.sessionId;
       const current=()=>this.project?.projectId===projectId&&this.session?.sessionId===sessionId;
-      await this.flushAll(current);
+      if(this.project)await this.flushAll(current);
       if(!current())throw Error('Projekt zmienił się podczas zapisu. Nie otwarto innego folderu.');
       const afterSave=this.folderOpenProblem();if(afterSave)throw Error(afterSave);
       // New folder means new consent and no inherited executable approval.
@@ -1098,6 +1181,7 @@ export class LiveBackend {
       this.invalidateEditorView();
       this.selectedView = null; this.selectionRequest++;
       this.generation++; this.lastSeq = 0; this.documents.clear(); this.loadErrors.clear(); this.state.fileConflict = null; this.state.activePath = '';
+      this.acceptDurableState(await this.http<DurableProjectState>('/api/durable-project'));
       this.projectState(project); this.reconnect(); return true;
     } catch (error) { this.fail(error); return false; }
     finally {this.openingProject=false;}
@@ -1222,7 +1306,7 @@ export class LiveBackend {
       if (!current() || this.saves.size || this.state.fileConflict) throw new Error('Kontekst uległ zmianie. Pytanie nie zostało wysłane.');
       const messageId = this.send('CHAT_MESSAGE', { text, path, documentVersion: path ? this.documents.get(path)!.version : null,
         selection: path ? this.editorView?.selection ?? null : null });
-      this.state.chatEntries = [...this.state.chatEntries, { id: messageId, sender: 'STUDENT', message: text, timestamp: Date.now() }]; this.publish();
+      this.state.chatEntries = [...this.state.chatEntries, { id: messageId, sender: 'STUDENT', message: text, timestamp: Date.now(),locale:this.state.locale }]; this.publish();
       return true;
     } catch (error) { this.fail(error); return false; }
     finally { this.chatSending = false; }

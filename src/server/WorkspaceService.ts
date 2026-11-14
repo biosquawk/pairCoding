@@ -20,7 +20,7 @@ const queuedRoots = new Map<string, number>(); // sync admission fence, includin
 const openWorkspaces = new Map<string, Set<WorkspaceService>>();
 const MAX_BYTES = 1048576;
 const MAX_FILES = 1000;
-const EXCLUDED = new Set(['.git', '.idea', '.vscode', '.gitignore', 'node_modules', 'target', '__pycache__', '.venv', 'dist', '.paircoach']);
+const EXCLUDED = new Set(['.git', '.idea', '.vscode', '.gitignore', 'node_modules', 'target', '__pycache__', '.venv', 'dist', '.paircoach', '.paircoding']);
 const TEMP_PREFIX = '.paircoach-write-';
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
 const lf = (value: string) => value.replace(/\r\n?/g, '\n');
@@ -150,7 +150,7 @@ export class WorkspaceService extends EventEmitter {
       const lower = component.toLowerCase();
       if (!component || component === '.' || component === '..' || /[. ]$/.test(component) ||
           /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(component) ||
-          EXCLUDED.has(lower) || /\.(iml|ipr|iws)$/.test(lower) || lower.startsWith(TEMP_PREFIX)) {
+          EXCLUDED.has(lower) || /\.(iml|ipr|iws)$/.test(lower) || lower.endsWith('.paircoding.json') || lower.startsWith(TEMP_PREFIX)) {
         throw new AppError(403, 'UNSAFE_PATH', 'Path is excluded, ambiguous, or a Windows device name.');
       }
       if (!missing) {

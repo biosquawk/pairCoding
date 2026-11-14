@@ -75,6 +75,8 @@ export async function createRuntimeStartup(options: {
   transport: Pick<DockerTransport, 'run'>;
   environment?: RuntimeEnvironment;
   explicitWorkspaceRoot?: string;
+  /** Product cold start exposes an empty shell even if config/env mentions an exercise. */
+  empty?: boolean;
   /** Only exact canonical project .paircoach is accepted; never another authority. */
   dataDir?: string;
 }): Promise<RuntimeStartup> {
@@ -101,6 +103,6 @@ export async function createRuntimeStartup(options: {
   // publish a fake session/bootstrap or select/create another project (including a temp one).
   else rootPath = null;
   // Unsafe explicit/env/config project paths refuse, never silently substitute another project.
-  const core = rootPath === null ? null : await createRuntimeWorkspace({ rootPath, dataDir:options.dataDir });
+  const core = options.empty || rootPath === null ? null : await createRuntimeWorkspace({ rootPath, dataDir:options.dataDir });
   return Object.freeze({ arguments: args, configuration, prepared, core, rootSource, close: () => core?.close() });
 }

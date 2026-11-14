@@ -34,6 +34,7 @@ export class ReportService {
   private closed = false;
   constructor(private options: {
     dataDir: string; projectId?: string; emit: (type: string, payload: unknown) => void;
+    locale?: () => 'pl'|'en';
     generate?: (facts: FrozenFacts, signal: AbortSignal) => Promise<string>;
   }) {
     mkdirSync(options.dataDir, { recursive: true, mode: 0o700 });
@@ -121,6 +122,13 @@ export class ReportService {
     this.options.emit('SESSION_REPORT', copy(entry.report));
     this.schedule(entry);
     return copy(entry.report);
+  }
+  cancelLocale(): void {
+    for (const entry of this.entries.values()) {
+      if (entry.report.status !== 'PENDING') continue;
+      entry.generation = undefined;entry.abort?.abort();
+      this.fail(entry, 'REPORT_LANGUAGE_CHANGED', this.options.locale?.()==='en' ? 'Report cancelled after language change. Retry in the selected language.' : 'Anulowano raport po zmianie języka. Ponów w wybranym języku.');
+    }
   }
   close(): void {
     if (this.closed) return;
@@ -289,6 +297,24 @@ export class ReportService {
     const steps = events.filter(e => e?.type === 'COACH_STEP_EDIT');
     const interventions = new Set(steps.map(e => e.payload?.interventionId).filter(Boolean));
     const vetoes = events.filter(e => e?.type === 'VETO_EXECUTED'); // request receipt alone is not an executed cutoff
+    if((this.options.locale?.() ?? f.locale)==='en') {
+      const lines=[
+        '# Attempt summary — local facts, no AI assessment','', '## Facts',
+        `End reason: ${{COMPLETED:'exercise completed',ABANDONED:'exercise abandoned',TIME_LIMIT_REVIEW:'time limit review'}[entry.report.reason]}.`,
+        `Final code state preserved (workspace version ${f.snapshot.workspaceVersion}).`,
+        `Session time: ${Math.floor(f.session.timer.elapsedMs/60000)} min ${Math.floor(f.session.timer.elapsedMs/1000)%60} s.`,
+        `Recorded AI interventions: ${interventions.size}; AI edit steps: ${steps.length}; veto events: ${vetoes.length}.`,
+        'These counts describe only the supplied journal; absent events do not prove independent work.',
+        ...f.runs.slice(0,30).map((r,i)=>`- Run ${i+1} (${r.mode==='RUN_TESTS'?'tests':'program'}): ${r.testOutcome==='PASSED'?'tests passed':r.testOutcome==='FAILED'?'tests failed':r.status}; test count: ${r.testCount??'not applicable'}${r.workspaceChangedDuringRun?'; source changed during execution':''}.`),
+        ...(f.runs.length?[]:['No recorded Runs — no evidence that tests passed.']),
+        '', '## Assessment and evidence limits',
+        f.aiConsent!==true ? 'AI report disabled: consent was not recorded for this attempt. This is a local facts summary.' : 'AI report unavailable: no report provider is configured. This is a local facts summary.',
+        'Review completeness, complexity, psychological traits and independence were not assessed. A passing result applies only to the specified Run; it did not finish the session automatically.',
+        '', '## One recommendation',
+        'Repeat the smallest part that required help independently, then verify it with an explicit Run.'
+      ];
+      return lines.join('\n');
+    }
     const lines = [
       '# Podsumowanie próby — lokalne fakty, bez oceny AI',
       '', '## Fakty',

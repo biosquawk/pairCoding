@@ -121,6 +121,7 @@ export interface Snapshot {
 }
 
 export interface Proposal {
+  locale?: import("./durable-project").Locale;
   proposalId: Id;
   kind: "RETRY_FROM_SNAPSHOT" | "RESTORE_SNAPSHOT" | "GENERATE_TESTS" | "FINISH_EXERCISE";
   questionText: string;
@@ -162,6 +163,7 @@ export interface Report {
 }
 
 export interface ChatEntry {
+  locale?: import("./durable-project").Locale;
   messageId: Id;
   author: "STUDENT" | "COACH" | "SYSTEM";
   text: string;

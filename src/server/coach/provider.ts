@@ -1,7 +1,7 @@
 import type { CoachContext } from './context';
-import { CodexCoachProvider } from './CodexProvider';
+import { CodexCoachProvider, type NativeCoachSessions } from './CodexProvider';
 import { COACH_DECISION_SCHEMA } from './schema';
-import { COACH_SYSTEM_PROMPT, COACH_CONVERSATION_RULES } from './prompt';
+import { COACH_SYSTEM_PROMPT, COACH_CONVERSATION_RULES, coachLocaleInstruction, DURABLE_COACH_RULES } from './prompt';
 
 export interface CoachProvider {
   readonly name: string;
@@ -32,7 +32,7 @@ export class GeminiCoachProvider implements CoachProvider {
       model: this.model,
       contents: JSON.stringify(context),
       config: {
-        systemInstruction: COACH_SYSTEM_PROMPT + COACH_CONVERSATION_RULES,
+        systemInstruction: COACH_SYSTEM_PROMPT + COACH_CONVERSATION_RULES + coachLocaleInstruction(context.locale) + DURABLE_COACH_RULES,
         responseMimeType: 'application/json',
         responseJsonSchema: COACH_DECISION_SCHEMA,
         abortSignal: signal,
@@ -44,9 +44,9 @@ export class GeminiCoachProvider implements CoachProvider {
   }
 }
 
-export function defaultCoachProvider(): CoachProvider {
+export function defaultCoachProvider(nativeSessions?:NativeCoachSessions): CoachProvider {
   const selected=process.env.PAIRCOACH_COACH_PROVIDER?.trim().toLowerCase();
-  if(selected==='codex')return new CodexCoachProvider();
+  if(selected==='codex')return new CodexCoachProvider(undefined,undefined,undefined,undefined,nativeSessions);
   if(selected&&selected!=='gemini')throw new Error('COACH_PROVIDER_UNSUPPORTED');
   return process.env.GEMINI_API_KEY ? new GeminiCoachProvider(process.env.GEMINI_API_KEY) : new LocalFallbackProvider();
 }

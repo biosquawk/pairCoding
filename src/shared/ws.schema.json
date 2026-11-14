@@ -681,6 +681,13 @@
         },
         "resetTimer": {
           "const": false
+        },
+        "locale": {
+          "type": "string",
+          "enum": [
+            "pl",
+            "en"
+          ]
         }
       },
       "required": [
@@ -932,6 +939,13 @@
     "ChatEntry": {
       "type": "object",
       "properties": {
+        "locale": {
+          "type": "string",
+          "enum": [
+            "pl",
+            "en"
+          ]
+        },
         "messageId": {
           "$ref": "#/$defs/Id"
         },
@@ -1014,7 +1028,7 @@
             "$ref": "#/$defs/ChatEntry"
           },
           "minItems": 0,
-          "maxItems": 100
+          "maxItems": 10000
         }
       },
       "required": [
@@ -2514,6 +2528,13 @@
               "type": "integer",
               "minimum": 0,
               "maximum": 9007199254740991
+            },
+            "locale": {
+              "type": "string",
+              "enum": [
+                "pl",
+                "en"
+              ]
             }
           },
           "required": [
@@ -2691,6 +2712,13 @@
             "contentHash": {
               "type": "string",
               "pattern": "^[a-f0-9]{64}$"
+            },
+            "locale": {
+              "type": "string",
+              "enum": [
+                "pl",
+                "en"
+              ]
             }
           },
           "required": [
@@ -2839,6 +2867,13 @@
             },
             "clear": {
               "type": "boolean"
+            },
+            "locale": {
+              "type": "string",
+              "enum": [
+                "pl",
+                "en"
+              ]
             }
           },
           "required": [
@@ -2939,6 +2974,17 @@
               },
               "minItems": 0,
               "maxItems": 20
+            },
+            "locale": {
+              "type": "string",
+              "enum": [
+                "pl",
+                "en"
+              ]
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           "required": [
@@ -3034,6 +3080,17 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 1200
+            },
+            "locale": {
+              "type": "string",
+              "enum": [
+                "pl",
+                "en"
+              ]
+            },
+            "createdAt": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           "required": [
@@ -3338,8 +3395,229 @@
         },
         {
           "$ref": "#/$defs/Server_ERROR"
+        },
+        {
+          "$ref": "#/$defs/Server_DURABLE_PROJECT_STATE"
         }
       ]
+    },
+    "Server_DURABLE_PROJECT_STATE": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "3.0"
+        },
+        "messageId": {
+          "$ref": "#/$defs/Id"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/Id"
+        },
+        "type": {
+          "const": "DURABLE_PROJECT_STATE"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991
+        },
+        "payload": {
+          "type": "object",
+          "properties": {
+            "durableProject": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "$ref": "#/$defs/Id"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "directory": {
+                      "type": "string"
+                    },
+                    "projectFile": {
+                      "type": "string"
+                    },
+                    "exercisePath": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "locale": {
+                      "enum": [
+                        "pl",
+                        "en"
+                      ]
+                    },
+                    "workspace": {
+                      "type": "object",
+                      "properties": {
+                        "openTabs": {
+                          "type": "array",
+                          "maxItems": 100,
+                          "uniqueItems": true,
+                          "items": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1024
+                          }
+                        },
+                        "activePath": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "sidebarTab": {
+                          "enum": [
+                            "files",
+                            "task",
+                            "chat",
+                            "environment"
+                          ]
+                        },
+                        "bottomTab": {
+                          "enum": [
+                            "console",
+                            "report"
+                          ]
+                        },
+                        "editorViews": {
+                          "type": "object",
+                          "maxProperties": 100,
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "position": {
+                                "type": "object",
+                                "properties": {
+                                  "lineNumber": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000.0
+                                  },
+                                  "column": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000.0
+                                  }
+                                },
+                                "required": [
+                                  "lineNumber",
+                                  "column"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "selection": {
+                                "type": "object",
+                                "properties": {
+                                  "startLineNumber": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000.0
+                                  },
+                                  "startColumn": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000.0
+                                  },
+                                  "endLineNumber": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000.0
+                                  },
+                                  "endColumn": {
+                                    "type": "integer",
+                                    "minimum": 1,
+                                    "maximum": 100000000.0
+                                  }
+                                },
+                                "required": [
+                                  "startLineNumber",
+                                  "startColumn",
+                                  "endLineNumber",
+                                  "endColumn"
+                                ],
+                                "additionalProperties": false
+                              },
+                              "scrollTop": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100000000.0
+                              },
+                              "scrollLeft": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 100000000.0
+                              }
+                            },
+                            "required": [
+                              "position",
+                              "selection",
+                              "scrollTop",
+                              "scrollLeft"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "openTabs",
+                        "activePath"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "name",
+                    "directory",
+                    "projectFile",
+                    "exercisePath",
+                    "locale",
+                    "workspace"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "locale": {
+              "enum": [
+                "pl",
+                "en"
+              ]
+            },
+            "projectError": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "durableProject",
+            "locale",
+            "projectError"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "messageId",
+        "sessionId",
+        "type",
+        "seq",
+        "payload"
+      ],
+      "additionalProperties": false
     }
   }
 }
