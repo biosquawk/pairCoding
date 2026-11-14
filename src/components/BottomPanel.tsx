@@ -34,8 +34,8 @@ function formatChatTimestamp(timestamp: number): string {
   const date = new Date(timestamp);
   if (!Number.isFinite(date.getTime())) return '';
   const twoDigits = (value: number) => String(value).padStart(2, '0');
-  return `${twoDigits(date.getFullYear() % 100)}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())} `
-    + `${twoDigits(date.getHours())}-${twoDigits(date.getMinutes())}-${twoDigits(date.getSeconds())}`;
+  return `${String(date.getFullYear()).padStart(4, '0')}-${twoDigits(date.getMonth() + 1)}-${twoDigits(date.getDate())} `
+    + `${twoDigits(date.getHours())}:${twoDigits(date.getMinutes())}`;
 }
 
 interface BottomPanelProps {
