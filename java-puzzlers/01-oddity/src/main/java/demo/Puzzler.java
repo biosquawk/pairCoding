@@ -8,7 +8,7 @@ public final class Puzzler {
 
     // Najpierw przewidź wynik bez uruchamiania demonstratora.
     public static String prediction() {
-        return "TODO";
+        return "TODO?";
     }
 
     public static void main(String[] args) {
