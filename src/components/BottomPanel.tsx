@@ -252,7 +252,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                           {isUser ? 'Ty' : 'Trener AI'}
                           {sentAt && <> <time dateTime={new Date(entry.timestamp).toISOString()}>({sentAt})</time></>}
                         </div>
-                        <div className="whitespace-pre-wrap">{entry.message}</div>
+                        <div className="pc-message-content whitespace-pre-wrap">{entry.message}</div>
 
                         {/* Proposal in Chat card */}
                         {entry.proposal && activeProposal && activeProposal.id === entry.proposal.id && (
@@ -260,7 +260,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                             <div className="font-semibold text-purple-300 text-xs mb-1">
                               Wymagana szybka decyzja:
                             </div>
-                            <div className="text-xs text-zinc-200 mb-2">{entry.proposal.questionText}</div>
+                            <div className="pc-message-content text-xs text-zinc-200 mb-2">{entry.proposal.questionText}</div>
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => onProposalResponse(entry.proposal!.id, true)}
@@ -293,7 +293,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
                   onKeyDown={handleKeyDown}
                   placeholder="Napisz do Trenera AI... (Shift+Enter dla nowej linii, w pełni zgodne z dyktowaniem Win+H)"
                   rows={1}
-                  className="flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-100 resize-none focus:outline-none focus:border-blue-500"
+                  className="pc-message-content flex-1 bg-zinc-900 border border-zinc-800 rounded px-3 py-2 text-xs text-zinc-100 resize-none focus:outline-none focus:border-blue-500"
                 />
                 <button
                   type="submit"
@@ -349,7 +349,7 @@ export const BottomPanel: React.FC<BottomPanelProps> = ({
               </div>
 
               {/* Logs Stream */}
-              <div className="flex-1 overflow-y-auto p-3 space-y-1 text-zinc-300">
+              <div className="pc-message-content flex-1 overflow-y-auto p-3 space-y-1 text-zinc-300">
                 {activeRun?.logs && activeRun.logs.length > 0 ? (
                   activeRun.logs.map((log) => (
                     <div

@@ -32,6 +32,7 @@ import {
 
 export interface EditorPanelProps {
   theme?: 'dark'|'light';
+  contentFontSize?: number;
   /** Optional wave1 injection; transport owner must provide the synchronous pre-CONTROL_PREPARE hook. */
   languageBinding?: EditorLanguageBinding;
   projectId: string;
@@ -59,6 +60,7 @@ export interface EditorPanelProps {
 
 export const EditorPanel: React.FC<EditorPanelProps> = ({
   theme='dark',
+  contentFontSize=13,
   projectId,
   languageBinding,
   files,
@@ -647,7 +649,7 @@ export const EditorPanel: React.FC<EditorPanelProps> = ({
               wordBasedSuggestions: 'off',
               minimap: { enabled: false },
               bracketPairColorization: { enabled: false },
-              fontSize: 13,
+              fontSize: contentFontSize,
               fontFamily: "'JetBrains Mono', 'Fira Code', 'Consolas', monospace",
               fontLigatures: true,
               lineNumbers: 'on',

@@ -99,3 +99,13 @@
 .monaco-editor .coach-pointer-line { background-color: var(--pc-pointer-background); border-left: 2px solid var(--pc-pointer-border); }
 .monaco-editor .coach-pointer-glyph { background-color: var(--pc-pointer-border); }
 ::selection { background: var(--pc-selection); color: var(--color-zinc-100); }
+
+/* Reading size affects document bodies only; menu, tabs and file tree stay fixed. */
+.pc-message-content,
+.safe-markdown,
+.safe-markdown .text-xs { font-size: calc(12px * var(--pc-reading-scale, 1)); }
+.safe-markdown .text-sm { font-size: calc(14px * var(--pc-reading-scale, 1)); }
+.safe-markdown .text-base { font-size: calc(16px * var(--pc-reading-scale, 1)); }
+.safe-markdown .text-xl { font-size: calc(20px * var(--pc-reading-scale, 1)); }
+.safe-markdown [class~="text-[11px]"] { font-size: calc(11px * var(--pc-reading-scale, 1)); }
+.safe-markdown [class~="text-[10px]"] { font-size: calc(10px * var(--pc-reading-scale, 1)); }

@@ -35,6 +35,17 @@ export default function App() {
     try {return window.localStorage.getItem('paircoach:theme')==='light'?'light':'dark';}
     catch {return 'dark';}
   });
+  const [contentFontSize,setContentFontSize]=useState(()=>{
+    try {
+      const saved=window.localStorage.getItem('paircoach:content-font-size');
+      const size=saved===null?13:Number(saved);
+      return Number.isInteger(size) && size>=10 && size<=30 ? size : 13;
+    } catch {return 13;}
+  });
+  useLayoutEffect(()=>{
+    try {window.localStorage.setItem('paircoach:content-font-size',String(contentFontSize));}
+    catch { /* Reading controls remain usable without storage. */ }
+  },[contentFontSize]);
   useLayoutEffect(()=>{
     document.documentElement.dataset.theme=theme;
     try {window.localStorage.setItem('paircoach:theme',theme);} catch { /* Appearance remains usable without storage. */ }
@@ -219,11 +230,15 @@ export default function App() {
   </div>;
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100">
+    <div className="flex flex-col h-screen w-screen overflow-hidden bg-zinc-950 font-sans text-zinc-100"
+      style={{'--pc-reading-scale':contentFontSize/13} as React.CSSProperties}>
       {/* Top Header Bar */}
       <HeaderBar
         theme={theme}
         onToggleTheme={()=>setTheme(value=>value==='dark'?'light':'dark')}
+        contentFontSize={contentFontSize}
+        onDecreaseContentFont={()=>setContentFontSize(size=>Math.max(10,size-1))}
+        onIncreaseContentFont={()=>setContentFontSize(size=>Math.min(30,size+1))}
         writeOwner={state.writeOwner}
         coachMode={state.coachMode}
         aiStatus={state.aiStatus}
@@ -312,6 +327,7 @@ export default function App() {
           <div className="flex-1 min-h-0 overflow-hidden relative">
             <EditorPanel
               theme={theme}
+              contentFontSize={contentFontSize}
               projectId={state.scenario.id}
               languageBinding={client.getEditorLanguageBinding()}
               files={state.files}

@@ -36,6 +36,9 @@ import {
 
 interface HeaderBarProps {
   theme?: 'dark'|'light'; onToggleTheme?:()=>void;
+  contentFontSize?: number;
+  onDecreaseContentFont?: () => void;
+  onIncreaseContentFont?: () => void;
   writeOwner: WriteOwner;
   coachMode: CoachMode;
   aiStatus: AiStatus;
@@ -61,6 +64,7 @@ interface HeaderBarProps {
 
 export const HeaderBar: React.FC<HeaderBarProps> = ({
   theme='dark',onToggleTheme,
+  contentFontSize=13,onDecreaseContentFont,onIncreaseContentFont,
   writeOwner,
   coachMode,
   aiStatus,
@@ -283,6 +287,16 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
           <Sun className={`w-5 h-5 rounded-full p-0.5 ${theme==='light'?'bg-amber-400 text-zinc-950':'text-zinc-500'}`} />
           <Moon className={`w-5 h-5 rounded-full p-0.5 ${theme==='dark'?'bg-zinc-700 text-zinc-100':'text-zinc-500'}`} />
         </button>}
+        <div role="group" aria-label="Rozmiar czcionki treści" className="flex shrink-0 gap-1">
+          <button type="button" aria-label="Zmniejsz czcionkę treści"
+            title={`Zmniejsz czcionkę treści (obecnie ${contentFontSize} px w edytorze)`}
+            disabled={!onDecreaseContentFont || contentFontSize<=10} onClick={onDecreaseContentFont}
+            className="px-2 py-1 text-xs font-semibold rounded border border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed">A-</button>
+          <button type="button" aria-label="Zwiększ czcionkę treści"
+            title={`Zwiększ czcionkę treści (obecnie ${contentFontSize} px w edytorze)`}
+            disabled={!onIncreaseContentFont || contentFontSize>=30} onClick={onIncreaseContentFont}
+            className="px-2 py-1 text-xs font-semibold rounded border border-zinc-700 bg-zinc-900 text-zinc-200 hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed">A+</button>
+        </div>
         {/* Center: Session Timer */}
         <div className="ml-auto flex shrink-0 items-center gap-2 bg-zinc-900/90 px-2 py-1 rounded-md border border-zinc-800">
           <Clock className={`w-4 h-4 ${isOvertime ? 'text-rose-400 animate-pulse' : 'text-zinc-400'}`} />
