@@ -344,7 +344,7 @@ export const SessionPanel: React.FC<SessionPanelProps> = ({
                   ))
                 ) : (
                   <div className="text-zinc-600 italic py-4 text-center">
-                    {t("Brak danych wyjściowych konsoli. Kliknij \"▶ Run Main\" lub \"✔ Run Tests\" na górnym pasku, aby uruchomić program.")}{' '}</div>
+                    {t("Brak danych wyjściowych konsoli. Kliknij \"Uruchom\" lub \"Uruchom testy\" na górnym pasku, aby uruchomić program.")}{' '}</div>
                 )}
                 <div ref={consoleBottomRef} />
               </div>

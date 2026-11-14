@@ -4,6 +4,7 @@ import React from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {setUiLocale,t,problemText,stateText} from '../../src/i18n';
 import {SessionPanel} from '../../src/components/BottomPanel';
+import {HeaderBar} from '../../src/components/HeaderBar';
 import {FolderPicker} from '../../src/components/FolderPicker';
 import {RuntimeSettingsV2} from '../../src/components/RuntimeSettingsV2';
 
@@ -48,4 +49,27 @@ test('runtime settings empty and failure surfaces follow explicit locale',()=>{
   const html=renderToStaticMarkup(<RuntimeSettingsV2 open settings={null} expectedWorkspaceVersion={1} execution={null} connected={false} canSave={false} onSave={async()=>({ok:false,message:'not used'})} onClose={()=>{}}/>);
   assert.match(html,/Execution settings V2/);assert.match(html,/Old or unknown settings are unchanged/);assert.match(html,/Cancel — without saving/);
   setUiLocale('pl');
+});
+
+
+test('empty console instructions name the actual toolbar buttons in PL and EN; raw logs stay unchanged',()=>{
+  const header={writeOwner:'STUDENT',coachMode:'UNAVAILABLE',aiStatus:'OFF',sessionStatus:'STOPPED',elapsedMs:0,limitMs:0,pauseOnHidden:false,taskMode:'IMPLEMENTATION',capabilities:{canRunMain:true,canRunTests:true},executionStatus:'IDLE',isDevSimulatorOpen:false} as React.ComponentProps<typeof HeaderBar>;
+  try {
+    for(const locale of ['pl','en','pl'] as const){
+      setUiLocale(locale);
+      const toolbar=renderToStaticMarkup(<HeaderBar {...header} locale={locale}/>);
+      const empty=renderToStaticMarkup(<SessionPanel {...panel} activeTab="console"/>);
+      const labels=locale==='pl'?['Uruchom','Uruchom testy']:['Run Main','Run Tests'];
+      for(const label of labels){
+        assert.ok(toolbar.includes('>'+label+'</span>'),'actual toolbar label: '+label);
+        assert.ok(empty.includes('&quot;'+label+'&quot;'),'console instruction must name: '+label);
+      }
+      if(locale==='pl')assert.doesNotMatch(empty,/Run Main|Run Tests/);
+      const raw='RAW_OUTPUT Run Main Uruchom NIE_TLUMACZ';
+      const activeRun={logs:[{id:'raw',type:'STDOUT',text:raw}]} as NonNullable<React.ComponentProps<typeof SessionPanel>['activeRun']>;
+      const output=renderToStaticMarkup(<SessionPanel {...panel} activeTab="console" activeRun={activeRun}/>);
+      assert.ok(output.includes(raw));
+      assert.doesNotMatch(output,/Brak danych wyjściowych konsoli|No console output/);
+    }
+  }finally{setUiLocale('pl');}
 });

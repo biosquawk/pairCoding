@@ -33,7 +33,7 @@ export const uiMessages: Readonly<Record<string,string>> = {
   "Bieżący raport": "Current report",
   "Brak aktywnego procesu": "No active process",
   "Brak bezpiecznego szkicu migracji. Odczytaj go z ustawień projektu po połączeniu.": "No safe migration draft. Read it from project settings after connecting.",
-  "Brak danych wyjściowych konsoli. Kliknij \"▶ Run Main\" lub \"✔ Run Tests\" na górnym pasku, aby uruchomić program.": "No console output. Click \"▶ Run Main\" or \"✔ Run Tests\" in the toolbar to run the program.",
+  "Brak danych wyjściowych konsoli. Kliknij \"Uruchom\" lub \"Uruchom testy\" na górnym pasku, aby uruchomić program.": "No console output. Click \"Run Main\" or \"Run Tests\" in the toolbar to run the program.",
   "Brak miejsca nad kodem — wskazówka zadokowana. Kod pozostaje odsłonięty.": "No room above the code — hint docked. Code remains visible.",
   "Brak otwartego pliku. Wybierz plik z drzewa po lewej stronie.": "No file open. Select a file from the tree on the left.",
   "Brak podfolderów.": "No subfolders.",
