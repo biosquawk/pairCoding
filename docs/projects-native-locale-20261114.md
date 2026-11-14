@@ -21,7 +21,9 @@ an explicit trusted fixture/embedding seam; it is not automatic product startup.
    remember bounded operational notes, but cannot rewrite those rules.
 5. Close Project flushes acknowledged state and clears the editor/chat/runtime binding.
    Open the project again after a page/backend restart to restore its latest exercise,
-   tabs, original chat timestamps/languages, timer (paused on restore), and context.
+   tabs, original chat timestamps/languages, saved timer intent, and context.
+   A real manual pause stays paused; reopening does not invent a manual pause.
+   Clock/coaching still require valid current presence and the normal guards.
    Switching to another project referencing the currently open **same** exercise
    asks you to close the current project first: no bypass of the source owner's lease.
 6. PL/EN explicitly controls future AI output. It never infers language from task text,
@@ -98,7 +100,7 @@ cannot mutate notes/rules/native paths. The store is not a new database or recov
 framework. Preserve a complete project directory for backup; restoring incompatible
 versions is an explicit operation, not an automatic destructive migration.
 
-## Actual native Codex continuity (real acceptance still required)
+## Actual native Codex continuity
 
 Official OpenAI documentation, fetched 2026-11-14:
 <https://developers.openai.com/codex/noninteractive/> documents
@@ -125,14 +127,32 @@ Quote paths correctly for your own shell; do not execute concatenated untrusted 
 Native account session journals remain in its private CODEX_HOME (not copied into the
 project). Credentials/auth.json and raw reasoning events are never stored on the desk.
 
-An argv/unit check does NOT establish native continuity. Final acceptance must really
-chat with configured Codex, save an invariant, switch exercises, close/restart/reopen,
-then resume the recorded ID from **another existing current directory** using its
-recorded --cd and the same private native store, after normal scratch cleanup.
-Verify that persona, invariant and selected language survive, and that Q does not
-inherit P. This real native/LIVE proof is deferred until the confirmed Terra test phase.
+An argv/unit check does NOT establish native continuity. Existing acceptance evidence
+is revision- and environment-specific, not a promise based on stored IDs:
 
-## Focused reproduction (after model gate)
+- ROOT resumed P's exact actual native ID after cleanup and backend restart from
+  `/tmp`, using the recorded stable `--cd` and the same private native store
+  (`native-resume-after-restart-c383.json`). The earlier CLI argument failure is retained.
+- On frozen host a72b5f9 (product-identical to source 016cac1; only a test differs),
+  VERIFY observed actual R PL→EN→PL replies, a true THINKING cancellation, reopen
+  and PL recall. ROOT's sanitized `r-native-turn-correlation-a72.json` matches all
+  four successful requests to one actual native ID; VERIFY and K matched their
+  message IDs/input hashes to GUI logs. The cancelled EN call is not claimed complete.
+- `p-r-context-isolation-a72.json` supports the first P→R request on the same exercise
+  with separate durable/native IDs and no protected P phrase in R's context. This is
+  trusted ROOT extraction, not K/VERIFY access to private journals, nor proof of every
+  timing/direction or a new literal-Q test. R is the authorized second-project proof;
+  historical Q limitations and old P English-response FAIL are retained.
+
+These artifacts are under the task's `SharedDesk/projectSpace/` root-host-proof;
+independent reports are under `SharedDesk/deliveries/_drafts/VERIFY/pc-projects-theme-locale-20261114/`.
+History/restart proof on c383 and manual-pause proof on 507 keep those revisions;
+they are not relabelled as new 016 executions. R recall may also use restored chat,
+so it does not isolate native-only memory. Old erroneous immutable language policy
+in unreleased P is not migrated or erased. Future native sessions use a neutral
+policy authorizing the app-controlled locale on each turn, without a new ID per language.
+
+## Focused reproduction
 
 Use Node >=22.22, existing deps and a writable test temp directory. No full historical
 `npm test` or unbounded coverage campaign is needed for these changed-path tests:
@@ -157,8 +177,35 @@ before releasing them. Existing local edits and veto remain available. A questio
 already waiting for editor ACK is invalidated by a language generation change.
 The client transport-fault tests cover rejection, disconnect **after commit**,
 failed/malformed readback, reconnect and concurrent flag clicks. These are authored
-tests, not a claim that the Terra-gated execution or real AI proof has occurred.
+tests; real AI acceptance is supported separately by the bounded evidence above.
 
-Final worker Quality Guard is a separate integrated-candidate phase: actual usage,
-audit(refresh coverage, sonar), inspect, claim; exact SHA, LCOV and real tool outcomes
-must be retained. No such run is claimed by this implementation checkpoint.
+## Final measurement outcome — not a quality PASS
+
+Workers entered the confirmed Terra/medium test phase. Existing focused 016 tests,
+typecheck/build and real host a72 GUI evidence remain distinct from Quality Guard.
+Final DEV audit on source 016 (build 34, sonar) is **BLOCKED**: two coverage-adapter
+exit-1 attempts (`gui-labels.test.tsx` not ACTIVE; tests_executed 0) plus three known
+parser SCAN_FAILED files: RuntimeExecutionLayout.ts, PairCoachClient.ts, paircoach.ts.
+Coverage is UNKNOWN and freshness/provenance MISSING. A separate manual bounded
+six-file run reports 61 PASS and 30.65% lines with 168-source inventory; it does not
+prove successful audit coverage or full-suite execution. Historical configuration
+bytes at audit time and cryptographic LCOV/run binding remain MISSING.
+
+The disclosed temporary tooling used absolute host Node and six selected test files
+instead of baseline 15; these are measurement-only deltas, not committed defaults
+or a permanent reduction of active tests. All 168 sources remain in inventory.
+The product retains portable `node` and the baseline test-selection policy.
+DEV's original inspect NOT_FOUND is retained. ROOT's actual host inspect found
+`src/server/http.ts` (OK lookup), but its unit is RED/evidence MISSING, not PASS.
+One ROOT operator claim returned no result for more than eight minutes and was
+stopped locally: **NO_RESULT_TIMEOUT**, no actual claim response, remote cancellation
+unconfirmed. Do not label that call PASSED or REJECTED. The attempt receipt is
+`root-host-proof/qg-final-claim-attempt-root.json`, not a fabricated raw claim.
+VERIFY independently reviews the available receipts in `QG-RO-016.md`.
+
+HUMAN ended costly measurement: no further scans/coverage/claims/recovery for this
+scope, and no whole-repository repair merely to turn the gate green. Functional
+acceptance is scoped and separate: Quality Guard is non-PASS and full Task 9 is not
+accepted. Earlier c383 results and all original failures remain historical evidence.
+This documentation does not claim publication, launch at 18120 or a completed
+Run/Stop/full-product acceptance; those remain outside these bounded proofs.
