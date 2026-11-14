@@ -130,6 +130,7 @@ const codeText:Record<string,readonly [string,string]> = {
   PROTECTED_PROJECT_PATH:['Metadane projektu są chronione i nie są folderem ćwiczenia.','Project metadata is protected and cannot be used as an exercise folder.'],
   CLOSE_PROJECT_FIRST:['Zamknij bieżący projekt przed otwarciem innego projektu z tym samym ćwiczeniem.','Close the current project before opening another project with the same exercise.'],
   INVALID_LOCALE:['Wybierz język pl lub en.','Choose pl or en.'],
+  LOCALE_SYNC_REQUIRED:['Język trenera nie jest potwierdzony. Połącz ponownie, aby zsynchronizować stan.','Coach language is unconfirmed. Reconnect to synchronize the state.'],
   SESSION_TRANSITION:['Trwa inna operacja projektu. Poczekaj na jej wynik.','Another project operation is in progress. Wait for its outcome.'],
   LEASE_CONFLICT:['Inna karta posiada sesję. Wróć do niej lub zamknij ją i połącz ponownie.','Another tab owns the session. Return to it or close it and reconnect.'],
   RUN_IN_PROGRESS:['Najpierw zatrzymaj i rozlicz bieżące wykonanie.','Stop and settle the current execution first.'],

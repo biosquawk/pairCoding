@@ -129,7 +129,8 @@ Use Node >=22.22, existing deps and a writable test temp directory. No full hist
 
 ```sh
 node --import tsx --test tests/durable-projects/store.test.ts \
-  tests/durable-projects/native-args.test.ts tests/durable-projects/http.test.ts
+  tests/durable-projects/native-args.test.ts tests/durable-projects/http.test.ts \
+  tests/durable-projects/locale-client.test.ts
 ```
 
 Store tests use real FS/kernel leases. HTTP tests use real server/WS/WriteGate with an
@@ -137,6 +138,16 @@ injected AI provider and no Docker: they are explicitly not real AI or native re
 acceptance. Add scoped touched-path coach/WriteGate/runtime tests on the integrated
 candidate; old auto-open-config-only HTTP fixtures must now explicitly select a root
 or assert the new empty startup requirement, not revive withdrawn product behavior.
+
+Locale mutation is single-flight. A lost/rejected response triggers authenticated
+durable-state readback rather than assuming a rollback. If readback is unavailable
+or its locale is invalid, chat/start/resume/accepted proposals and project switching
+remain blocked with `LOCALE_SYNC_REQUIRED`; reconnect reads the authoritative locale
+before releasing them. Existing local edits and veto remain available. A question
+already waiting for editor ACK is invalidated by a language generation change.
+The client transport-fault tests cover rejection, disconnect **after commit**,
+failed/malformed readback, reconnect and concurrent flag clicks. These are authored
+tests, not a claim that the Terra-gated execution or real AI proof has occurred.
 
 Final worker Quality Guard is a separate integrated-candidate phase: actual usage,
 audit(refresh coverage, sonar), inspect, claim; exact SHA, LCOV and real tool outcomes

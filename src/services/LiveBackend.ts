@@ -93,6 +93,7 @@ export class LiveBackend {
   private openingProject = false;
   private shellAuthenticated=false;
   private localeSwitching=false;
+  private localeRequestPending=false;
   private localeGeneration=0;
   private projectCommandPending=false;
   private workspaceSaveGeneration=0;
@@ -415,6 +416,8 @@ export class LiveBackend {
     return { requestId, clientId: this.clientId, sessionId: this.session.sessionId, ...extra };
   }
   private send(type: string, payload: object, messageId: string = id()) {
+    if(this.localeSwitching && (type==='CHAT_MESSAGE' || type==='PROPOSAL_RESPONSE' || type==='TIMER_ACTION' && (payload as {action?:string}).action==='RESUME'))
+      throw Error('LOCALE_SYNC_REQUIRED: Reconnect to synchronize the coach language.');
     if (!this.session || this.ws?.readyState !== 1) throw new Error('Brak połączenia WebSocket. Draft pozostaje lokalny.');
     this.ws.send(JSON.stringify({ protocolVersion: '3.0', messageId, sessionId: this.session.sessionId, clientId: this.clientId, type, payload }));
     return messageId;
@@ -426,8 +429,10 @@ export class LiveBackend {
       if (!this.token) this.token = (await this.http<{ token: string }>('/dev/bootstrap', 'GET', undefined, false)).token;
       if (!this.token) throw new Error('Brak tokenu lokalnego serwera. Otwórz URL launchera lub uruchom backend.');
       const metadata=await this.http<DurableProjectState>('/api/durable-project');
+      if(!isLocale(metadata.locale))throw Error('INVALID_LOCALE');
       this.shellAuthenticated=true;
-      if(metadata.durableProject)this.acceptDurableState(metadata);
+      if(this.localeSwitching && !this.localeRequestPending) {this.acceptDurableState(metadata);this.localeSwitching=false;}
+      else if(metadata.durableProject)this.acceptDurableState(metadata);
       else {const selected=this.state.locale;this.acceptDurableState({...metadata,locale:selected});
         if(metadata.locale!==selected)await this.http('/api/durable-project/locale','POST',{requestId:id(),clientId:this.clientId,sessionId:null,projectId:null,locale:selected});}
       const [project, session] = await Promise.all([this.http<ProjectSnapshot>('/api/project'), this.http<Wire.Session>('/api/session')]);
@@ -1133,20 +1138,39 @@ export class LiveBackend {
     }catch(error){this.state.projectError=error instanceof Error?error.message:String(error);this.publish();return false;}
   }
   async setLocale(locale:Locale):Promise<boolean> {
-    if(!isLocale(locale))return false;
+    if(!isLocale(locale) || this.localeSwitching)return false;
     const priorLocale=this.state.locale;
     const generation=++this.localeGeneration;
+    let synchronized=false;
+    this.localeRequestPending=true;
     this.localeSwitching=true;this.state.locale=locale;this.state.activeHintBubble=null;this.state.activePointer=null;this.state.activeProposal=null;
     this.pendingSteps.clear();this.wiring.invalidate('SCOPE');this.publish();
     try {
       if(!this.token)await this.connect();
       const value=await this.http<DurableProjectState>('/api/durable-project/locale','POST',this.durableBody({locale}));
       if(generation!==this.localeGeneration)return false;
-      this.acceptDurableState(value);this.state.projectError=null;return true;
-    }catch(error){if(generation===this.localeGeneration){this.state.locale=priorLocale;this.state.projectError=error instanceof Error?error.message:String(error);}return false;}
-    finally {if(generation===this.localeGeneration){this.localeSwitching=false;this.publish();}}
+      if(!isLocale(value.locale))throw Error('INVALID_LOCALE');
+      this.acceptDurableState(value);synchronized=true;this.state.projectError=null;return true;
+    }catch(error){
+      if(generation!==this.localeGeneration)return false;
+      // A disconnected/unreadable POST may already have committed. Rollback alone
+      // is not evidence of the server locale. Read it before releasing coach calls.
+      try {
+        const value=await this.http<DurableProjectState>('/api/durable-project');
+        if(generation!==this.localeGeneration)return false;
+        if(!isLocale(value.locale))throw Error('INVALID_LOCALE');
+        this.acceptDurableState(value);synchronized=true;
+        this.state.projectError=error instanceof Error?error.message:String(error);
+      }catch {
+        this.state.locale=priorLocale;
+        this.state.projectError='LOCALE_SYNC_REQUIRED: Reconnect to synchronize the coach language.';
+      }
+      return false;
+    }
+    finally {if(generation===this.localeGeneration){this.localeRequestPending=false;this.localeSwitching=!synchronized;this.publish();}}
   }
   folderOpenProblem(): string|null {
+    if(this.localeSwitching)return 'LOCALE_SYNC_REQUIRED: Reconnect to synchronize the coach language.';
     if(!this.project && this.shellAuthenticated && !this.stopped)return null;
     if(!this.synced || this.stopped)return 'Połącz się z backendem przed zmianą folderu.';
     if(this.preparing || this.session?.writeOwner!=='STUDENT')return 'Przerwij pisanie trenera przed zmianą folderu.';
@@ -1200,6 +1224,7 @@ export class LiveBackend {
     } catch (error) { if (current()) this.fail(error); }
   }
   async startTimer() {
+    if(this.localeSwitching){this.fail(Error('LOCALE_SYNC_REQUIRED: Reconnect to synchronize the coach language.'));return;}
     try { this.sessionState(await this.http<Wire.Session>('/api/session/start', 'POST', this.commandBody({ limitMs: this.state.limitMs || null, pauseOnHidden: this.state.pauseOnHidden }))); this.publish(); } catch (error) { this.fail(error); }
   }
   private safeSend(type: string, payload: object) { try { this.send(type, payload); } catch (error) { this.fail(error); } }
@@ -1278,9 +1303,11 @@ export class LiveBackend {
   }
   async sendChatMessage(text: string): Promise<boolean> {
     if (this.chatSending || !text.trim()) return false;
+    if(this.localeSwitching){this.fail(Error('LOCALE_SYNC_REQUIRED: Reconnect to synchronize the coach language.'));return false;}
     this.chatSending = true;
     const scope = this.getEditorViewScope(), path = this.state.activePath || null;
-    const current = () => !!scope && scope === this.getEditorViewScope();
+    const localeGeneration=this.localeGeneration;
+    const current = () => !!scope && scope === this.getEditorViewScope() && !this.localeSwitching && localeGeneration===this.localeGeneration;
     try {
       if (!current()) throw new Error('Brak zsynchronizowanego połączenia. Pytanie nie zostało wysłane.');
       await this.flushAll(current);
@@ -1312,6 +1339,7 @@ export class LiveBackend {
     finally { this.chatSending = false; }
   }
   async respondToProposal(proposalId: string, accepted: boolean) {
+    if(accepted && this.localeSwitching){this.fail(Error('LOCALE_SYNC_REQUIRED: Reconnect to synchronize the coach language.'));return;}
     // Repeated/opposite clicks cannot replace an unresolved envelope or consent.
     if (this.proposalDecision) return this.proposalDecision.wait;
     const proposal = this.proposals.get(proposalId); if (!proposal) return;
