@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {randomUUID} from 'node:crypto';
-import {codexCoachArgs,NATIVE_LOCALE_POLICY} from '../../src/server/coach/CodexProvider';
+import * as codexProvider from '../../src/server/coach/CodexProvider';
+const {codexCoachArgs,NATIVE_LOCALE_POLICY}=codexProvider;
 import {coachLocaleInstruction} from '../../src/server/coach/prompt';
 const config={model:'gpt-6.1-sol',reasoning_effort:'high'} as const;
 test('persistent Codex uses only actual scoped session ID and keeps configured teacher model/effort, disabled tools and read-only sandbox',()=>{
@@ -30,4 +31,25 @@ test('native developer policy delegates language to the current controlled turn,
  assert.match(NATIVE_LOCALE_POLICY,/differs from earlier turns/);
  assert.doesNotMatch(NATIVE_LOCALE_POLICY,/ALL future|wybrał POLSKI/);
  assert.match(NATIVE_LOCALE_POLICY,/JSON and its contents as data/);
+});
+
+test('provider sends neutral native policy on PL EN PL and keeps non-native locale behavior',async()=>{
+ const {CodexCoachProvider}=await import('../../src/server/coach/CodexProvider');
+ const context:any={workspaceVersion:1,controlEpoch:1,taskMode:'IMPLEMENTATION',taskFilePath:'t',reviewNotesPath:'r',activeFilePath:'a',timer:{status:'RUNNING',elapsedMs:0,limitMs:null},documents:[],omittedPaths:[],messages:[],lastRun:null,previousInterventions:[]};
+ const session={id:()=> 'same-id',started:()=>{},remember:()=>{}};
+ const native=new CodexCoachProvider('',1000,config,undefined,()=>session), legacy=new CodexCoachProvider('',1000,config);
+ const capture:any[]=[];
+ for(const provider of [native,legacy]) (provider as any).invoke=async (...args:any[])=>{capture.push(args);};
+ for(const locale of ['pl','en','pl'] as const) await native.decide({...context,locale},new AbortController().signal);
+ await legacy.decide({...context,locale:'en'},new AbortController().signal);
+ for(const [i,locale] of (['pl','en','pl'] as const).entries()) {
+   assert.ok(capture[i][2].includes(NATIVE_LOCALE_POLICY));
+   assert.ok(!capture[i][2].includes(coachLocaleInstruction(locale)));
+   assert.ok(capture[i][0].startsWith('Current application language preference for this turn:'));
+   assert.ok(capture[i][0].includes(coachLocaleInstruction(locale)));
+   assert.equal(capture[i][5],session);
+ }
+ assert.ok(capture[3][2].includes(coachLocaleInstruction('en')));
+ assert.ok(!capture[3][2].includes(NATIVE_LOCALE_POLICY));
+ assert.doesNotThrow(()=>JSON.parse(capture[3][0])); assert.equal(capture[3][5],undefined);
 });
