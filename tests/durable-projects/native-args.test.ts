@@ -17,3 +17,10 @@ test('explicit flag overrides persona and exercise language without rewriting hi
  assert.match(coachLocaleInstruction('en'),/MUST be in English/);assert.match(coachLocaleInstruction('pl'),/po polsku/);
  assert.match(coachLocaleInstruction('en'),/Do not translate code or historical/);
 });
+
+test('each native turn carries current locale outside untrusted project JSON, including resume and switches',async()=>{
+ const {nativeCoachTurn}=await import('../../src/server/coach/CodexProvider');
+ const data=JSON.stringify({locale:'en',messages:[{text:'bursztynowa wydra'}]});
+ const en=nativeCoachTurn(data,'en'); assert.match(en,/ALL future user-facing replies.*MUST be in English/); assert.ok(en.includes(data));
+ const pl=nativeCoachTurn(data,'pl'); assert.match(pl,/Wszystkie przyszłe odpowiedzi.*po polsku/); assert.doesNotMatch(pl,/MUST be in English/);assert.ok(pl.includes(data));
+});

@@ -164,3 +164,17 @@ test('coach and report subprocesses receive identical pinned config; API credent
     assert.equal(record.env.OPENAI_API_KEY,undefined);assert.equal(record.env.OPENAI_BASE_URL,undefined);
   }
 });
+
+test('native turns carry current explicit locale on fresh and exact-ID resume without rewriting project data',async t=>{
+  const f=await fake(t,`emit({type:'thread.started',thread_id:'11111111-1111-4111-8111-111111111111'});emit({type:'item.completed',item:{type:'agent_message',text:JSON.stringify({decision:{kind:'REPLY',text:'ok'},memoryNote:''})}});emit({type:'turn.completed'});`);
+  let sessionId:string|undefined;
+  const native={directory:f.rootPath,id:()=>sessionId,started:(id:string)=>{sessionId=id;},remember:()=>{}};
+  const provider=new CodexCoachProvider(path.join(f.base,'fake codex.cjs'),5000,undefined,undefined,()=>native);
+  for(const locale of ['en','pl','en'] as const){
+    await provider.decide({...context,locale},new AbortController().signal);
+    const r=await f.read();
+    assert.match(r.input,locale==='en'?/ALL future user-facing replies.*MUST be in English/:/Wszystkie przyszłe odpowiedzi.*po polsku/);
+    assert.ok(r.input.includes('Dlaczego suma jest błędna?'));
+    if(locale==='pl')assert.deepEqual(r.argv.slice(-3),['resume','11111111-1111-4111-8111-111111111111','-']);
+  }
+});
