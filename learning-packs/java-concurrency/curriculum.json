@@ -1,0 +1,26 @@
+{
+  "id": "java-concurrency",
+  "version": "v1",
+  "title": "Java — współbieżność BEGINNER · 30 minut (materiał autorski)",
+  "topics": [
+    {
+      "id": "concurrency",
+      "title": "Współbieżność: Java 5 → Java 21"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "01-executor-future",
+      "topicId": "concurrency",
+      "title": "1/5 · Odbierz wynik Future",
+      "difficulty": 1,
+      "estimatedMinutes": 6,
+      "exercisePath": "tasks/01-executor-future",
+      "sourceIds": [
+        "executor-future"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": true
+    }
+  ]
+}

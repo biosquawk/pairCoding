@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "id": "executor-future",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "Java — współbieżność w 30 minut, materiał autorski PairCoach",
+      "section": "1. Callable i Future (Java 5)",
+      "text": "Callable zwraca wartość lub zgłasza wyjątek. ExecutorService.submit zleca pracę puli i zwraca Future. get() czeka na jej wynik i propaguje niepowodzenie przez ExecutionException. Przykład innego obliczenia: Future<Integer> f = pool.submit(() -> 3 + 4); int suma = f.get(); Zamknij pulę, gdy skończysz."
+    }
+  ]
+}

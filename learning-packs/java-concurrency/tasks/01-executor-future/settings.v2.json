@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 2,
+  "taskFilePath": "challenge.md",
+  "taskMode": "IMPLEMENTATION",
+  "reviewNotesPath": "review.md",
+  "aiConsent": false,
+  "contextPatterns": [
+    "src/main/**/*.java",
+    "challenge.md"
+  ],
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.ConcurrencyExercise"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.ConcurrencyExerciseTest"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 120000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "JAVA_MAIN",
+          "className": "demo.ConcurrencyExercise"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.ConcurrencyExerciseTest"
+          ]
+        }
+      }
+    }
+  ]
+}
