@@ -157,8 +157,15 @@ paczki PASS. To odbiór tej funkcji na gałęzi feature, nie pełnego Zadania 9.
 lecz GUI nie jest bezbłędne. Niezależny finish: **13 PASS / 2 FAIL** — istniejące
 fixtures przełączenia folderu nie tworzą wymaganego trwałego projektu (test i guard
 identyczne względem bazy Task2 `2e0e52f`; wykonanie na bazie NOT_RUN).
-Końcowe asercje izolacji opóźnionych odpowiedzi nie zostały osiągnięte;
-ta granica nowej ścieżki przełączenia sprintu pozostaje niezweryfikowana.
+Końcowe asercje tych dwóch legacy testów nie zostały osiągnięte.
+Osobny nowy `tests/sprint/late-snapshots.test.ts` na rewizji
+`824d1fa8cb5b2e83842e83178b4672ad6e9a9c40`: **2 PASS / exit0 / 4,080 s**
+(jedno wykonanie Node na Linux). Rzeczywisty trwały projekt, HTTP/WS i
+`LiveBackend.sprintAction(harder)` A→B: opóźniony sukces/błąd transportu GET A
+nie publikuje stanu ani nie przenosi cache/błędu do B; bieżący GET B działa.
+To dowód tej wąskiej granicy, nie naprawa legacy fixtures ani pełny suite.
+Produkt/config/materiały pozostają identyczne z przetestowanym kodem d072783;
+nowy test i końcowe README nie wymagają powtórzenia GUI/build/12HTTP.
 TEST201: pierwotnie **14 PASS / 1 FAIL środowiska** (brak domyślnego Chromium);
 ten jeden przypadek osobno **1 PASS** z istniejącym Chromium i bibliotekami,
 bez zmiany testu. Opening/currentness **31 PASS**, AC-103 **66 PASS**.
