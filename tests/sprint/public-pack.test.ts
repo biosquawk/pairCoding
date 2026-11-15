@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
+import {once} from 'node:events';
 import {publicServerOptions} from '../../src/server/index';
 import {readLearningPack} from '../../src/server/sprint/LearningPack';
 
@@ -18,7 +19,6 @@ test('explicit invalid pack never silently starts a REST lesson',()=>{
 
 test('actual public npm start forwards explicit pack to HTTP, not only an unused config helper',{timeout:60_000},async t=>{
   const {spawn}=await import('node:child_process');
-  const {once}=await import('node:events');
   const net=await import('node:net');
   const fs=await import('node:fs');
   const path=await import('node:path');
