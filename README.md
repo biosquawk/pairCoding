@@ -141,13 +141,30 @@ To instrukcja obsługi kandydata, nie deklaracja zakończenia odbioru LIVE.
 Materiały `learning-packs/rest-spring/` są **autorskim opracowaniem PairCoach**:
 12 ćwiczeń / 5 tematów, nie import książki użytkownika. GUI dopuszcza wyłącznie
 zadania oznaczone jako sprawdzone HTTP; referencje nie trafiają do ćwiczenia/AI.
-**Stan odbioru kandydata:** końcowe9 par HTTP po korekcie oracle i jeden pełny
-TEST202≤300s na zintegrowanej rewizji są jeszcze PENDING; nie jest to deklaracja
-12/12 ani wydania. Pełna bramka jakości niezaliczona (audit BLOCKED / claim
-REJECTED), natywny Windows niepotwierdzony. Wcześniejszy celowany tail zachował
-raport mimo widocznego WORKSPACE_BUSY przy zapisie preferencji; końcowy odbiór
-sprawdza ten przypadek, nie ukrywa go. Operator po odbiorze uaktualni ten jeden
-zapis wyników oraz adres18130 dla finalnej instancji/paczki.
+**Wynik odbioru funkcji (2026-11-15):** przetestowany kod
+`d072783a1e59c8ac52e6752e2d78ad538bd6fbfe`, instancja operatora
+**http://127.0.0.1:18130/** (Ubuntu/WSL). Typecheck/build PASS;
+**MATERIAL12/12**: startery celowo FAIL, referencje PASS na tych samych testach HTTP.
+Pełny **TEST202 PASS, 190,675 s**: 15 kontroli GUI, trzy rzeczywiste Run w tym
+samym przygotowanym obrazie, edycja/ACK, A→B→A z zachowaniem kodu i historii,
+rzeczywisty Codex z bieżącym materiałem, reload i lokalny raport A+B.
+ZIP tej rewizji sprawdzono bajtowo względem Git/manifestu (809 plików,
+12 kompletów ćwiczeń i skill Banc, bez prywatnego stanu); 10 testów z rozpakowanej
+paczki PASS. To odbiór tej funkcji na gałęzi feature, nie pełnego Zadania 9.
+
+**Ograniczenia pozostają jawne:** podczas Finish wystąpił banner
+`WORKSPACE_BUSY` / HTTP409 zapisu preferencji; raport A+B powstał poprawnie,
+lecz GUI nie jest bezbłędne. Niezależny finish: **13 PASS / 2 FAIL** — istniejące
+fixtures przełączenia folderu nie tworzą wymaganego trwałego projektu (test i guard
+identyczne względem bazy Task2 `2e0e52f`; wykonanie na bazie NOT_RUN).
+Końcowe asercje izolacji opóźnionych odpowiedzi nie zostały osiągnięte;
+ta granica nowej ścieżki przełączenia sprintu pozostaje niezweryfikowana.
+TEST201: pierwotnie **14 PASS / 1 FAIL środowiska** (brak domyślnego Chromium);
+ten jeden przypadek osobno **1 PASS** z istniejącym Chromium i bibliotekami,
+bez zmiany testu. Opening/currentness **31 PASS**, AC-103 **66 PASS**.
+Pierwotny pełny GUI na starszej rewizji pozostaje INCOMPLETE; późniejszy PASS
+go nie nadpisuje. Pełna bramka jakości nadal **audit BLOCKED / claim REJECTED**;
+pełnego `npm test` ani natywnego Windows nie zweryfikowano w tym odbiorze.
 
 ## Trener AI i folder zadania
 
