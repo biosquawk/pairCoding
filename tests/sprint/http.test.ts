@@ -140,3 +140,60 @@ test('TEST201 explicit new on same folder keeps code, archives history, changes 
  await f.refresh();await f.connect();assert.equal(f.view.sprint!.status,'SUSPENDED');assert.equal(currentAttempt(f.view.sprint!).outcome,'INTERRUPTED');
  await f.command('resume');await f.connect();assert.equal(f.view.sprint!.status,'ACTIVE');assert.equal(f.app.workspace.rootPath,oldPath);
 });
+
+test('TEST201 no easier feedback survives response, GET, retry and reopen; fresh Run/action and stale PASS still refresh',async t=>{
+ const f=await fixture(t);await f.command('start',{topics:['http'],level:1,budgetMinutes:60});await f.connect();
+ const attempt=f.view.sprint!.activeAttemptId,count=f.view.sprint!.attempts.length;
+ const session=f.app.session.state.sessionId,source=fs.readFileSync(path.join(f.app.workspace.rootPath,'src/main/java/demo/ApiApplication.java'));
+ const feedback:NonNullable<SprintView['sprint']>['recommendation']={taskId:null,reason:'NO_EASIER_HINT_AVAILABLE'};
+ const {b,r}=await f.command('easier');
+ assert.deepEqual(r.body.sprint.recommendation,feedback,'POST must retain the explicit no-easier result');
+ assert.deepEqual(f.view.sprint!.recommendation,feedback,'GET must retain the same feedback');
+ assert.equal(f.view.sprint!.activeAttemptId,attempt);assert.equal(f.view.sprint!.attempts.length,count);
+ assert.equal(f.app.session.state.sessionId,session);assert.deepEqual(fs.readFileSync(path.join(f.app.workspace.rootPath,'src/main/java/demo/ApiApplication.java')),source);
+ const repeated=await f.req('POST','/api/durable-project/sprint',b);assert.equal(repeated.status,200);
+ assert.deepEqual(repeated.body.sprint.recommendation,feedback,'idempotent retry must not replace feedback');
+ const file=f.metadata.durableProject.projectFile;
+ await f.restart();await f.reopen(file);
+ assert.deepEqual(f.view.sprint!.recommendation,feedback,'durable reopen must retain feedback');
+ assert.equal(f.view.sprint!.activeAttemptId,attempt);assert.equal(f.view.sprint!.attempts.length,count);
+ const pass={runId:randomUUID(),mode:'RUN_TESTS',status:'SUCCEEDED',exitCode:0,workspaceVersionAtStart:f.app.workspace.workspaceVersion,
+  workspaceChangedDuringRun:false,testOutcome:'PASSED',testCount:1,outputTail:'',outputTruncated:false,startedAt:new Date().toISOString(),finishedAt:new Date().toISOString()};
+ // Trusted backend Run publication only; this HTTP regression does not execute Java/Docker.
+ f.ctx.emit('RUN_STATE',pass);await f.refresh();
+ assert.deepEqual(f.view.sprint!.recommendation,{taskId:'create-item',reason:'PASSED_NEXT'},'fresh Run supersedes no-candidate feedback');
+ assert.equal(f.view.sprint!.activeAttemptId,attempt);assert.equal(f.view.sprint!.attempts.length,count,'Run must not auto-switch tasks');
+ await f.command('selfAssess',{selfAssessment:5});assert.equal(f.view.sprint!.recommendation.reason,'HARDER');
+ await f.edit('package demo; // new untested version after the PASS\n');await f.refresh();
+ assert.deepEqual(f.view.sprint!.recommendation,{taskId:'create-item',reason:'AVAILABLE_IN_SELECTED_TOPICS'},'editing invalidates stale PASS recommendation');
+ await f.command('selfAssess',{selfAssessment:5},409);
+ const again=await f.command('easier');assert.deepEqual(again.r.body.sprint.recommendation,feedback);
+ f.ctx.emit('RUN_STATE',pass);await f.refresh();
+ assert.deepEqual(f.view.sprint!.recommendation,feedback,'duplicate old Run is not a new result/action');
+ await f.command('example');assert.notDeepEqual(f.view.sprint!.recommendation,feedback,'a new action refreshes the recommendation');
+ assert.equal(currentAttempt(f.view.sprint!).help,true);
+ await f.command('next');await f.connect();assert.equal(currentAttempt(f.view.sprint!).taskId,'create-item');
+ assert.equal(f.view.sprint!.attempts[0].outcome,'INTERRUPTED','stale PASS cannot mark old code TESTED/ASSISTED');
+});
+
+test('TEST201 exhausted deeper feedback survives response, GET and reopen; fresh Run and normal next still work',async t=>{
+ const f=await fixture(t);await f.command('start',{topics:['http','dto'],level:1,budgetMinutes:120});await f.connect();
+ for(const id of ['create-item','update-item']){
+  await f.command('deeper');await f.connect();assert.equal(currentAttempt(f.view.sprint!).taskId,id);
+ }
+ const attempt=f.view.sprint!.activeAttemptId,count=f.view.sprint!.attempts.length;
+ const session=f.app.session.state.sessionId,source=fs.readFileSync(path.join(f.app.workspace.rootPath,'src/main/java/demo/ApiApplication.java'));
+ const feedback:NonNullable<SprintView['sprint']>['recommendation']={taskId:null,reason:'NO_AVAILABLE_TASK'};
+ const {r}=await f.command('deeper');assert.deepEqual(r.body.sprint.recommendation,feedback,'deeper must not advertise a task from a different topic');
+ assert.deepEqual(f.view.sprint!.recommendation,feedback);assert.equal(f.view.sprint!.activeAttemptId,attempt);assert.equal(f.view.sprint!.attempts.length,count);
+ assert.equal(f.app.session.state.sessionId,session);assert.deepEqual(fs.readFileSync(path.join(f.app.workspace.rootPath,'src/main/java/demo/ApiApplication.java')),source);
+ const file=f.metadata.durableProject.projectFile;await f.restart();await f.reopen(file);
+ assert.deepEqual(f.view.sprint!.recommendation,feedback);assert.equal(f.view.sprint!.activeAttemptId,attempt);
+ f.ctx.emit('RUN_STATE',{runId:randomUUID(),mode:'RUN_TESTS',status:'FAILED',exitCode:1,workspaceVersionAtStart:f.app.workspace.workspaceVersion,
+  workspaceChangedDuringRun:false,testOutcome:'FAILED',testCount:1,outputTail:'',outputTruncated:false,startedAt:new Date().toISOString(),finishedAt:new Date().toISOString()});
+ await f.refresh();assert.deepEqual(f.view.sprint!.recommendation,{taskId:'validate-input',reason:'AVAILABLE_IN_SELECTED_TOPICS'},'new Run refreshes selection across selected topics');
+ assert.equal(f.view.sprint!.activeAttemptId,attempt);assert.equal(f.view.sprint!.attempts.length,count,'Run must not auto-switch tasks');
+ const exhausted=await f.command('deeper');assert.deepEqual(exhausted.r.body.sprint.recommendation,feedback);
+ await f.command('next');await f.connect();assert.equal(currentAttempt(f.view.sprint!).taskId,'validate-input','normal next still opens an available task');
+ assert.equal(f.view.sprint!.attempts.length,count+1);assert.equal(f.view.sprint!.attempts[count-1].outcome,'REVIEW');
+});

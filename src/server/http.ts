@@ -703,7 +703,9 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     const version=startup.core?.workspace.workspaceVersion??null;
     if(s && s.status==='ACTIVE' && sprintOwnsCurrent(s,pack)) {
       s.elapsedMs=Math.max(s.elapsedMs,session.getSession().timer.elapsedMs);
-      s.recommendation=selectTask(pack,s,'next',version);
+      // A read must not replace an explicit no-candidate result with a different action.
+      // Runs/actions refresh the persisted recommendation; live candidates still recheck stale code/time.
+      if(s.recommendation.taskId!==null)s.recommendation=selectTask(pack,s,'next',version);
     }
     return {pack,sprint:s,currentVersion:version};
   }
