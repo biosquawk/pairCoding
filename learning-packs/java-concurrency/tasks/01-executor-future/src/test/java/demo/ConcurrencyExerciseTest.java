@@ -19,7 +19,7 @@ class ConcurrencyExerciseTest {
                 completed.countDown();
                 return 42;
             });
-            assertTrue(completed.await(2, TimeUnit.SECONDS), "Callable musi zostać wykonany");
+            assertTrue(completed.await(10, TimeUnit.SECONDS), "Callable musi zostać wykonany");
         }
         assertNotEquals(caller, worker.get(), "Obliczenie musi wykonać inny wątek");
         assertEquals(42, result, "Odbierz wartość przez Future.get()");

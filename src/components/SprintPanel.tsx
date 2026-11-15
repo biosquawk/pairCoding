@@ -6,8 +6,9 @@ import {currentAttempt,type SprintView,type SprintAction} from '../shared/sprint
 export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientState}) {
   const en=state.locale==='en',text=(pl:string,english:string)=>en?english:pl;
   const [view,setView]=useState<SprintView|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
-  const [level,setLevel]=useState(1),[minutes,setMinutes]=useState(45),[topics,setTopics]=useState<string[]>(['http']);
+  const [level,setLevel]=useState(1),[minutes,setMinutes]=useState(45),[selectedTopics,setTopics]=useState<string[]|null>(null);
   const [more,setMore]=useState(false),[example,setExample]=useState(false),[startNew,setStartNew]=useState(false);
+  const topics=selectedTopics??view?.pack.topics.slice(0,1).map(topic=>topic.id)??[];
   const pending=useRef(false);
   useEffect(()=>{
     let current=true;
@@ -31,7 +32,7 @@ export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientS
     AVAILABLE_IN_SELECTED_TOPICS:text('Dobór z wybranych tematów','Selected topics'),START:text('Poziom startowy','Starting level')};
   return <section aria-label={text('Sprint nauki','Learning sprint')} className="p-2 text-xs border-b border-zinc-700 space-y-2">
     {!view?<p>{text('Wczytywanie sprintu…','Loading sprint…')}</p>:!s||startNew?<>
-      <strong>{text('Sprint REST / Spring (materiał autorski)','REST / Spring sprint (original material)')}</strong>
+      <strong>{view.pack.title}</strong>
       <label className="block">{text('Poziom','Level')} <select aria-label={text('Poziom startowy','Starting level')} value={level} onChange={e=>setLevel(Number(e.target.value))} className="bg-zinc-800">
         <option value={1}>{text('Początkujący','Beginner')}</option><option value={3}>{text('Średni','Intermediate')}</option><option value={5}>{text('Zaawansowany','Advanced')}</option></select></label>
       <label className="block">{text('Minuty','Minutes')} <input type="number" min={1} max={1440} value={minutes} onChange={e=>setMinutes(Number(e.target.value))} className="w-14 bg-zinc-800"/></label>
@@ -39,7 +40,7 @@ export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientS
         <input type="checkbox" checked={topics.includes(topic.id)} onChange={e=>setTopics(e.target.checked?[...topics,topic.id]:topics.filter(t=>t!==topic.id))}/>{topic.title}</label>)}</fieldset>
       <button disabled={busy||!topics.length} onClick={()=>void action(s?'new':'start',{level,budgetMinutes:minutes,topics})}>{text('Rozpocznij sprint','Start sprint')}</button>
       {s&&<button onClick={()=>setStartNew(false)}>{text('Anuluj','Cancel')}</button>}
-      <p>{text('Dostępne po sprawdzeniu HTTP:','HTTP-verified tasks:')} {view?.pack.tasks.filter(t=>t.ready).length}/{view?.pack.tasks.length}.</p>
+      <p>{text('Dostępne zadania:','Available tasks:')} {view?.pack.tasks.filter(t=>t.ready).length}/{view?.pack.tasks.length}.</p>
     </>:<>
       <strong>{task?.title}</strong>
       <p>{view.pack.topics.find(t=>t.id===task?.topicId)?.title} · {text('trudność','difficulty')} {task?.difficulty}/5 · {Math.max(0,Math.ceil(s.budgetMinutes-elapsed/60000))} min</p>

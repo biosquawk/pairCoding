@@ -1,5 +1,6 @@
 import { pathToFileURL } from 'node:url';
 import { createPairCoachServer } from './http';
+import {readLearningPack} from './sprint/LearningPack';
 export { createPairCoachServer } from './http';
 
 // WHATWG Fetch bad ports: https://fetch.spec.whatwg.org/#port-blocking.
@@ -25,8 +26,16 @@ export function parsePublicHttpPort(value: string | undefined): number {
   return port;
 }
 
+/** Startup-only pack selection. No catalog/hotswap or per-request environment lookup. */
+export function publicServerOptions(environment:NodeJS.ProcessEnv=process.env) {
+  const learningPackPath=environment.PAIRCOACH_LEARNING_PACK_PATH;
+  // An explicitly invalid/empty path is an error, never an implicit REST fallback.
+  if(learningPackPath!==undefined)readLearningPack(learningPackPath);
+  return {port:parsePublicHttpPort(environment.PAIRCOACH_HTTP_PORT),learningPackPath};
+}
+
 async function main() {
-  const app=createPairCoachServer({port:parsePublicHttpPort(process.env.PAIRCOACH_HTTP_PORT),enableCoach:true,enableExecution:true,runtimeArguments:process.argv.slice(2)});
+  const app=createPairCoachServer({...publicServerOptions(),enableCoach:true,enableExecution:true,runtimeArguments:process.argv.slice(2)});
   const port=await app.listen();
   console.log(`PairCoach: http://127.0.0.1:${port} (wyłącznie loopback; token nie jest logowany).`);
   let stopping=false;
