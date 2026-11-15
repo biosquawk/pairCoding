@@ -127,7 +127,7 @@
         "browser-collections"
       ],
       "kind": "BUGFIX",
-      "ready": false
+      "ready": true
     },
     {
       "id": "filter-items",
@@ -140,7 +140,7 @@
         "browser-collections"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "page-items",
