@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -27,16 +39,16 @@ class ApiContractTest {
     }
     @Test void domainConflictOverHttp() throws Exception {
         var ok = request("PUT","/items/1/name","{\"name\":\"alpha\"}");assertEquals(200,ok.statusCode());
-        assertEquals("{\"id\":1,\"name\":\"alpha\"}",ok.body());
+        assertJsonEquals("{\"id\":1,\"name\":\"alpha\"}",ok.body());
         var conflict = request("PUT","/items/1/name","{\"name\":\"tasks\"}");assertEquals(409,conflict.statusCode(),"Duplicate name is a conflict");
         assertTrue(conflict.headers().firstValue("Content-Type").orElse("").contains("application/json"));
-        assertEquals("{\"code\":\"DUPLICATE_NAME\"}",conflict.body());
-        assertEquals(ok.body(),request("GET","/items/1",null).body(),"Rejected conflict must not mutate state");
+        assertJsonEquals("{\"code\":\"DUPLICATE_NAME\"}",conflict.body());
+        assertJsonEquals(ok.body(),request("GET","/items/1",null).body(),"Rejected conflict must not mutate state");
         for (String body : List.of("{}","null","{\"name\":\" \"}")) {
             var bad = request("PUT","/items/1/name",body);assertEquals(400,bad.statusCode());
-            assertEquals(ok.body(),request("GET","/items/1",null).body());
+            assertJsonEquals(ok.body(),request("GET","/items/1",null).body());
         }
         assertEquals(200,request("PUT","/items/1/name","{\"name\":\"beta\"}").statusCode());
-        assertEquals("{\"id\":1,\"name\":\"beta\"}",request("GET","/items/1",null).body());
+        assertJsonEquals("{\"id\":1,\"name\":\"beta\"}",request("GET","/items/1",null).body());
     }
 }

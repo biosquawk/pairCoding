@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -29,8 +41,8 @@ class ApiContractTest {
         var ada = request("POST","/greetings","{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\"}");
         assertEquals(200,ada.statusCode());
         assertTrue(ada.headers().firstValue("Content-Type").orElse("").contains("application/json"));
-        assertEquals("{\"displayName\":\"Ada Lovelace\"}",ada.body(),"Response DTO must map firstName then lastName");
-        assertEquals("{\"displayName\":\"Grace Hopper\"}",request("POST","/greetings","{\"firstName\":\"Grace\",\"lastName\":\"Hopper\"}").body());
+        assertJsonEquals("{\"displayName\":\"Ada Lovelace\"}",ada.body(),"Response DTO must map firstName then lastName");
+        assertJsonEquals("{\"displayName\":\"Grace Hopper\"}",request("POST","/greetings","{\"firstName\":\"Grace\",\"lastName\":\"Hopper\"}").body());
         for (String body : List.of("{}","{\"firstName\":\"Ada\"}","{\"firstName\":\" \",\"lastName\":\"Lovelace\"}","not-json")) assertEquals(400,request("POST","/greetings",body).statusCode());
     }
 }

@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -29,9 +41,9 @@ class ApiContractTest {
         var first = request("GET","/items/1",null);assertEquals(200,first.statusCode());
         String tag = first.headers().firstValue("ETag").orElseThrow();assertEquals("\"1\"",tag);
         assertEquals(428,request("DELETE","/items/1",null).statusCode(),"DELETE must require the precondition before changing state");
-        assertEquals(first.body(),request("GET","/items/1",null).body());
+        assertJsonEquals(first.body(),request("GET","/items/1",null).body());
         assertEquals(412,request("DELETE","/items/1",null,"If-Match","\"stale\"").statusCode());
-        var unchanged = request("GET","/items/1",null);assertEquals(first.body(),unchanged.body());assertEquals(tag,unchanged.headers().firstValue("ETag").orElseThrow());
+        var unchanged = request("GET","/items/1",null);assertJsonEquals(first.body(),unchanged.body());assertEquals(tag,unchanged.headers().firstValue("ETag").orElseThrow());
         var futures = List.of(client.sendAsync(build("DELETE","/items/1",null,"If-Match",tag),HttpResponse.BodyHandlers.ofString()),client.sendAsync(build("DELETE","/items/1",null,"If-Match",tag),HttpResponse.BodyHandlers.ofString()));
         var a = futures.get(0).get(10,TimeUnit.SECONDS);var b = futures.get(1).get(10,TimeUnit.SECONDS);
         var statuses = new ArrayList<>(List.of(a.statusCode(),b.statusCode()));Collections.sort(statuses);assertEquals(List.of(204,404),statuses,"Only one concurrent conditional delete can win");

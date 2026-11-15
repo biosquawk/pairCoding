@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -30,7 +42,7 @@ class ApiContractTest {
             String body = "{\"name\":\"notes\",\"quantity\":"+quantity+"}";
             var r = request("POST","/orders",body); assertEquals(201,r.statusCode());
             assertEquals("/orders/1",r.headers().firstValue("Location").orElse(""));
-            assertEquals(body,r.body());
+            assertJsonEquals(body,r.body());
         }
         for (String body : List.of("{}","null","{\"name\":null,\"quantity\":1}","{\"name\":\" \",\"quantity\":1}","{\"name\":\"n\"}","{\"name\":\"n\",\"quantity\":null}","{\"name\":\"n\",\"quantity\":0}","{\"name\":\"n\",\"quantity\":-1}","{\"name\":\"n\",\"quantity\":101}","not-json"))
             assertEquals(400,request("POST","/orders",body).statusCode(),"Invalid input must be rejected: "+body);

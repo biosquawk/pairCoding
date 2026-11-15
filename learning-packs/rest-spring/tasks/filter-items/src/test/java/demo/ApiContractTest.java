@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -28,11 +40,11 @@ class ApiContractTest {
     @Test void filteredCollectionOverHttp() throws Exception {
         var all = request("GET","/items",null);assertEquals(200,all.statusCode());
         assertTrue(all.headers().firstValue("Content-Type").orElse("").contains("application/json"));
-        assertEquals("[{\"id\":1,\"name\":\"notes\"},{\"id\":2,\"name\":\"tasks\"}]",all.body());
-        assertEquals("[{\"id\":1,\"name\":\"notes\"}]",request("GET","/items?q=NOTE",null).body(),"Filter must be applied case-insensitively");
-        assertEquals("[{\"id\":2,\"name\":\"tasks\"}]",request("GET","/items?q=ask",null).body());
-        var empty = request("GET","/items?q=absent",null);assertEquals(200,empty.statusCode());assertEquals("[]",empty.body());
-        assertEquals(all.body(),request("GET","/items?q=",null).body());
-        assertEquals(all.body(),request("GET","/items",null).body(),"Filtering must not remove stored items");
+        assertJsonEquals("[{\"id\":1,\"name\":\"notes\"},{\"id\":2,\"name\":\"tasks\"}]",all.body());
+        assertJsonEquals("[{\"id\":1,\"name\":\"notes\"}]",request("GET","/items?q=NOTE",null).body(),"Filter must be applied case-insensitively");
+        assertJsonEquals("[{\"id\":2,\"name\":\"tasks\"}]",request("GET","/items?q=ask",null).body());
+        var empty = request("GET","/items?q=absent",null);assertEquals(200,empty.statusCode());assertJsonEquals("[]",empty.body());
+        assertJsonEquals(all.body(),request("GET","/items?q=",null).body());
+        assertJsonEquals(all.body(),request("GET","/items",null).body(),"Filtering must not remove stored items");
     }
 }

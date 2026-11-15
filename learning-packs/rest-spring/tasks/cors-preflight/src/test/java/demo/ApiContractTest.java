@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -33,7 +45,7 @@ class ApiContractTest {
         assertTrue(preflight.headers().firstValue("Access-Control-Allow-Headers").orElse("").toLowerCase(Locale.ROOT).contains("content-type"));
         var get = request("GET","/items/1",null,"Origin","https://student.example");assertEquals(200,get.statusCode());
         assertEquals("https://student.example",get.headers().firstValue("Access-Control-Allow-Origin").orElse(""));
-        assertEquals("{\"id\":1,\"name\":\"notes\"}",get.body());
+        assertJsonEquals("{\"id\":1,\"name\":\"notes\"}",get.body());
         for (var denied : List.of(request("OPTIONS","/items/1",null,"Origin","https://evil.example","Access-Control-Request-Method","GET"),request("OPTIONS","/items/1",null,"Origin","https://student.example","Access-Control-Request-Method","POST"),request("GET","/items/1",null,"Origin","https://evil.example"))) {
             assertEquals(403,denied.statusCode());assertTrue(denied.headers().firstValue("Access-Control-Allow-Origin").isEmpty());
         }

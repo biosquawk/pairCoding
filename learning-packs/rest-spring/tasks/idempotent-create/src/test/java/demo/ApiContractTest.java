@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -29,18 +41,18 @@ class ApiContractTest {
         String body = "{\"name\":\"alpha\"}";
         var first = request("POST","/items",body,"Idempotency-Key","a");assertEquals(201,first.statusCode());
         assertEquals("/items/1",first.headers().firstValue("Location").orElse(""));
-        assertEquals("{\"id\":1,\"name\":\"alpha\"}",first.body());
+        assertJsonEquals("{\"id\":1,\"name\":\"alpha\"}",first.body());
         var replay = request("POST","/items",body,"Idempotency-Key","a");assertEquals(201,replay.statusCode());
-        assertEquals(first.body(),replay.body(),"Same key and payload must replay the first item");
+        assertJsonEquals(first.body(),replay.body(),"Same key and payload must replay the first item");
         assertEquals(first.headers().firstValue("Location"),replay.headers().firstValue("Location"));
-        var conflict = request("POST","/items","{\"name\":\"other\"}","Idempotency-Key","a");assertEquals(409,conflict.statusCode());assertEquals("{\"code\":\"KEY_REUSED\"}",conflict.body());
-        assertEquals("["+first.body()+"]",request("GET","/items",null).body());
+        var conflict = request("POST","/items","{\"name\":\"other\"}","Idempotency-Key","a");assertEquals(409,conflict.statusCode());assertJsonEquals("{\"code\":\"KEY_REUSED\"}",conflict.body());
+        assertJsonEquals("["+first.body()+"]",request("GET","/items",null).body());
         var futures = List.of(client.sendAsync(build("POST","/items",body,"Idempotency-Key","b"),HttpResponse.BodyHandlers.ofString()),client.sendAsync(build("POST","/items",body,"Idempotency-Key","b"),HttpResponse.BodyHandlers.ofString()));
         var b1 = futures.get(0).get(10,TimeUnit.SECONDS);var b2 = futures.get(1).get(10,TimeUnit.SECONDS);
-        assertEquals(201,b1.statusCode());assertEquals(201,b2.statusCode());assertEquals(b1.body(),b2.body());
+        assertEquals(201,b1.statusCode());assertEquals(201,b2.statusCode());assertJsonEquals(b1.body(),b2.body());
         assertEquals("/items/2",b1.headers().firstValue("Location").orElse(""));
         assertEquals(b1.headers().firstValue("Location"),b2.headers().firstValue("Location"));
-        assertEquals("["+first.body()+","+b1.body()+"]",request("GET","/items",null).body());
+        assertJsonEquals("["+first.body()+","+b1.body()+"]",request("GET","/items",null).body());
         for (var bad : List.of(request("POST","/items",body),request("POST","/items","{}","Idempotency-Key","c"),request("POST","/items","not-json","Idempotency-Key","c"))) assertEquals(400,bad.statusCode());
         assertEquals("/items/3",request("POST","/items","{\"name\":\"gamma\"}","Idempotency-Key","c").headers().firstValue("Location").orElse(""));
     }

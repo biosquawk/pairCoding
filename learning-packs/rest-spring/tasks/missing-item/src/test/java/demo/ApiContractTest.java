@@ -1,5 +1,8 @@
 package demo;
 import java.net.URI;
+import tools.jackson.core.StreamReadFeature;
+import tools.jackson.databind.DeserializationFeature;
+import tools.jackson.databind.json.JsonMapper;
 import java.net.http.*;
 import java.util.*;
 import java.util.concurrent.*;
@@ -9,6 +12,15 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.context.ConfigurableApplicationContext;
 import static org.junit.jupiter.api.Assertions.*;
 class ApiContractTest {
+    static final JsonMapper JSON = JsonMapper.builder()
+        .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+        .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
+    static void assertJsonEquals(String expected, String actual) {
+        assertJsonEquals(expected, actual, "JSON response differs");
+    }
+    static void assertJsonEquals(String expected, String actual, String message) {
+        assertEquals(JSON.readTree(expected), JSON.readTree(actual), message);
+    }
     ConfigurableApplicationContext app;
     HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     String base;
@@ -27,13 +39,13 @@ class ApiContractTest {
     }
     @Test void missingResourceOverHttp() throws Exception {
         var known = request("GET","/items/1",null);assertEquals(200,known.statusCode());
-        assertEquals("{\"id\":1,\"name\":\"notes\"}",known.body());
+        assertJsonEquals("{\"id\":1,\"name\":\"notes\"}",known.body());
         for (long id : List.of(2L,99L,-1L)) {
             var r = request("GET","/items/"+id,null);assertEquals(404,r.statusCode(),"Absent resource must be 404, not a successful empty response");
             assertTrue(r.headers().firstValue("Content-Type").orElse("").contains("application/json"));
-            assertEquals("{\"code\":\"ITEM_NOT_FOUND\",\"id\":"+id+"}",r.body());
+            assertJsonEquals("{\"code\":\"ITEM_NOT_FOUND\",\"id\":"+id+"}",r.body());
             assertEquals(404,request("GET","/items/"+id,null).statusCode());
         }
-        assertEquals(known.body(),request("GET","/items/1",null).body());
+        assertJsonEquals(known.body(),request("GET","/items/1",null).body());
     }
 }
