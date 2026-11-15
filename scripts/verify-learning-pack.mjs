@@ -9,12 +9,24 @@ import {spawnSync} from 'node:child_process';
 import {XMLParser} from 'fast-xml-parser';
 import {encodeSpec} from './runtime-spec.mjs';
 const root=fileURLToPath(new URL('../learning-packs/rest-spring/',import.meta.url));
-const [mode,output,prepared]=process.argv.slice(2);
 const check=(v,m)=>{if(!v)throw Error(m);};
+export function selectTasks(pack, ids) {
+ check(typeof ids==='string'&&ids.length>0,'Explicit nonempty --ids comma-list required');
+ const names=ids.split(',');
+ check(names.every(id=>/^[a-z0-9][a-z0-9-]{0,63}$/.test(id)),'Empty or invalid task ID');
+ check(new Set(names).size===names.length,'Duplicate task ID');
+ return names.map(id=>{const task=pack.tasks.find(t=>t.id===id);check(task,'Unknown task ID: '+id);return task;});
+}
+export function main(args=process.argv.slice(2)) {
+const [mode,output,...rest]=args;
+const prepared=mode==='verify'?rest.shift():undefined;
+check(rest.length===0&&mode==='stage'||rest.length===2&&rest[0]==='--ids','Use stage ABS_NEW [--ids ID,...] or verify ABS_NEW ABS_PREPARED_JOB --ids ID,...');
 check(['stage','verify'].includes(mode)&&output&&path.isAbsolute(output),'Use stage ABS_NEW or verify ABS_NEW ABS_PREPARED_JOB');
+
+const pack=JSON.parse(fs.readFileSync(path.join(root,'curriculum.json'),'utf8'));
+const tasks=rest.length?selectTasks(pack,rest[1]):pack.tasks;
 check(!fs.existsSync(output),'Evidence/output already exists; preserve it, do not retry blindly.');
 fs.mkdirSync(output,{mode:0o700});
-const pack=JSON.parse(fs.readFileSync(path.join(root,'curriculum.json'),'utf8'));
 const sha=b=>createHash('sha256').update(b).digest('hex');
 const copy=(from,to)=>{
  fs.mkdirSync(to,{mode:0o755});
@@ -25,12 +37,12 @@ const copy=(from,to)=>{
  }
 };
 if(mode==='stage'){
- for(const task of pack.tasks){
+ for(const task of tasks){
   const to=path.join(output,task.id);copy(path.join(root,task.exercisePath),to);
   fs.mkdirSync(path.join(to,'.paircoach'),{mode:0o700});
   fs.copyFileSync(path.join(to,'settings.v2.json'),path.join(to,'.paircoach/settings.json'),fs.constants.COPYFILE_EXCL);
  }
- console.log(JSON.stringify({project:path.join(output,pack.tasks[0].id),profile:'java-maven-21',tasks:pack.tasks.map(t=>t.id)}));
+ console.log(JSON.stringify({project:path.join(output,tasks[0].id),profile:'java-maven-21',tasks:tasks.map(t=>t.id)}));
 } else {
  check(prepared&&path.isAbsolute(prepared),'Explicit prepared job required');
  const receipt=JSON.parse(fs.readFileSync(path.join(prepared,'receipt.json'),'utf8'));
@@ -66,7 +78,7 @@ if(mode==='stage'){
  };
  const run=(args)=>{const r=docker(args);check(!r.error&&!r.signal&&r.status===0,r.stderr||r.error?.message||'Docker command failed');return r.stdout;};
  const pomHash=sha(fs.readFileSync(path.join(root,pack.tasks[0].exercisePath,'pom.xml')));
- for(const task of pack.tasks){
+ for(const task of tasks){
   check(sha(fs.readFileSync(path.join(root,task.exercisePath,'pom.xml')))===pomHash,'Pack POM identity differs');
   const testSource=fs.readFileSync(path.join(root,task.exercisePath,'src/test/java/demo/ApiContractTest.java'));
   const pair=[];
@@ -82,7 +94,7 @@ if(mode==='stage'){
    const spec=encodeSpec({schemaVersion:1,family:'java-maven',release:21,preview:false,runId,manifestSha256:sha(testSource),mode:'RUN_TESTS',task:taskSpec,cache:'/cache/0'});
    active={id:null,name:label};fs.writeFileSync(path.join(dir,'container-intent.json'),JSON.stringify(active));
    const id=run(['create','--name',label,'--pull=never','--network=none','--label','paircoach.material='+label,'--user','10001:10001','--cap-drop=ALL','--security-opt=no-new-privileges','--read-only',
-    '--memory=2g','--cpus=2','--pids-limit=256','--tmpfs','/tmp:rw,nosuid,size=256m,mode=1777',
+    '--memory=2g','--cpus=2','--pids-limit=256','--log-driver=json-file','--log-opt=max-size=10m','--log-opt=max-file=3','--tmpfs','/tmp:rw,nosuid,size=256m,mode=1777',
     '--mount',`type=bind,source=${input},target=/input,readonly`,
     '--mount',`type=bind,source=${build},target=/workspace`,
     '--mount',`type=bind,source=${artifacts},target=/artifacts`,
@@ -99,11 +111,14 @@ if(mode==='stage'){
    check(counts.tests>0&&counts.skipped===0&&counts.errors===0,'Tests absent, skipped or infrastructure error; not an expected starter FAIL');
    check(variant==='starter'?state.State.ExitCode!==0&&counts.failures>0:state.State.ExitCode===0&&counts.failures===0,'Unexpected '+name+' outcome');
    pair.push({variant,containerId:id,exitCode:state.State.ExitCode,counts,testSha256:sha(testSource),
-    sourceSha256:sha(fs.readFileSync(path.join(input,'src/main/java/demo/ApiApplication.java'))),pomSha256:pomHash});
+    sourceSha256:sha(fs.readFileSync(path.join(input,'src/main/java/demo/ApiApplication.java'))),pomSha256:pomHash,settingsSha256:sha(fs.readFileSync(path.join(input,'settings.v2.json')))});
    run(['rm',id]);active=null; // Only proven terminal owned container; evidence already copied by dispatcher.
   }
-  results.push({taskId:task.id,pair});fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({imageId:receipt.imageId,prepared,results},null,2)+'\n');
+  results.push({taskId:task.id,pair});fs.writeFileSync(path.join(output,'results.json'),JSON.stringify({imageId:receipt.imageId,prepared,selectedTaskIds:tasks.map(t=>t.id),results},null,2)+'\n');
  }
  } finally {cleanup();process.off('SIGTERM',terminated);process.off('SIGINT',terminated);}
- console.log(JSON.stringify({MATERIAL:results.length+'/'+pack.tasks.length,results:path.join(output,'results.json')}));
+ console.log(JSON.stringify({MATERIAL:results.length+'/'+tasks.length,packTaskCount:pack.tasks.length,results:path.join(output,'results.json')}));
 }
+
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))main();

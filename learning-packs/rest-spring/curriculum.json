@@ -63,6 +63,32 @@
       ],
       "kind": "BUGFIX",
       "ready": true
+    },
+    {
+      "id": "map-dto",
+      "topicId": "dto",
+      "title": "Zmapuj wejście na DTO odpowiedzi",
+      "difficulty": 1,
+      "estimatedMinutes": 8,
+      "exercisePath": "tasks/map-dto",
+      "sourceIds": [
+        "dto-input"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "validate-input",
+      "topicId": "dto",
+      "title": "Waliduj wejście zamówienia",
+      "difficulty": 2,
+      "estimatedMinutes": 10,
+      "exercisePath": "tasks/validate-input",
+      "sourceIds": [
+        "dto-input"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
     }
   ]
 }

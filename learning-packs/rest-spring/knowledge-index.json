@@ -15,6 +15,14 @@
       "section": "5. Aktualizacja warunkowa",
       "text": "Klient może wysłać If-Match z otrzymaną wersją ETag. Serwer porównuje wersję i aktualizuje zasób atomowo. Nieaktualny If-Match oznacza 412 i nie zmienia danych. Sukces zwraca nowy ETag. Bez nagłówka wymaganego kontraktem odpowiedz 428.",
       "quote": "Nieaktualny If-Match oznacza 412 i nie zmienia danych."
+    },
+    {
+      "id": "dto-input",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "REST w praktyce — autorski warsztat PairCoach",
+      "section": "2. DTO i walidacja wejścia",
+      "text": "DTO oddziela kształt wejścia od odpowiedzi. Mapuj pola według znaczenia, nie ujawniaj wewnętrznych pól. Niepoprawny JSON daje 400. Sprawdź też brakujące i puste wartości oraz granice liczb; samo parsowanie JSON nie jest walidacją reguł domeny. Odrzucone wejście nie może utworzyć zasobu.",
+      "quote": "samo parsowanie JSON nie jest walidacją reguł domeny."
     }
   ]
 }
