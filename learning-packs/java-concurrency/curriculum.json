@@ -33,7 +33,7 @@
         "countdown-latch"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "03-completable-combine",
@@ -46,7 +46,7 @@
         "completable-combine"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "04-virtual-thread",
@@ -59,7 +59,7 @@
         "virtual-thread"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "05-virtual-executor",
@@ -72,7 +72,7 @@
         "virtual-executor"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     }
   ]
 }
