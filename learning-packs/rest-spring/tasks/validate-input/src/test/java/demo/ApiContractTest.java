@@ -44,7 +44,7 @@ class ApiContractTest {
             assertEquals("/orders/1",r.headers().firstValue("Location").orElse(""));
             assertJsonEquals(body,r.body());
         }
-        for (String body : List.of("{}","null","{\"name\":null,\"quantity\":1}","{\"name\":\" \",\"quantity\":1}","{\"name\":\"n\"}","{\"name\":\"n\",\"quantity\":null}","{\"name\":\"n\",\"quantity\":0}","{\"name\":\"n\",\"quantity\":-1}","{\"name\":\"n\",\"quantity\":101}","not-json"))
+        for (String body : List.of("{}","null","{\"name\":null,\"quantity\":1}","{\"name\":\" \",\"quantity\":1}","{\"name\":\"n\"}","{\"name\":\"n\",\"quantity\":null}","{\"name\":\"n\",\"quantity\":0}","{\"name\":\"n\",\"quantity\":-1}","{\"name\":\"n\",\"quantity\":101}","{\"name\":\"n\",\"quantity\":1.5}","not-json"))
             assertEquals(400,request("POST","/orders",body).statusCode(),"Invalid input must be rejected: "+body);
         assertEquals(201,request("POST","/orders","{\"name\":\"valid\",\"quantity\":2}").statusCode());
     }

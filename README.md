@@ -109,6 +109,46 @@ Po lewej są cztery zakładki: **Pliki projektu** (domyślna), **Zadanie**, **Cz
 [Szczegóły projektów, reguł i natywnego resume](docs/projects-native-locale-20261114.md).
 To instrukcja obsługi kandydata, nie deklaracja zakończenia odbioru LIVE.
 
+## Sprint REST / Spring — Banc Mentor (gałąź feature)
+
+1. Użyj gałęzi `feature/adaptive-interview-sprint`. Wymagany jest profil
+   **java-maven-21** w Dockerze; prepare i start wykonaj według
+   [istniejącej instrukcji](docs/windows-polyglot.md). Przy już przygotowanym
+   profilu użyj jego konfiguracji, bez kolejnego prepare. Nie instaluj JDK/Mavena
+   na hoście. Operator kandydata używa **http://127.0.0.1:18130/**; ten adres
+   nie zastępuje domyślnego portu8080 ani istniejącej instancji18120.
+2. Przed startem aplikacji ustaw `"character": "banc-mentor"` w
+   `paircoach.config.json`; profil zawiera własny skill `lesson-feedback`.
+   Pozostała konfiguracja trenera nie zmienia się. AI wymaga dotychczasowej
+   konfiguracji dostawcy i jawnej zgody w ustawieniach ćwiczenia; ręczna nauka
+   działa również bez tej zgody.
+3. **Utwórz projekt** w nowym, własnym folderze → **Zadanie** → **Sprint nauki**.
+   Wybierz poziom startowy, minuty i co najmniej jeden temat, następnie
+   **Rozpocznij sprint**. Sprint sam instaluje wybrane ćwiczenie w tym projekcie.
+   Edytuj, poczekaj na ACK zapisu i uruchom Test. Zamierzony FAIL startera jest
+   początkiem zadania, nie oceną umiejętności.
+4. **Dalej / Next** i **Łatwiejsze / Easier** wybierasz ręcznie: wynik testu
+   nie przełącza zadania automatycznie. Powrót do wcześniejszego zadania
+   zachowuje własny kod i historię; deklaracja „umiem” nie zastępuje PASSED.
+5. Zachowaj cały folder projektu: `NAZWA.paircoding.json`, kod w
+   `sprint-rest-spring-v1/tasks/<id>/` i stan/postęp w
+   `.pairCoding/codex/state.json`. Po ponownym otwarciu tego samego pliku
+   projektu wznów wstrzymaną pracę. **Zakończ** utrwala podsumowanie; panel
+   **Raport** pokazuje wynik i poprzednie raporty, zapisane lokalnie pod
+   `.pairCoding/codex/reports/<sessionId>/`. Dane te mogą zawierać Twój kod/czat;
+   nie publikuj ich razem z aplikacją.
+
+Materiały `learning-packs/rest-spring/` są **autorskim opracowaniem PairCoach**:
+12 ćwiczeń / 5 tematów, nie import książki użytkownika. GUI dopuszcza wyłącznie
+zadania oznaczone jako sprawdzone HTTP; referencje nie trafiają do ćwiczenia/AI.
+**Stan odbioru kandydata:** końcowe9 par HTTP po korekcie oracle i jeden pełny
+TEST202≤300s na zintegrowanej rewizji są jeszcze PENDING; nie jest to deklaracja
+12/12 ani wydania. Pełna bramka jakości niezaliczona (audit BLOCKED / claim
+REJECTED), natywny Windows niepotwierdzony. Wcześniejszy celowany tail zachował
+raport mimo widocznego WORKSPACE_BUSY przy zapisie preferencji; końcowy odbiór
+sprawdza ten przypadek, nie ukrywa go. Operator po odbiorze uaktualni ten jeden
+zapis wyników oraz adres18130 dla finalnej instancji/paczki.
+
 ## Trener AI i folder zadania
 
 Dostęp do AI wymaga konfiguracji dostawcy oraz zaznaczenia zgody w ustawieniach projektu w interfejsie.
