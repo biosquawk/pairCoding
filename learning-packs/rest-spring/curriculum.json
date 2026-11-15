@@ -75,7 +75,7 @@
         "dto-input"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "validate-input",
@@ -88,7 +88,7 @@
         "dto-input"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "missing-item",
