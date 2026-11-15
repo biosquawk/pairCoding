@@ -25,11 +25,11 @@ class ConcurrencyExerciseTest {
     @Test void stillSupportsCallableAndShutdown() throws Exception {
         var pool = ConcurrencyExercise.executor();
         try (pool) {
-            var value = pool.submit(() -> {
-                assertTrue(Thread.currentThread().isVirtual());
-                return -7;
-            });
-            assertEquals(-7, value.get(10, TimeUnit.SECONDS));
+            record Observation(boolean virtual, int value) {}
+            var value = pool.submit(() -> new Observation(Thread.currentThread().isVirtual(), -7));
+            var observed = value.get(10, TimeUnit.SECONDS);
+            assertTrue(observed.virtual(), "Rzeczywisty rodzaj wątku sprawdzamy po odebraniu wyniku");
+            assertEquals(-7, observed.value());
         }
         assertTrue(pool.isShutdown());
         assertThrows(RejectedExecutionException.class, () -> pool.submit(() -> 1));
