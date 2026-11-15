@@ -1,3 +1,4 @@
+import {localSprintReport,type SprintReportFacts} from './sprint/sprintFacts';
 import { createHash, randomUUID } from 'node:crypto';
 import { closeSync, existsSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync,
   readdirSync, realpathSync, renameSync, unlinkSync, writeFileSync, type BigIntStats } from 'node:fs';
@@ -293,6 +294,7 @@ export class ReportService {
   }
   private localReport(entry: Entry): string {
     const f = entry.facts;
+    if(f.sprint)return localSprintReport(f.sprint as SprintReportFacts,this.options.locale?.()??(f.locale==='en'?'en':'pl'));
     const events = f.events as { type?: string; payload?: { path?: string; interventionId?: string } }[];
     const steps = events.filter(e => e?.type === 'COACH_STEP_EDIT');
     const interventions = new Set(steps.map(e => e.payload?.interventionId).filter(Boolean));

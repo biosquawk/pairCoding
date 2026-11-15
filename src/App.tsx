@@ -5,6 +5,7 @@ import { t, problemText, useLocale, setUiLocale } from './i18n';
  */
 
 import type {ProjectWorkspace} from './shared/durable-project';
+import {SprintPanel} from './components/SprintPanel';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { client } from './services/PairCoachClient';
 import { observeWindowPresence } from './services/windowPresence';
@@ -458,6 +459,8 @@ export default function App() {
           <div role="tabpanel" id="sidebar-panel-environment" aria-labelledby="sidebar-tab-environment" hidden={sidebarTab!=='environment'} className="flex-1 min-h-0 overflow-y-auto p-2">{environmentDetails}</div>
           <div role="tabpanel" id={'sidebar-panel-'+(sidebarTab==='chat'?'chat':'task')} aria-labelledby={'sidebar-tab-'+(sidebarTab==='chat'?'chat':'task')}
             hidden={sidebarTab!=='task'&&sidebarTab!=='chat'} className="flex-1 min-h-0">
+            {sidebarTab==='task' && isLive && state.durableProject && <SprintPanel
+              key={state.durableProject.id} client={client} state={state} />}
             {sidebarTab==='task' && state.taskReadError && <div role="alert" className="p-2 text-xs text-amber-300">{t('Błąd pliku zadania')}: {problemText(state.taskReadError.message)}</div>}
             <SessionPanel key={state.durableProject?.id??'empty'} sidebar activeTab={sidebarTab==='chat'?'chat':'task'} taskContent={taskMarkdownContent}
               chatEntries={state.chatEntries} activeProposal={state.activeProposal} activeRun={null} report={null}

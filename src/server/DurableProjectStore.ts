@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import {validSprint,currentAttempt,type SprintState} from '../shared/sprint';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {ChatEntry, Session} from '../shared/protocol';
@@ -12,6 +13,7 @@ export interface SavedTrainingSession {
   lifecycle: Session['lifecycle']; timer: Session['timer']; activeFilePath: string | null;
 }
 interface State {
+  sprint?: SprintState;
   schemaVersion: 1; projectId: string; locale: Locale; exercisePath: string | null;
   workspace: ProjectWorkspace; chat: ChatEntry[]; session: SavedTrainingSession | null;
   transitions: {path: string; at: string}[];
@@ -98,6 +100,7 @@ export class DurableProjectStore {
       !Array.isArray(s.observations) || s.observations.length > 1000 || s.observations.some(o => !o || typeof o.kind !== 'string' || !Number.isFinite(Date.parse(o.at))) ||
       !s.nativeSessions || typeof s.nativeSessions !== 'object' || Array.isArray(s.nativeSessions) || Object.keys(s.nativeSessions).length > 50 || Object.values(s.nativeSessions).some(v => !uuid(v)))
       fail('PROJECT_STATE_INVALID', 'Invalid project state; preserve state.json and repair it before opening.');
+    if(s.sprint!==undefined && !validSprint(s.sprint))fail('PROJECT_SPRINT_INVALID','Invalid saved sprint; preserve state.json.');
     const saved = s.session;
     if (saved && (!['READY','RUNNING','FINISHED'].includes(saved.lifecycle) || !saved.timer || !Number.isSafeInteger(saved.timer.elapsedMs) || saved.timer.elapsedMs < 0 ||
       !(saved.timer.limitMs === null || Number.isSafeInteger(saved.timer.limitMs) && saved.timer.limitMs >= 1000 && saved.timer.limitMs <= 86400000) ||
@@ -123,7 +126,7 @@ export class DurableProjectStore {
     this.assertCurrent(); replaceRecord(this.file, bytes); this.digest = sha256(bytes!); this.state = next;
   }
   view(): DurableProject {return {id: this.manifest.id, name: this.manifest.name, directory: this.directory, projectFile: this.projectFile,
-    exercisePath: this.state.exercisePath, workspace: copy(this.state.workspace), locale: this.state.locale};}
+    exercisePath: this.state.exercisePath, workspace: copy(this.state.workspace), locale: this.state.locale, ...(this.state.sprint ? {sprint:copy(this.state.sprint)} : {})};}
   snapshot() {this.assertCurrent(); return copy(this.state);}
   setLocale(locale: Locale) {this.update(s => {s.locale = locale;});}
   setWorkspace(workspace: ProjectWorkspace) {if (!validProjectWorkspace(workspace)) fail('INVALID_PROJECT_WORKSPACE', 'Invalid tabs/active file.'); this.update(s => {s.workspace = copy(workspace);});}
@@ -132,13 +135,18 @@ export class DurableProjectStore {
     s.exercisePath = exercisePath; s.workspace = {openTabs: [], activePath: null}; s.session = null;
     s.transitions = [...s.transitions, {path: exercisePath, at: new Date().toISOString()}].slice(-1000);
   });}
-  commitExercise(exercisePath:string,chat:ChatEntry[],session:Session):void {this.update(s=>{
+  commitExercise(exercisePath:string,chat:ChatEntry[],session:Session,sprint?:SprintState):void {this.update(s=>{
     if(s.exercisePath!==exercisePath){s.exercisePath=exercisePath;s.workspace={openTabs:[],activePath:null};s.transitions=[...s.transitions,{path:exercisePath,at:new Date().toISOString()}].slice(-1000);}
+    if(sprint)s.sprint=copy(sprint);
+    else if(s.sprint?.status==='ACTIVE')s.sprint.status='SUSPENDED';
     s.chat=copy(chat);s.session={lifecycle:session.lifecycle,timer:copy(session.timer),activeFilePath:session.activeFilePath};
   });}
   capture(chat: ChatEntry[], session: Session | null, observations: State['observations'] = []) {this.update(s => {
     s.observations = [...s.observations,...copy(observations)].slice(-1000);
     s.chat = copy(chat);
+    // Same atomic project capture; no second per-keystroke sprint write/pack scan.
+    if(s.sprint?.status==='ACTIVE' && session && currentAttempt(s.sprint).sessionId===session.sessionId)
+      s.sprint.elapsedMs=Math.max(s.sprint.elapsedMs,session.timer.elapsedMs);
     for(const message of chat) {
       if(message.author!=='STUDENT' || s.rules.some(r=>r.sourceMessageId===message.messageId))continue;
       const match=/^(?:\/rule\s+|Project rule:\s*|Zasada projektu:\s*)([^\r\n][\s\S]{0,1999})$/i.exec(message.text.trim());

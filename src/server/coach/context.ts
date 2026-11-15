@@ -13,6 +13,7 @@ export interface ContextWorkspace {
 }
 export const ALLOWED_PROPOSAL_KINDS = ['RETRY_FROM_SNAPSHOT', 'RESTORE_SNAPSHOT', 'FINISH_EXERCISE'] as const;
 export interface CoachContext {
+  sprint?: import("../sprint/sprintFacts").SprintCoachContext;
   locale?: import("../../shared/durable-project").Locale;
   durableProject?: {projectId:string;rules:string[];notes:string[];transitions:unknown[];observations:unknown[]};
   availableSnapshots?: {snapshotId:string;label:string;workspaceVersion:number;paths:string[]}[];

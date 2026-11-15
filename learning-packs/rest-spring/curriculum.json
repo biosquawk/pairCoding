@@ -1,0 +1,68 @@
+{
+  "id": "rest-spring",
+  "version": "v1",
+  "title": "REST / Spring — autorski sprint",
+  "topics": [
+    {
+      "id": "http",
+      "title": "Metody HTTP i statusy"
+    },
+    {
+      "id": "dto",
+      "title": "DTO, JSON i wejście"
+    },
+    {
+      "id": "errors",
+      "title": "Obsługa błędów"
+    },
+    {
+      "id": "browser",
+      "title": "Przeglądarka, CORS i kolekcje"
+    },
+    {
+      "id": "concurrency",
+      "title": "Idempotentność i współbieżność"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "get-item",
+      "topicId": "http",
+      "title": "Odczytaj zasób przez GET",
+      "difficulty": 1,
+      "estimatedMinutes": 8,
+      "exercisePath": "tasks/get-item",
+      "sourceIds": [
+        "http-contract"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": true
+    },
+    {
+      "id": "create-item",
+      "topicId": "http",
+      "title": "Utwórz zasób przez POST",
+      "difficulty": 2,
+      "estimatedMinutes": 12,
+      "exercisePath": "tasks/create-item",
+      "sourceIds": [
+        "http-contract"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": true
+    },
+    {
+      "id": "update-item",
+      "topicId": "http",
+      "title": "Napraw aktualizację warunkową",
+      "difficulty": 4,
+      "estimatedMinutes": 15,
+      "exercisePath": "tasks/update-item",
+      "sourceIds": [
+        "conditional-update"
+      ],
+      "kind": "BUGFIX",
+      "ready": true
+    }
+  ]
+}

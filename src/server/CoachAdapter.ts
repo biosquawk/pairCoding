@@ -25,7 +25,7 @@ export interface CoachOptions {
   readContext?: <T>(read: () => T, signal: AbortSignal) => Promise<T>;
   sensitiveValues?: readonly string[];
   restoredMessages?: readonly ChatEntry[];
-  contextExtras?: () => Pick<CoachContext, 'locale'|'durableProject'>;
+  contextExtras?: () => Pick<CoachContext, 'locale'|'durableProject'|'sprint'>;
 }
 type Ready = { requestId: string; workspaceVersion: number; ready: boolean };
 type Rendered = { stepId: string; interventionId: string; documentVersion: number };
@@ -188,8 +188,10 @@ export class CoachAdapter {
       if (generation !== this.generation || !this.allowed() ||
           epoch !== this.options.session.getSession().controlEpoch || version !== this.options.workspace.workspaceVersion)
         throw new Error('COACH_CONTEXT_REVOKED');
-      return {...buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
+      const context={...buildContext(this.options.workspace, this.options.session.getSession(), this.messages,
         this.lastRun, this.interventions, this.sensitive, this.options.session.getEditorView()), ...this.options.contextExtras?.()};
+      if(context.sprint)context.allowedEvidenceIds=[...new Set([...(context.allowedEvidenceIds??[]),...context.sprint.sources.map(s=>s.id)])];
+      return context;
     };
   }
 
@@ -229,8 +231,13 @@ export class CoachAdapter {
           this.options.emit('COACH_POINTER', { id, path: decision.path, documentVersion: decision.documentVersion, range: decision.range, clear: false });
         }
         const { kind: _, showPointer: __, ...hint } = decision;
+        // Quotes are selected by the application from the exact admitted fragment, never reconstructed by the model.
+        const citations=context.sprint?.sources.filter(s=>decision.evidenceIds.includes(s.id)).map(s=>
+          s.sourceTitle+' / '+s.section+(s.quote?' — „'+s.quote+'”':''))??[];
+
         this.options.emit('COACH_HINT_BUBBLE', { id, ...hint, text: redactSecrets(hint.text, this.sensitive) });
         this.rememberReply(redactSecrets(hint.text, this.sensitive));
+        if(citations.length)this.options.emit('CHAT_REPLY',{replyTo:null,text:redactSecrets(citations.slice(0,2).join('\n'),this.sensitive)});
         await this.remember(decision.kind, decision.path, generation, signal);
         return;
       }
@@ -414,6 +421,10 @@ export class CoachAdapter {
     // No waiting for AI on veto path. SessionController has already invalidated epoch.
     if (!this.closed && this.options.session.getSession().aiStatus === 'THINKING') this.setStatus(this.options.workspace.settings.aiConsent ? 'READY' : 'OFF');
   }
+  resetAttempt():void {
+    this.abort();this.lastRun=null;this.interventions.length=0;this.fingerprints.clear();
+  }
+
   close(): void {
     if (this.closed) return;
     this.closed = true;

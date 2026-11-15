@@ -21,6 +21,7 @@ export interface DurableProject {
   exercisePath: string | null;
   workspace: ProjectWorkspace;
   locale: Locale;
+  sprint?: import("./sprint").SprintState;
 }
 export interface DurableProjectState {
   durableProject: DurableProject | null;

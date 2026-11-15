@@ -40,6 +40,10 @@ import { DurableMutationJournal } from './runtime-coordinator/MutationJournal';
 import { RuntimeRunMutation } from './runtime-coordinator/RuntimeRunMutation';
 import { RuntimeNetworkMaintenance, type RuntimeNetworkPrepareRequest } from './runtime-coordinator/RuntimeNetworkMaintenance';
 import { RuntimeClientOwnership } from './runtime-coordinator/RuntimeClientOwnership';
+import {sha256} from './runtime-coordinator/storage';
+import {readLearningPack,installLearningTask,learningTaskPath} from './sprint/LearningPack';
+import {sprintContext,sprintReportFacts} from './sprint/sprintFacts';
+import {selectTask,currentAttempt,closeAttempt,type SprintState,type SprintView,type SprintCommand} from '../shared/sprint';
 import type { ReconcileMutationRequestV2 } from '../shared/runtime-mutation-v2';
 
 /** Network AI receives structural Run facts, never local stdout/stderr or future Run fields. */
@@ -48,6 +52,7 @@ export type ReportAIFacts = Pick<FrozenFacts, 'session'|'snapshot'|'chat'|'event
   [key:string]: unknown;
 };
 export interface ServerOptions {
+  learningPackPath?:string;
   rootPath?: string; dataDir?: string; token?: string; port?: number;
   /** Programmatic options, not HTTP/config/env discovery surfaces. Production composition is index. */
   runtimeArguments?: readonly string[]; runtimeEnvironment?: RuntimeEnvironment;
@@ -76,6 +81,7 @@ export interface ServiceContext {
 export interface CoachService {
   trigger(reason: 'EDIT'|'CHAT'|'RUN'|'START'|'OVERTIME', message?: ChatEntry): void;
   updateRun?(run:Run):void;
+  resetAttempt?():void;
   controlReady(payload: any): void; stepRendered(payload: any): void; abort(): void; close(): void;
 }
 export interface ExecutionServices {
@@ -148,8 +154,10 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(['CHAT_REPLY','COACH_HINT_BUBBLE','COACH_POINTER','ACTION_PROPOSAL','COACH_STEP_EDIT','CONTROL_PREPARE'].includes(type))payload={...(payload as object),locale,...(['CHAT_REPLY','COACH_HINT_BUBBLE'].includes(type)?{createdAt:new Date().toISOString()}:{})};
     const message = envelope(type,payload,messageId), encoded = JSON.stringify(message);
     if (['COACH_STEP_EDIT','CONTROL_STATE'].includes(type)) facts.push(clone(message));
+    if(durable && type==='COACH_STEP_EDIT' && durable.snapshot().sprint && sprintOwnsCurrent(durable.snapshot().sprint!))durable.update(s=>{currentAttempt(s.sprint!).help=true;});
     if(durable && ['COACH_STEP_EDIT','RUN_STATE'].includes(type))observeProject(type,(payload as {path?:string}).path??null);
     if (type==='RUN_STATE') {
+      recordSprintRun(payload as Run);
       lastRun = clone(payload as Run);
       if (lastRun.finishedAt) facts.push({type:'RUN',run:clone(lastRun)});
     }
@@ -164,6 +172,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(type==='CONTROL_STATE' && session.state.writeOwner==='STUDENT')queueMicrotask(()=>{
       for(const [ws,peer] of peers)if(peer.readinessDeferred)refreshReadiness(ws);
     });
+    if(type==='RUN_STATE' && (payload as Run).finishedAt && durable?.snapshot().sprint)respondState();
     // Coach updates can publish more frames. Send this sequence before reentering emit.
     if (type==='RUN_STATE' && (payload as Run).finishedAt) {
       coach?.updateRun?.(clone(payload as Run));
@@ -493,7 +502,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         },generate:reportGenerator(),locale:()=>locale});
       }
       boundCoach=options.enableCoach ? (options.coachFactory?.(boundContext) ??
-        new CoachAdapter({...boundContext,provider:options.coachProvider ?? defaultCoachProvider(desk ? key=>desk.nativeSession(key) : undefined),restoredMessages:desk?.snapshot().chat,contextExtras:()=>({locale, ...(desk ? {durableProject:desk.coachContext()} : {})}),sensitiveValues:[token,process.env.GEMINI_API_KEY||'']})) : undefined;
+        new CoachAdapter({...boundContext,provider:options.coachProvider ?? defaultCoachProvider(desk ? key=>desk.nativeSession(key) : undefined),restoredMessages:desk?.snapshot().chat,contextExtras:()=>({locale, ...(desk ? {durableProject:desk.coachContext(),sprint:sprintContext(learningPack(),desk.snapshot().sprint,boundWorkspace.workspaceVersion)} : {})}),sensitiveValues:[token,process.env.GEMINI_API_KEY||'']})) : undefined;
       on(boundWorkspace,'external',(payload:unknown)=>{boundCoach?.abort();publish('EXTERNAL_FILE_SYNC',payload);publish('SESSION_STATE',boundSession.getSession());});
       on(boundSession,'state',()=>{publish('SESSION_STATE',boundSession.getSession());if(active) scheduleProjectSave();});
       on(boundWorkspace,'changed',(change:{actor?:string;path?:string})=>{if(active) {observeProject('EDIT_'+(change.actor??'UNKNOWN'),change.path??null);scheduleProjectSave();}});
@@ -552,7 +561,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           version:e.payload.version,workspaceVersion:e.payload.workspaceVersion}}];
         return [];
       });
-      const safe:ReportAIFacts={session:clone(frozen.session),snapshot:{...clone(frozen.snapshot),paths:frozen.snapshot.paths.filter(allowed)},
+      const safe:ReportAIFacts={...(frozen.sprint ? {sprint:clone(frozen.sprint)} : {}),session:clone(frozen.session),snapshot:{...clone(frozen.snapshot),paths:frozen.snapshot.paths.filter(allowed)},
         runs:frozen.runs.map(projectRunFacts),
         chat:clone(frozen.chat),events,aiConsent:true,
         taskMode:settings.taskMode,documents,omittedPaths,locale:reportLocale,systemPrompt:REPORT_SYSTEM_PROMPT+coachLocaleInstruction(reportLocale)};
@@ -641,8 +650,11 @@ export function createPairCoachServer(options: ServerOptions = {}) {
       // Persist the prospective closed state first; a storage error must not announce FINISHED.
       finalSession.lifecycle='FINISHED';finalSession.controlEpoch++;finalSession.writeOwner='STUDENT';
       finalSession.interventionId=null;finalSession.coachMode='UNAVAILABLE';finalSession.timer.status='STOPPED';
+      let frozenSprint;
+      const sprint=durable?.snapshot().sprint;
+      if(sprint && sprintOwnsCurrent(sprint)){closeAttempt(currentAttempt(sprint),workspace.workspaceVersion,'next');sprint.elapsedMs=finalSession.timer.elapsedMs;sprint.status='FINISHED';durable!.update(s=>{s.sprint=sprint;});frozenSprint=sprintReportFacts(learningPack(),sprint);}
       const frozen:FrozenFacts={session:finalSession,snapshot:clone(finalSnapshot),finalMaterial:clone(finalMaterial),
-        settings:clone(workspace.settings),aiConsent:workspace.settings.aiConsent,locale,
+        ...(frozenSprint?{sprint:frozenSprint}:{}),settings:clone(workspace.settings),aiConsent:workspace.settings.aiConsent,locale,
         runs:clone(execution?.runner.list() ?? runtimeExecution?.runner.list(session.state.sessionId) ?? []),chat:clone(chat),events:clone(facts)};
       persistingFinish=true;
       try { report=reports.finish(reason,frozen); } finally {persistingFinish=false;}
@@ -685,7 +697,136 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     ledger.retire();proposalOutcomes.retire();({ledger,proposalOutcomes}=makeLedgers());
     chat=[];proposals=[];report=null;lastRun=null;facts.length=0;controlPreparing=false;closePeers();
   }
+  const learningPack=()=>readLearningPack(options.learningPackPath);
+  function sprintView():SprintView {
+    const pack=learningPack(),s=durable?.snapshot().sprint??null;
+    const version=startup.core?.workspace.workspaceVersion??null;
+    if(s && s.status==='ACTIVE' && sprintOwnsCurrent(s,pack)) {
+      s.elapsedMs=Math.max(s.elapsedMs,session.getSession().timer.elapsedMs);
+      s.recommendation=selectTask(pack,s,'next',version);
+    }
+    return {pack,sprint:s,currentVersion:version};
+  }
+  function sprintOwnsCurrent(s:SprintState,pack=learningPack()):boolean {
+    const a=currentAttempt(s),task=pack.tasks.find(t=>t.id===a.taskId);
+    return s.packId===pack.id && s.packVersion===pack.version && !!task && !!durable &&
+      startup.core?.workspace.rootPath===learningTaskPath(durable.directory,pack,task) && session.state.sessionId===a.sessionId;
+  }
+  function recordSprintRun(run:Run):void {
+    const s=durable?.snapshot().sprint;
+    if(!s || s.status!=='ACTIVE'||!sprintOwnsCurrent(s)||run.mode!=='RUN_TESTS'||!run.finishedAt)return;
+    const a=currentAttempt(s);
+    // Trusted Run timestamps and retained IDs exclude late results from a retired same-root session.
+    if(!run.startedAt || Date.parse(run.startedAt)<Date.parse(a.startedAt) ||
+      [...s.attempts.filter(x=>x.attemptId!==a.attemptId),...(s.previous??[]).flatMap(x=>x.attempts)].some(x=>x.runs.some(r=>r.runId===run.runId)))return;
+    if(a.runs.some(r=>r.runId===run.runId))return;
+    if(a.runs.length>=1000)fail(409,'SPRINT_HISTORY_LIMIT','Export this sprint before recording more Runs.');
+    a.runs.push({runId:run.runId,inputVersion:run.workspaceVersionAtStart,
+      outcome:!run.workspaceChangedDuringRun&&run.testCount!==null&&run.testCount>0&&['PASSED','FAILED'].includes(run.testOutcome)?
+        run.testOutcome as 'PASSED'|'FAILED':'UNKNOWN',testCount:run.testCount});
+    s.elapsedMs=Math.max(s.elapsedMs,session.getSession().timer.elapsedMs);
+    s.recommendation=selectTask(learningPack(),s,'next',workspace.workspaceVersion);
+    durable!.update(state=>{state.sprint=s;});
+  }
+  async function sprintHttp(req:IncomingMessage,res:ServerResponse):Promise<void> {
+    if(req.method==='GET'){respond(res,200,sprintView());return;}
+    if(req.method!=='POST')fail(404,'NOT_FOUND','Unknown sprint method.');
+    const b=await readBody(req) as SprintCommand;
+    const id=(v:unknown)=>typeof v==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(v);
+    const actions=['start','new','next','easier','harder','deeper','bugfix','example','selfAssess','resume','topic','extend'];
+    const fields=['requestId','clientId','projectId','sessionId','expectedSprintId','expectedAttemptId','action'];
+    if(b?.action==='start'||b?.action==='new')fields.push('topics','level','budgetMinutes');
+    if(b?.action==='selfAssess')fields.push('selfAssessment');
+    if(b?.action==='extend')fields.push('budgetMinutes');
+    if(b?.action==='topic')fields.push('topicId');
+    if(!b||!id(b.requestId)||!id(b.clientId)||!id(b.projectId)||!(b.sessionId===null||id(b.sessionId))||
+      !(b.expectedSprintId===null||id(b.expectedSprintId))||!(b.expectedAttemptId===null||id(b.expectedAttemptId))||
+      !actions.includes(b.action)||Object.keys(b).some(k=>!fields.includes(k)))fail(400,'INVALID_SPRINT_COMMAND','Invalid sprint action/fields.');
+    if(!durable||b.projectId!==durable.view().id)fail(409,'DURABLE_PROJECT_REQUIRED','Open the expected training project.');
+    const hash=sha256(Buffer.from(JSON.stringify(b)));
+    const duplicate=durable.snapshot().sprint?.requests.find(r=>r.requestId===b.requestId);
+    if(duplicate){if(duplicate.payloadHash!==hash)fail(409,'REQUEST_ID_CONFLICT','RequestId was used for another sprint action.');respond(res,200,sprintView());return;}
+    const op=openLedger.run('SPRINT:'+b.requestId,b,async()=>{
+      if(!durable||durable.view().id!==b.projectId)fail(409,'PROJECT_STATE_CHANGED','Training project changed.');
+      if(startup.core){session.assertClient(b.clientId,b.sessionId!);binding!.clients.assertBound(b.clientId,b.sessionId!);}
+      else if(b.sessionId!==null)fail(409,'SESSION_MISMATCH','No exercise is open.');
+      transitionAdmission(b.clientId);
+      const pack=learningPack(),old=durable.snapshot().sprint;
+      if((old?.sprintId??null)!==b.expectedSprintId||(old?.activeAttemptId??null)!==b.expectedAttemptId)
+        fail(409,'SPRINT_STATE_CHANGED','Read the current sprint; this action belongs to an old attempt.');
+      if(b.action==='start'&&old)return sprintView(); // Explicit new required to reset history.
+      let next:SprintState;
+      if(b.action==='start'||b.action==='new') {
+        if(!Array.isArray(b.topics)||!b.topics.length||b.topics.length>pack.topics.length||new Set(b.topics).size!==b.topics.length||
+          b.topics.some(t=>!pack.topics.some(topic=>topic.id===t))||!Number.isInteger(b.level)||b.level!<1||b.level!>5||
+          !Number.isInteger(b.budgetMinutes)||b.budgetMinutes!<1||b.budgetMinutes!>1440)fail(400,'INVALID_SPRINT_OPTIONS','Select existing topics, level1–5 and minutes1–1440.');
+        const previous=old?[...(old.previous??[]),clone(old)]:[];
+        if(previous.length>20)fail(409,'SPRINT_HISTORY_LIMIT','Archive this training project before starting another sprint.');
+        if(old){const archived=previous.at(-1)!;delete archived.previous;
+          if(archived.status==='ACTIVE' && sprintOwnsCurrent(old,pack)){
+            closeAttempt(currentAttempt(archived),workspace.workspaceVersion,'next');
+            archived.elapsedMs=Math.max(old.elapsedMs,session.getSession().timer.elapsedMs);
+          }
+          archived.status='FINISHED';
+        }
+        next={sprintId:randomUUID(),packId:pack.id,packVersion:pack.version,topics:[...b.topics],startLevel:b.level!,budgetMinutes:b.budgetMinutes!,
+          previous,elapsedMs:0,status:'ACTIVE',activeAttemptId:'pending',attempts:[],requests:old?.requests??[],recommendation:{taskId:null,reason:'START'}};
+      } else {
+        if(!old)fail(409,'SPRINT_REQUIRED','Start a sprint first.');
+        next=clone(old!);
+        if(next.packId!==pack.id||next.packVersion!==pack.version)fail(409,'SPRINT_PACK_CHANGED','Restore the original pack version.');
+        if(b.action!=='resume'&&!sprintOwnsCurrent(next,pack))fail(409,'SPRINT_SUSPENDED','Resume the sprint before using its actions.');
+        if(sprintOwnsCurrent(next,pack))next.elapsedMs=Math.max(next.elapsedMs,session.getSession().timer.elapsedMs);
+      }
+      if(next.requests.length>=1000||next.attempts.length>=1000)fail(409,'SPRINT_HISTORY_LIMIT','Preserve this project; start a fresh project to continue.');
+      next.requests.push({requestId:b.requestId,payloadHash:hash});
+      const version=startup.core?.workspace.workspaceVersion??0;
+      let target:string|null=null;
+      if(b.action==='extend') {
+        if(!Number.isInteger(b.budgetMinutes)||b.budgetMinutes!<=next.budgetMinutes||b.budgetMinutes!>1440)fail(400,'INVALID_SPRINT_BUDGET','Explicitly choose a larger budget, up to1440 minutes.');
+        next.budgetMinutes=b.budgetMinutes!;
+      } else if(b.action==='selfAssess') {
+        if(!Number.isInteger(b.selfAssessment)||b.selfAssessment!<1||b.selfAssessment!>5||
+          !currentAttempt(next).runs.some(r=>r.outcome==='PASSED'&&r.inputVersion===version))fail(409,'SPRINT_FRESH_PASS_REQUIRED','Self assessment follows a fresh PASSED Run.');
+        currentAttempt(next).selfAssessment=b.selfAssessment!;
+      } else if(b.action==='example')currentAttempt(next).help=true;
+      else if(b.action==='resume'){
+        if(next.status!=='SUSPENDED')fail(409,'SPRINT_NOT_SUSPENDED','The current sprint is already open or finished.');
+        target=currentAttempt(next).taskId;
+      }
+      else {
+        if(b.action==='topic') {
+          if(!pack.topics.some(t=>t.id===b.topicId)||!next.topics.includes(b.topicId!))fail(400,'INVALID_SPRINT_TOPIC','Choose a selected topic.');
+          const candidates=pack.tasks.filter(t=>t.ready&&t.topicId===b.topicId&&t.id!==currentAttempt(next).taskId).sort((a,b)=>a.difficulty-b.difficulty||a.id.localeCompare(b.id));
+          target=candidates.find(t=>t.estimatedMinutes<=next.budgetMinutes-next.elapsedMs/60000)?.id??null;
+          next.recommendation={taskId:target,reason:target?'SELECTED_TOPIC':'NO_AVAILABLE_TASK'};
+        } else {
+          next.recommendation=selectTask(pack,next,b.action,version);
+          target=next.recommendation.taskId;
+        }
+      }
+      if(target) {
+        const task=pack.tasks.find(t=>t.id===target&&t.ready&&next.topics.includes(t.topicId));
+        if(!task)fail(409,'SPRINT_TASK_UNAVAILABLE','Task is unavailable.');
+        if(next.attempts.length && b.action!=='resume')closeAttempt(currentAttempt(next),version,b.action);
+        const root=installLearningTask(durable.directory,pack,task!,options.learningPackPath,[...next.attempts,...(old?.attempts??[]),...(old?.previous??[]).flatMap(s=>s.attempts)].some(a=>a.taskId===target));
+        coach?.abort();proposals=[]; // Existing cancellation boundary, even when provider ignores abort.
+        const attempt={attemptId:randomUUID(),taskId:target,sessionId:'pending',startedAt:new Date().toISOString(),
+          outcome:'IN_PROGRESS' as const,runs:[],help:false,selfAssessment:null};
+        next.attempts.push(attempt);next.activeAttemptId=attempt.attemptId;next.status='ACTIVE';
+        await adoptExercise(root,b.clientId,durable,false,next);
+      } else {
+        if(!next.attempts.length)fail(409,'SPRINT_TASK_UNAVAILABLE','No verified task fits the selected topics and time.');
+        if(['selfAssess','example','extend'].includes(b.action))next.recommendation=selectTask(pack,next,'next',version);
+        durable.update(state=>{state.sprint=next;});if(b.action==='extend')session.state.timer.limitMs=next.budgetMinutes*60000;persistProject();respondState();
+      }
+      return sprintView();
+    });
+    respond(res,200,await op.result);
+  }
+
   async function durableHttp(req:IncomingMessage,res:ServerResponse,url:URL):Promise<void> {
+    if(url.pathname==='/api/durable-project/sprint'){await sprintHttp(req,res);return;}
     if(req.method==='GET' && url.pathname==='/api/durable-project'){respond(res,200,durableState());return;}
     if(req.method!=='POST')fail(404,'NOT_FOUND','Unknown project command.');
     const b=await readBody(req),action=url.pathname.slice('/api/durable-project/'.length);
@@ -695,7 +836,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     if(Object.keys(b).some(k=>!allowed.includes(k)))fail(400,'VALIDATION_ERROR','Unknown project command fields.');
     const operation=openLedger.run('DURABLE:'+b.requestId,{action,body:b},async()=>{
       if(b.projectId!==(durable?.view().id??null))fail(409,'PROJECT_STATE_CHANGED','Training project changed. Synchronize before applying this command.');
-      if(startup.core){session.assertClient(b.clientId,b.sessionId);binding!.clients.assertBound(b.clientId,b.sessionId);}
+      if(startup.core){session.assertClient(b.clientId,b.sessionId!);binding!.clients.assertBound(b.clientId,b.sessionId!);}
       else if(b.sessionId!==null)fail(409,'SESSION_MISMATCH','There is no exercise session.');
       if(action==='workspace') {
         if(!durable)fail(409,'DURABLE_PROJECT_REQUIRED','Create/open a project first.');
@@ -738,7 +879,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
     respond(res,200,await operation.result);
   }
   function respondState():void {if(startup?.core)emit('DURABLE_PROJECT_STATE',durableState());}
-  async function adoptExercise(rootPath:string,clientId:string,desk:DurableProjectStore|null=durable,restore=false):Promise<ProjectV2> {
+  async function adoptExercise(rootPath:string,clientId:string,desk:DurableProjectStore|null=durable,restore=false,sprint?:SprintState):Promise<ProjectV2> {
           if(typeof rootPath!=='string'||path.resolve(rootPath).split(path.sep).some(p=>/^\.pair(?:coding|coach)$/i.test(p)))fail(403,'PROTECTED_PROJECT_PATH','Project metadata cannot be opened as an exercise.');
           if(startup.core?.session.leaseClientId && startup.core.session.leaseClientId!==clientId) fail(409,'LEASE_CONFLICT','Inna karta posiada dzierżawę.');
           if(transitioning) fail(409,'SESSION_TRANSITION','Project transition is already in progress.');
@@ -755,12 +896,42 @@ export function createPairCoachServer(options: ServerOptions = {}) {
           try {
             // Reserve transition BEFORE awaiting construction/recovery. GET/snapshot refuses mixed bindings.
             if(startup.core && path.resolve(rootPath)===startup.core.workspace.rootPath) {
-              session.claimLease(clientId); binding!.clients.bind(clientId,session.state.sessionId); transitioning=false; return await getProject(false);
+              session.claimLease(clientId); binding!.clients.bind(clientId,session.state.sessionId);
+              if(sprint){
+                const prospective=session.getSession();
+                prospective.sessionId=randomUUID();prospective.lifecycle='RUNNING';prospective.controlEpoch++;
+                prospective.writeOwner='STUDENT';prospective.interventionId=null;prospective.aiStatus='OFF';
+                prospective.timer={...prospective.timer,elapsedMs:sprint.elapsedMs,limitMs:sprint.budgetMinutes*60000};
+                if(sprint.attempts.length===1)prospective.timer.manualPaused=false;
+                currentAttempt(sprint).sessionId=prospective.sessionId;
+                // Durable client linkage alone does not grant a current session/lease.
+                binding!.clients.bind(clientId,prospective.sessionId);
+                const nextLedgers=makeLedgers();
+                desk?.commitExercise(workspace.rootPath,chat,prospective,sprint);
+                session.adoptProgress(prospective);ledger.retire();proposalOutcomes.retire();
+                ({ledger,proposalOutcomes}=nextLedgers);coach?.resetAttempt?.();
+                lastRun=null;report=null;facts.length=0;proposals=[];closePeers();
+              }
+              transitioning=false; return await getProject(false);
             }
             next=await makeCore(rootPath);
             const nextCore=requireRuntimeWorkspace(next);
             const saved=desk?.snapshot();
-            if(restore && saved?.session)nextCore.session.restoreProgress({...saved.session,activeFilePath:saved.workspace.activePath});
+            let suspended:SprintState|undefined;
+            if(!sprint && !restore && saved?.sprint?.status==='ACTIVE' && startup.core && sprintOwnsCurrent(saved.sprint)){
+              suspended=clone(saved.sprint);closeAttempt(currentAttempt(suspended),workspace.workspaceVersion,'next');suspended.status='SUSPENDED';
+            }
+            if(sprint){
+              const timer=startup.core?session.getSession().timer:nextCore.session.getSession().timer;
+              nextCore.session.restoreProgress({lifecycle:'RUNNING',timer:{...timer,elapsedMs:sprint.elapsedMs,limitMs:sprint.budgetMinutes*60000},activeFilePath:null});
+              currentAttempt(sprint).sessionId=nextCore.session.state.sessionId;
+            }
+            else if(restore && saved?.session){
+              nextCore.session.restoreProgress({...saved.session,activeFilePath:saved.workspace.activePath});
+              if(saved.sprint && saved.sprint.status==='ACTIVE'){
+                sprint=clone(saved.sprint);currentAttempt(sprint).sessionId=nextCore.session.state.sessionId;
+              }
+            }
             else if(saved?.workspace.activePath && saved.exercisePath===nextCore.workspace.rootPath)nextCore.session.state.activeFilePath=saved.workspace.activePath;
             // Open is NOT a settings SAVE. Its opening form is never authority or persisted.
             nextCore.session.claimLease(clientId);
@@ -774,7 +945,7 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             const nextChat=desk?.snapshot().chat??[];
             // Commit durable metadata BEFORE adopting the prepared core. No await or fallible
             // IO between this commit and swapping the authority references below.
-            desk?.commitExercise(nextCore.workspace.rootPath,nextChat,nextCore.session.getSession());
+            desk?.commitExercise(nextCore.workspace.rootPath,nextChat,nextCore.session.getSession(),sprint??suspended);
             const previous=binding, previousStartup=startup, previousLedger=ledger, previousProposals=proposalOutcomes;
             startup=next;({workspace,session,gate}=nextCore);binding=prepared;controlPreparing=false;
             ({ledger,proposalOutcomes}=makeLedgers());adopted=true;

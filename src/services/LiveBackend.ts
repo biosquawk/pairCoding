@@ -1207,6 +1207,40 @@ export class LiveBackend {
       throw Error('Projekt zmienił się podczas wyboru folderu. Otwórz wybór ponownie.');
     return result;
   }
+  async readSprint():Promise<import('../shared/sprint').SprintView> {
+    return this.http('/api/durable-project/sprint');
+  }
+  async sprintAction(action:import('../shared/sprint').SprintAction,extra:object={}):Promise<import('../shared/sprint').SprintView> {
+    if(this.openingProject||this.projectCommandPending)throw Error('SESSION_TRANSITION');
+    this.projectCommandPending=true;
+    const beforeProject=this.state.durableProject?.id,beforePath=this.project?.rootPath,beforeSession=this.session?.sessionId;
+    const current=()=>beforeProject===this.state.durableProject?.id&&beforeSession===this.session?.sessionId;
+    try {
+      const problem=this.folderOpenProblem();if(problem)throw Error(problem);
+      if(this.finishAttempt||this.finishStarting||this.proposalDecision||this.chatSending)throw Error('SESSION_TRANSITION');
+      if(this.project)await this.flushAll(current);
+      if(!current())throw Error('PROJECT_STATE_CHANGED');
+      const afterSave=this.folderOpenProblem();if(afterSave)throw Error(afterSave);
+      const sprint=this.state.durableProject?.sprint;
+      const body=this.durableBody({expectedSprintId:sprint?.sprintId??null,expectedAttemptId:sprint?.activeAttemptId??null,action,...extra});
+      let result:import('../shared/sprint').SprintView;
+      let error:unknown;
+      try {result=await this.http('/api/durable-project/sprint','POST',body);}
+      catch(e) {
+        // Unknown response may have committed. Never send a new logical next.
+        error=e;result=await this.readSprint();
+      }
+      const metadata=await this.http<DurableProjectState>('/api/durable-project');
+      if(metadata.durableProject?.id!==beforeProject)throw Error('PROJECT_STATE_CHANGED');
+      this.acceptDurableState(metadata);
+      if(metadata.durableProject?.exercisePath!==beforePath || result!.sprint?.attempts.find(a=>a.attemptId===result!.sprint!.activeAttemptId)?.sessionId!==beforeSession) {
+        this.installEmptyShell();this.retries=0;void this.connect();
+      }
+      this.publish();
+      if(error)throw error; // Readback reconciles authority, but do not hide a failed request.
+      return result!;
+    } finally {this.projectCommandPending=false;}
+  }
   async openProject(rootPath: string) {
     if(this.openingProject){this.fail(Error('Trwa otwieranie folderu. Poczekaj na wynik.'));return false;}
     this.openingProject=true;

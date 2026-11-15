@@ -134,6 +134,15 @@ export class SessionController extends EventEmitter {
     this.state.timer = this.computeTimer();
   }
 
+  /** Composition-only: install a prospectively persisted attempt on this same workspace.
+   * Caller already admitted/settled the transition and committed durable metadata.
+   * Reuses this controller's clock and WriteGate; no IO or independent timer. */
+  adoptProgress(saved:Session):void {
+    this.runningSince=null;this.elapsed=saved.timer.elapsedMs;this.overtimeSent=false;
+    Object.assign(this.state,structuredClone(saved));this.clearEditorView();
+    this.syncClock();this.emit('invalidate');
+  }
+
   start(limitMs: number | null, pauseOnHidden: boolean): Session {
     if (this.closed) throw new AppError(503, 'SESSION_CLOSED', 'Session is closed.');
     if (this.state.lifecycle !== 'READY') throw new AppError(409, 'SESSION_ALREADY_STARTED', 'Start requires a READY session.');

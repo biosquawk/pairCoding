@@ -1,0 +1,20 @@
+{
+  "sources": [
+    {
+      "id": "http-contract",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "REST w praktyce — autorski warsztat PairCoach",
+      "section": "1. Metoda i status",
+      "text": "GET odczytuje zasób bez zmiany jego stanu. Odpowiedź 200 zawiera reprezentację. POST tworzący zasób zwraca 201 oraz nagłówek Location wskazujący utworzony zasób. Status odpowiedzi i treść JSON są częścią kontraktu HTTP.",
+      "quote": "Status odpowiedzi i treść JSON są częścią kontraktu HTTP."
+    },
+    {
+      "id": "conditional-update",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "REST w praktyce — autorski warsztat PairCoach",
+      "section": "5. Aktualizacja warunkowa",
+      "text": "Klient może wysłać If-Match z otrzymaną wersją ETag. Serwer porównuje wersję i aktualizuje zasób atomowo. Nieaktualny If-Match oznacza 412 i nie zmienia danych. Sukces zwraca nowy ETag. Bez nagłówka wymaganego kontraktem odpowiedz 428.",
+      "quote": "Nieaktualny If-Match oznacza 412 i nie zmienia danych."
+    }
+  ]
+}

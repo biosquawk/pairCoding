@@ -11,7 +11,7 @@ import {buildContext, contextFingerprint} from '../../src/server/coach/context';
 import type {CoachContext} from '../../src/server/coach/context';
 import {CodexCoachProvider, CODEX_COACH_SCHEMA, codexCoachArgs} from '../../src/server/coach/CodexProvider';
 import {parseCoachDecision, COACH_DECISION_SCHEMA} from '../../src/server/coach/schema';
-import {COACH_SYSTEM_PROMPT, COACH_CONVERSATION_RULES} from '../../src/server/coach/prompt';
+import {COACH_SYSTEM_PROMPT, COACH_CONVERSATION_RULES, coachLocaleInstruction, DURABLE_COACH_RULES, SPRINT_COACH_RULES} from '../../src/server/coach/prompt';
 import type {ChatEntry, Run} from '../../src/shared/protocol';
 
 const ALLOWED_PROPOSAL_KINDS = ['RETRY_FROM_SNAPSHOT','RESTORE_SNAPSHOT','FINISH_EXERCISE'];
@@ -182,7 +182,13 @@ const fs=require('node:fs');let input='';process.stdin.setEncoding('utf8');proce
   assert.deepEqual(sent.input.allowedEvidenceIds,['current']);
   assert.doesNotMatch(JSON.stringify(sent),/PRIVATE_FUTURE|PRIVATE_ROOT/);
   assert.match(sent.args.join(' '),/allowedEvidenceIds/);
-  assert.deepEqual(sent.args,codexCoachArgs(sent.args[sent.args.indexOf('--output-schema')+1]));
+  // ROOT source 7bf7a1cb: preserve full argv oracle while expecting the current
+  // locale/project/sprint contract, not the historical bare default instruction.
+  const expectedArgs=codexCoachArgs(sent.args[sent.args.indexOf('--output-schema')+1]);
+  const instructionIndex=expectedArgs.findIndex(arg=>arg.startsWith('developer_instructions='));
+  const baseInstruction=JSON.parse(expectedArgs[instructionIndex].slice('developer_instructions='.length));
+  expectedArgs[instructionIndex]='developer_instructions='+JSON.stringify(baseInstruction+coachLocaleInstruction(context.locale)+DURABLE_COACH_RULES+SPRINT_COACH_RULES);
+  assert.deepEqual(sent.args,expectedArgs);
   const {capabilities:_,allowedEvidenceIds:__,allowedProposalKinds:___,...legacy}=context;
   await provider.decide(legacy,new AbortController().signal);
   const defaults=JSON.parse(await readFile(record,'utf8')).input;

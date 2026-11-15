@@ -44,8 +44,19 @@ const runtimeAssets = [
   'examples/spring-counter/pom.xml', 'examples/spring-counter/src/main/java/demo/CounterApplication.java',
   'examples/spring-counter/src/test/java/demo/CounterApplicationTest.java',
 ];
+// Only the shipped authored pack; never arbitrary uploaded/private material.
+const learningRequired = [
+  'scripts/verify-learning-pack.mjs', 'characters/banc-mentor/AGENTS.md',
+  ...['curriculum.json', 'knowledge-index.json', 'material.md'].map(n => `learning-packs/rest-spring/${n}`),
+  ...['get-item', 'create-item', 'update-item'].flatMap(id => [
+    ...['challenge.md', 'pom.xml', 'settings.v2.json', 'src/main/java/demo/ApiApplication.java', 'src/test/java/demo/ApiContractTest.java']
+      .map(n => `learning-packs/rest-spring/tasks/${id}/${n}`),
+    `learning-packs/rest-spring/references/${id}/ApiApplication.java`,
+  ]),
+];
+const learningSource = name => /^learning-packs\/rest-spring\/(?:curriculum\.json|knowledge-index\.json|material\.md|tasks\/[a-z0-9-]+\/(?:challenge\.md|pom\.xml|settings\.v2\.json|src\/main\/java\/demo\/ApiApplication\.java|src\/test\/java\/demo\/ApiContractTest\.java)|references\/[a-z0-9-]+\/ApiApplication\.java)$/.test(name);
 const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
-export const requiredFiles = [...new Set([...top, ...runtimeRequired, 'scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'java-puzzlers/README.md', 'java-puzzlers/SOURCE.json', 'java-puzzlers/prepare-tasks.mjs', 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
+export const requiredFiles = [...new Set([...top, ...runtimeRequired, ...learningRequired, 'scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'java-puzzlers/README.md', 'java-puzzlers/SOURCE.json', 'java-puzzlers/prepare-tasks.mjs', 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
 const runtimeScriptSet = new Set(runtimeScripts);
 // Finite source formats within the three product source roots, not arbitrary binary/runtime data.
 const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||
@@ -57,7 +68,7 @@ export function allowedSource(name) {
   if (/^(?:runtimes|docker|examples)\//.test(name) && parts.some(p => ['cache', 'caches', 'downloads', 'receipts', 'output', 'outputs', 'workspaces'].includes(p))) return false;
   if (parts.some(p => ['.git', '.paircoach', '.paircoding', 'node_modules', '.runtime', 'runtime', 'target', '__pycache__', '.pytest_cache', '.mypy_cache', '.venv', 'venv', '.m2', '.aws', '.ssh', 'tmp', '.tmp', 'artifacts', 'test-results', 'playwright-report', 'dist', 'coverage', 'credentials', 'secrets', 'logs', 'traces', 'screenshots', 'reports'].includes(p) ||
       p.startsWith('.env') || p.endsWith('.paircoding.json') || /\.(pem|key|pfx|p12|log)$/i.test(p))) return false;
-  return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || ['scripts/coverage.mjs', 'scripts/coverage-policy.mjs'].includes(name) || name === runtimeTestSupport || runtimeSource(name) || /^java-puzzlers\/[A-Za-z0-9._/-]+\.(?:java|xml|json|md|mjs)$/.test(name) || /^characters\/[A-Za-z0-9._/-]+\.(?:md|txt|json|ya?ml|py|mjs|js|sh)$/.test(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
+  return top.has(name) || ['ARCHITECTURE.md', 'AGENTS.md'].includes(name) || runtimeScriptSet.has(name) || ['scripts/coverage.mjs', 'scripts/coverage-policy.mjs'].includes(name) || name === runtimeTestSupport || runtimeSource(name) || learningSource(name) || name === 'scripts/verify-learning-pack.mjs' || /^java-puzzlers\/[A-Za-z0-9._/-]+\.(?:java|xml|json|md|mjs)$/.test(name) || /^characters\/[A-Za-z0-9._/-]+\.(?:md|txt|json|ya?ml|py|mjs|js|sh)$/.test(name) || name.startsWith('src/') || name === 'docs/WINDOWS.md' || /^docs\/windows[^/]*\.md$/.test(name) || /^scripts\/package[^/]*\.mjs$/.test(name) || ['scripts/clean.mjs', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs'].includes(name) ||
     (name.startsWith('tests/') && (/\.(ts|tsx|js|jsx|mjs|cjs|json|xml|txt|md|py|java|ps1)$/.test(name) || name === 'tests/qa/.gitignore'));
 }
 function fail(code, identity = {}) { const error = new Error(code); error.identity = identity; throw error; }
@@ -116,9 +127,9 @@ function inventory(root) {
       if (allowedSource(name)) {
         if (entry.isDirectory()) { walk(name); continue; }
         safeName(name); readFile(root, name); found.push(name);
-      } else if (entry.isDirectory() && (['src', 'tests', 'docs', 'scripts', 'runtimes', 'docker', 'examples', 'characters', 'java-puzzlers'].includes(name) || ['tests/', 'runtimes/', 'docker/', 'examples/', 'characters/', 'java-puzzlers/'].some(prefix => name.startsWith(prefix)))) {
+      } else if (entry.isDirectory() && (['src', 'tests', 'docs', 'scripts', 'runtimes', 'docker', 'examples', 'characters', 'java-puzzlers'].includes(name) || ['tests/', 'runtimes/', 'docker/', 'examples/', 'characters/', 'java-puzzlers/'].some(prefix => name.startsWith(prefix)) || learningRequired.some(file => file.startsWith(name + '/')))) {
         // Do not descend denylisted test directories (or symlinks).
-        if (['docs', 'scripts'].includes(name) || ['probe.ts', 'probe.json', 'probe.Dockerfile'].some(file => allowedSource(name + '/' + file))) walk(name);
+        if (learningRequired.some(file => file.startsWith(name + '/')) || ['docs', 'scripts'].includes(name) || ['probe.ts', 'probe.json', 'probe.Dockerfile'].some(file => allowedSource(name + '/' + file))) walk(name);
       }
     }
   }

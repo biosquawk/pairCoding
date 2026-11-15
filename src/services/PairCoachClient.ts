@@ -274,6 +274,8 @@ export class PairCoachClient {
   public closeDurableProject() {return this.live.closeDurableProject();}
   public saveProjectWorkspace(workspace:import('../shared/durable-project').ProjectWorkspace) {return this.live.saveProjectWorkspace(workspace);}
   public setLocale(locale:import('../shared/durable-project').Locale) {return this.live.setLocale(locale);}
+  public readSprint() {return this.live.readSprint();}
+  public sprintAction(action:import('../shared/sprint').SprintAction,extra:object={}) {return this.live.sprintAction(action,extra);}
   public async openProject(rootPath: string) { return this.transportMode === 'LIVE_BACKEND' ? this.live.openProject(rootPath) : false; }
   public folderOpenProblem() { return this.transportMode==='LIVE_BACKEND' ? this.live.folderOpenProblem() : 'Wybór folderu wymaga lokalnego backendu.'; }
   public listFolders(path?:string,signal?:AbortSignal) { return this.live.listFolders(path,signal); }

@@ -1,3 +1,4 @@
+import {projectSprintContext} from '../sprint/sprintFacts';
 import {loadCodexConfig, type CodexConfig} from './codexConfig';
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 import fs from 'node:fs/promises';
@@ -8,7 +9,7 @@ import type {CoachProvider} from './provider';
 import type {CoachContext} from './context';
 import {projectRunFacts} from './runFacts';
 import {COACH_DECISION_SCHEMA, parseCoachDecision} from './schema';
-import {COACH_SYSTEM_PROMPT,COACH_CONVERSATION_RULES,coachLocaleInstruction,DURABLE_COACH_RULES} from './prompt';
+import {COACH_SYSTEM_PROMPT,COACH_CONVERSATION_RULES,coachLocaleInstruction,DURABLE_COACH_RULES,SPRINT_COACH_RULES} from './prompt';
 import {loadCharacter,copyCharacter,type CharacterPackage} from './character';
 
 // Strict Structured Outputs needs an object root, nested anyOf, and Rust-compatible
@@ -46,7 +47,7 @@ export function codexCoachArgs(schemaPath:string,instruction=INSTRUCTION,configu
 // Explicit wire projection: future fields, root paths and raw stdout never hitchhike
 // into the child. Context redaction/consent remain the existing CoachAdapter's job.
 function inputContext(c:Readonly<CoachContext>):CoachContext {
-  return {locale:c.locale ?? 'pl', ...(c.durableProject ? {durableProject:structuredClone(c.durableProject)} : {}), capabilities:{canGenerateTests:false},
+  return {...(c.sprint?{sprint:projectSprintContext(c.sprint)}:{}),locale:c.locale ?? 'pl', ...(c.durableProject ? {durableProject:structuredClone(c.durableProject)} : {}), capabilities:{canGenerateTests:false},
     availableSnapshots:(c.availableSnapshots??[]).map(s=>({snapshotId:s.snapshotId,label:s.label,workspaceVersion:s.workspaceVersion,paths:[...s.paths]})),
     allowedProposalKinds:[...(c.allowedProposalKinds ?? [])],allowedEvidenceIds:[...(c.allowedEvidenceIds ?? [])],
     ...(c.trigger ? {trigger:{reason:c.trigger.reason,messageId:c.trigger.messageId}} : {}),workspaceVersion:c.workspaceVersion,controlEpoch:c.controlEpoch,taskMode:c.taskMode,
@@ -86,7 +87,7 @@ export class CodexCoachProvider implements CoachProvider {
     const native = this.nativeSessions?.(`${this.character.name}:${this.configuration.model}:${this.configuration.reasoning_effort}`);
     const schema = native ? {...CODEX_COACH_SCHEMA, properties:{...CODEX_COACH_SCHEMA.properties,memoryNote:{type:'string',maxLength:2000}},required:['decision','memoryNote']} : CODEX_COACH_SCHEMA;
     const contextJson=JSON.stringify(inputContext(context));
-    return this.invoke(native ? nativeCoachTurn(contextJson,context.locale) : contextJson, schema, INSTRUCTION + (native ? NATIVE_LOCALE_POLICY : coachLocaleInstruction(context.locale)) + DURABLE_COACH_RULES, wrapper => {
+    return this.invoke(native ? nativeCoachTurn(contextJson,context.locale) : contextJson, schema, INSTRUCTION + (native ? NATIVE_LOCALE_POLICY : coachLocaleInstruction(context.locale)) + DURABLE_COACH_RULES + SPRINT_COACH_RULES, wrapper => {
       if (!wrapper || typeof wrapper !== 'object' || Array.isArray(wrapper) || Object.keys(wrapper).some(k=>!['decision','memoryNote'].includes(k)) || !Object.hasOwn(wrapper, 'decision') ||
           (native && (typeof wrapper.memoryNote !== 'string' || wrapper.memoryNote.length > 2000))) throw Error();
       return parseCoachDecision(wrapper.decision);
