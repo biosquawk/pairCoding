@@ -12,7 +12,7 @@ const hashSHA = /^[a-f0-9]{64}$/;
 const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts', '.c8rc.json', '.quality-policy.json', '.quality-runner.json']);
 // Finite source contract. These are source inputs, never prepared images, caches or receipts.
 const runtimeScripts = [
-  'runtime-prepare-cli.mjs', 'runtime-prepare-control.mjs', 'runtime-prepare.mjs', 'runtime-language-prepare.mjs',
+  'runtime-prepare-cli.mjs', 'runtime-prepare-control.mjs', 'runtime-prepare.mjs',
   'runtime-operator.mjs', 'runtime-stage-inputs.mjs', 'runtime-files.mjs',
   'runtime-task.mjs', 'runtime-pom.mjs', 'runtime-spec.mjs', 'runtime-cache.mjs',
   'runtime-tools.mjs', 'runtime-dependencies.mjs', 'runtime-artifacts.mjs',
@@ -24,13 +24,14 @@ const runtimeScripts = [
 const runtimeTestSupport = 'scripts/runtime-operator-remainder.mjs';
 const runtimeTestImporters = [
   'tests/runtime-prepare-cli/remainder.test.mjs',
+  'tests/runtime-prepare-cli/docker-client-metadata.test.mjs',
   'tests/runtime-remainder-image-equality/image-equality.test.mjs',
   'tests/runtime-image-retention/seams.test.mjs', // includes dynamic fixture.load reference
 ];
 const runtimeAssets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json',
-  'runtimes/pin-status.json', 'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
-  'docker/runtime.Dockerfile', 'docker/language-java.Dockerfile', 'docker/language-python.Dockerfile',
+  'runtimes/pin-status.json', 'runtimes/production-inputs.lock.json',
+  'docker/runtime.Dockerfile',
   'examples/README.md',
   ...['javascript-counter', 'typescript-counter', 'python-calculator', 'java-pattern', 'spring-counter']
     .map(name => `examples/${name}/task.v2.json`),

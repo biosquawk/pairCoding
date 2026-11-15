@@ -27,7 +27,5 @@ test('generator output byte-exact approved catalog/task fragments; no actual ins
  const result=spawnSync(process.execPath,[path.join(repo,'scripts/runtime-generate-templates.mjs')],{cwd:root,env:{PATH:''},encoding:'utf8'});
  assert.equal(result.status,0,result.stderr);assert.deepEqual(fs.readFileSync(path.join(root,'runtimes/catalog.json')),fs.readFileSync(path.join(repo,'runtimes/catalog.json')));
  for(const dir of dirs)assert.deepEqual(fs.readFileSync(path.join(root,'examples',dir,'task.v2.json')),fs.readFileSync(path.join(repo,'examples',dir,'task.v2.json')));
- const code=fs.readFileSync(path.join(repo,'scripts/runtime-language-prepare.mjs'),'utf8');
- assert.match(code,/jdt-server-java[^\n]+version:'27\.0\.1\.0\.2'/);
- assert.match(code,/27:'27\.0\.1\.0\.2'/);
+ // LSP recipe assertions removed by Task1 owner064364a7; Run catalog/generator checks above retained.
 });

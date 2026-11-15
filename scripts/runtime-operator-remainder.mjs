@@ -1,4 +1,5 @@
-/** Operator-only, explicit NEW scoped preparation after a retained failure. Not public CLI,
+/** Run-only retained preparation; Task1 owner 064364a7 removed the LSP producer.
+ * Operator-only, explicit NEW scoped preparation after a retained failure. Not public CLI,
  * not a resume/overwrite/retry facility. Default plan reads only. No cleanup of old resources. */
 import * as fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +10,6 @@ import { isDeepStrictEqual } from 'node:util';
 import { canonicalDirectory, readPrivate, receiptWriter, syncDirectory } from './runtime-files.mjs';
 import { buildOperatorPlan } from './runtime-operator.mjs';
 import { prepare, validatePrepareRequest, validateProductionRequest, resolvePreparedToolchainIdentity, createDockerClientState, beginDockerCommand, finishDockerCommand } from './runtime-prepare.mjs';
-import { prepareLanguageImages } from './runtime-language-prepare.mjs';
 import { createImageRetention, imagePin, imageCommandOutput, assertImagePin } from './runtime-image-retention.mjs';
 import { measuredImageEntry } from './runtime-prepare-cli.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -77,9 +77,9 @@ export function buildRemainderPlan(options) {
   const originalTools = artifactInventory(old.jobs[0].request.tools.root).map(({ path, sha256 }) => ({ path, sha256 }));
   check(equal(originalTools, old.jobs[0].request.tools.files), 'Original staged tool inventory mismatch');
   const lock = json(path.join(repo, 'runtimes/production-inputs.lock.json')), approvedStage = new Map();
-  for (const a of [...lock.artifacts, ...lock.language.artifacts]) {
+  for (const a of lock.artifacts) {
     const files = a.kind === 'npm' ? a.files.map(f => ({ path: 'tools/node_modules/' + a.name + '/' + f.path, sha256: f.sha256 }))
-      : [{ path: a.kind === 'jdt' ? 'language/jdt.tar.gz' : 'wheels/' + a.filename, sha256: a.sha256 }];
+      : [{ path: 'wheels/' + a.filename, sha256: a.sha256 }];
     for (const f of files) { check(!approvedStage.has(f.path) || approvedStage.get(f.path) === f.sha256, 'Conflicting staged artifact pin'); approvedStage.set(f.path, f.sha256); }
   }
   check(equal(stagingInventory.map(({ path, sha256 }) => ({ path, sha256 })), [...approvedStage].map(([path, sha256]) => ({ path, sha256 })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0)), 'Original staged public artifact inventory differs from installed hashlock');
@@ -93,12 +93,11 @@ export function buildRemainderPlan(options) {
   const inspectFile = path.join(options.failureEvidenceDirectory, 'inspect-exact.stdout'), terminal = json(inspectFile);
   check(/^[a-f0-9]{64}$/.test(terminal.Id) && terminal.State?.Running === false && terminal.State.ExitCode === 1 && terminal.State.OOMKilled === false && terminal.ConfigImage === failure.imageId && terminal.Labels?.['paircoach.installation'] === failed.request.installationId && terminal.Labels?.['paircoach.role'] === 'prepare', 'Failed exact terminal identity unconfirmed');
   const jobs = remainingIds.map(id => { const job = fresh.jobs.find(j => j.id === id); check(job, 'Remainder job missing'); return job; });
-  return { schemaVersion: 1, phase: 'PREPARE_ONLY_REMAINDER_AFTER_REVIEWED_FAILURE', scope: 'REUSE6_READONLY_PREPARE3_LANGUAGE2_NO_OFFLINE_OR_PRODUCT_ACCEPTANCE',
+  return { schemaVersion: 1, phase: 'PREPARE_ONLY_REMAINDER_AFTER_REVIEWED_FAILURE', scope: 'REUSE6_READONLY_PREPARE3_RUN_ONLY_NO_OFFLINE_OR_PRODUCT_ACCEPTANCE',
     options, maxHeavyConcurrency: 1, maxElapsedMs: 2700000, maxCommandMs: 480000, offlineFixtureContainers: 0, engine: fresh.operatorEngine,
     sourceInventory: fresh.sourceInventory, reuse, staging: { root: stagingRoot, receipt: digestFile(stagingReceipt), files: stagingInventory }, jobs,
     failure: { receipt: digestFile(failedFile), mismatch: digestFile(mismatchFile), collection: digestFile(collectionFile), inspect: digestFile(inspectFile), exactContainerId: terminal.Id, expectedImageId: failure.imageId,
-      cleanup: 'SEPARATE_EXPLICIT_K_ROOT_REVIEW_REQUIRED_NOT_AUTHORIZED_BY_THIS_PLAN', requiredBeforeExecute: 'FRESH_EXACT_ID_INSPECT_NO_SUCH_CONTAINER' },
-    languageKinds: ['java', 'python'] };
+      cleanup: 'SEPARATE_EXPLICIT_K_ROOT_REVIEW_REQUIRED_NOT_AUTHORIZED_BY_THIS_PLAN', requiredBeforeExecute: 'FRESH_EXACT_ID_INSPECT_NO_SUCH_CONTAINER' } };
 }
 function make(dir, mode = 0o700) { canonicalDirectory(path.dirname(dir)); fs.mkdirSync(dir, { mode }); canonicalDirectory(dir); }
 function put(file, bytes, mode = 0o600) {
@@ -173,11 +172,6 @@ export function executeRemainderPlan(plan, dependencies = {}) {
       for (const entry of prepared.imageRetention.pins) retention.add(entry.pin);
       item.prepareReceipt = path.join(job.request.outputRoot, 'receipt.json'); item.status = 'PREPARED_TOOLS_CHECKED_OFFLINE_DEFERRED'; save();
     }
-    (dependencies.prepareLanguageImages ?? prepareLanguageImages)(root, json(path.join(repo, 'runtimes/production-inputs.lock.json')), { run: (args, ...rest) => {
-      if (args[0] !== 'build') return run(args, ...rest);
-      const tag = args[args.indexOf('--tag') + 1]; retention.beforeBuild(tag);
-      const result = run(args); retention.afterBuild(tag); return result;
-    }, save, receipt }, plan.languageKinds);
     // Every prior receipt/cache byte is re-proven after new preparation; never rewrite old evidence.
     const old = json(plan.options.previousPlanFile);
     const reusedAfter = previousIds.map(id => verifyPreparedReuse(old.jobs.find(j => j.id === id), plan.engine));

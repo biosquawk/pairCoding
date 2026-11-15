@@ -10,11 +10,11 @@ import { createHash } from 'node:crypto';
 import { requiredFiles as oldRequired, allowedSource, verifyAndCopy, verifyCopiedInputs } from '../../scripts/verify-source-revision.mjs';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const scripts = ['prepare-cli','prepare-control','prepare','language-prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates','image-retention','test','test-policy'].map(n => `scripts/runtime-${n}.mjs`);
+const scripts = ['prepare-cli','prepare-control','prepare','operator','stage-inputs','files','task','pom','spec','cache','tools','dependencies','artifacts','generate-templates','image-retention','test','test-policy'].map(n => `scripts/runtime-${n}.mjs`);
 const assets = [
   'runtimes/README.md', 'runtimes/catalog.json', 'runtimes/images.lock.json', 'runtimes/pin-status.json',
-  'runtimes/production-inputs.lock.json', 'runtimes/pylsp-requirements.lock',
-  'docker/runtime.Dockerfile','docker/language-java.Dockerfile','docker/language-python.Dockerfile',
+  'runtimes/production-inputs.lock.json',
+  'docker/runtime.Dockerfile',
   'examples/README.md',
   ...['javascript-counter','typescript-counter','python-calculator','java-pattern','spring-counter'].map(n=>`examples/${n}/task.v2.json`),
   'examples/javascript-counter/package.json','examples/javascript-counter/main.js','examples/javascript-counter/counter.test.js',
@@ -111,7 +111,7 @@ test('synthetic --output STORE ZIP independently matches all Git bytes/manifest 
   pack(f,['--output',out],1);assert.deepEqual(fs.readFileSync(path.join(out,'manifest.json')),manifestBytes);
   const inside=path.join(f.root,'forbidden');pack(f,['--output',inside],1);assert.equal(fs.existsSync(inside),false);
 });
-for(const name of ['paircoach.runtime.json','docs/windows-polyglot.md',...scripts,'runtimes/catalog.json','runtimes/images.lock.json','runtimes/production-inputs.lock.json','runtimes/pylsp-requirements.lock','docker/runtime.Dockerfile',...assets.filter(n=>n.endsWith('/task.v2.json')),
+for(const name of ['paircoach.runtime.json','docs/windows-polyglot.md',...scripts,'runtimes/catalog.json','runtimes/images.lock.json','runtimes/production-inputs.lock.json','docker/runtime.Dockerfile',...assets.filter(n=>n.endsWith('/task.v2.json')),
   'tests/snapshots/snapshot-crash.test.ts','tests/snapshots/snapshot-child.ts','tests/snapshots/helpers.ts',
   'tests/journal-lease-native/lease.test.ts','tests/journal-lease-native/lease-child.ts']) {
   test(`missing mandatory input fails closed: ${name}`,t=>{const f=fixture(t);fs.unlinkSync(path.join(f.root,name));f.revision=f.commit();const out=path.join(f.base,'absent');

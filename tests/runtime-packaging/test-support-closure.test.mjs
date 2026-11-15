@@ -11,7 +11,8 @@ const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const support = 'scripts/runtime-operator-remainder.mjs';
 const importers = ['tests/runtime-prepare-cli/remainder.test.mjs',
   'tests/runtime-remainder-image-equality/image-equality.test.mjs',
-  'tests/runtime-image-retention/seams.test.mjs'];
+  'tests/runtime-image-retention/seams.test.mjs',
+  'tests/runtime-prepare-cli/docker-client-metadata.test.mjs'];
 function write(root, name, bytes) {
   const p = path.join(root, name); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, bytes);
 }

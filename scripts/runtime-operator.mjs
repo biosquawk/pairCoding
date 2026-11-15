@@ -16,7 +16,7 @@ const hash=b=>createHash('sha256').update(b).digest('hex');
 const json=p=>JSON.parse(readPrivate(p,4*1024*1024).bytes);
 const sourcePaths=()=>[
  ...fs.readdirSync(path.join(repo,'scripts')).filter(n=>/^runtime-.*\.(?:mjs|py)$/.test(n)).map(n=>'scripts/'+n),
- 'docker/runtime.Dockerfile','docker/language-java.Dockerfile','docker/language-python.Dockerfile','runtimes/production-inputs.lock.json','runtimes/pylsp-requirements.lock','runtimes/catalog.json',
+ 'docker/runtime.Dockerfile','runtimes/production-inputs.lock.json','runtimes/catalog.json',
  ...walk(path.join(repo,'examples')).map(f=>'examples/'+f.path)
 ].sort();
 function walk(root) {

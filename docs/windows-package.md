@@ -83,13 +83,17 @@ To statyczna kontrola wejść, nie dowód wykonania ani pełny parser importów.
 | `npm.cmd run runtime:prepare -- …` | `node scripts/runtime-prepare-cli.mjs`; jawny projekt/profil i NOWY prywatny output według [przewodnika](windows-polyglot.md#3-publiczne-przygotowanie-wybranego-środowiska). Domyślnie `PLAN_ONLY`, nie gotowość; osobne `--execute` wymaga przyjętej spójnej rewizji i pinów/Docker. Nie uruchamia go pakieter. |
 | `npm.cmd test` | Źródła obu rodzin są w ZIP; `node scripts/runtime-test.mjs`. Teraz tylko izolowany dowód selekcji; pełne wykonanie wymaga spójnej rewizji i właściwego środowiska, nie jest częścią samego pakowania. |
 
-Paczka zachowuje wszystkie wybrane testy i ich zależności. Obok15skryptów runtime
+Paczka zachowuje wszystkie wybrane testy i ich zależności. Obok skryptów runtime
 publicznego przepływu skończona allowlista dopuszcza pojedynczy prywatny test-support
 `scripts/runtime-operator-remainder.mjs`: wymagany przy wybranych regresjach remainder
 lub retention (również dynamiczny import fixture). To źródło, nie dodatkowa komenda
 npm/HTTP ani publiczna instrukcja acquisition; pakowanie go nie wykonuje. Brak modułu
-odrzuca plan/weryfikację zamiast pomijać asercje. ROOT recovery controller i prywatne
-proof fixtures pozostają poza paczką. Szczegóły: [przewodnik](windows-polyglot.md).
+odrzuca plan/weryfikację zamiast pomijać asercje. Task1 (owner064364a7, 2026-11-15) usuwa historyczny LSP producer, jego Dockerfiles
+i recovery controller wraz z wyłącznie jego testami/fixture. Remainder jest Run-only:
+zachowuje dowód exact reuse/cache/projektu i retencję przed nowym przygotowaniem, bez
+LANGUAGE acquisition. Publiczne prepare nadal builtin/local. Historyczne FAIL pozostają
+w Git/raportach, nie są PASS. Historyczne metadane lock.language pozostają tylko
+dla jawnie superseded fixture, nie są wejściem producenta. Szczegóły: [przewodnik](windows-polyglot.md).
 
 Manifest.sourceVerification opisuje dodatkowe skończone komendy operatora (PowerShell/portable Node),
 wymagane docs/config/helper i zaufanie do zewnętrznego manifestu; te wejścia są obowiązkowe

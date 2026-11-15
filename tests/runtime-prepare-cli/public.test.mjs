@@ -7,7 +7,6 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parseArguments, buildPublicPreparePlan, executePublicPreparePlan, measuredImageEntry } from '../../scripts/runtime-prepare-cli.mjs';
 import { resolvePreparedToolchainIdentity, prepare } from '../../scripts/runtime-prepare.mjs';
-import { prepareLanguageImages } from '../../scripts/runtime-language-prepare.mjs';
 import { receiptWriter } from '../../scripts/runtime-files.mjs';
 const repo = process.cwd();
 const hash = b => createHash('sha256').update(b).digest('hex');
@@ -210,17 +209,7 @@ test('UNIT failed/unknown transport or same-engine drift retains durable error, 
   }
 });
 
-test('language kinds strict BEFORE any write/run; default BOTH preserved (source), selected-only failure does not enter other kind', { skip: 'SUPERSEDED_BY_OWNER_LIGHTWEIGHT_POLICY c905 §2: LSP image preparation withdrawn; body/history retained, not PASS' }, t => {
-  const f = fixture(t);
-  for (const kinds of [[], ['java', 'java'], ['bogus'], ['java', 'python', 'java'], 'java']) {
-    assert.throws(() => prepareLanguageImages(f.output, {}, { run: () => assert.fail(), save: () => assert.fail(), receipt: {} }, kinds), /language kinds/); assert.equal(fs.existsSync(f.output), false);
-  }
-  const root = path.join(f.root, 'languages'); fs.mkdirSync(root);
-  let saved = 0;
-  assert.throws(() => prepareLanguageImages(root, {}, { run: () => assert.fail(), save: () => saved++, receipt: {} }, ['python']));
-  assert.ok(saved > 0); assert.equal(fs.existsSync(path.join(root, 'language-contexts/java')), false); assert.equal(fs.existsSync(path.join(root, 'language-contexts/python')), true);
-  assert.match(fs.readFileSync('scripts/runtime-language-prepare.mjs', 'utf8'), /kinds=\['java','python'\]/);
-});
+// Task1 owner064364a7: removed test of retired LSP producer; history stays in Git.
 
 test('actual producer default plan compatible; optional explicit transport logs argv, propagates unknown failure without retry', async t => {
   const f = fixture(t), install = path.join(f.root, 'install');
