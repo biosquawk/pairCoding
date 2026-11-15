@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 2,
+  "taskFilePath": "challenge.md",
+  "taskMode": "IMPLEMENTATION",
+  "reviewNotesPath": "review.md",
+  "aiConsent": false,
+  "contextPatterns": [
+    "src/main/**/*.java",
+    "challenge.md"
+  ],
+  "runProfiles": [
+    {
+      "kind": "RUN_MAIN",
+      "timeoutMs": 900000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SPRING_BOOT",
+          "containerPort": 8080,
+          "healthPath": "/items"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.ApiContractTest"
+          ]
+        }
+      }
+    },
+    {
+      "kind": "RUN_TESTS",
+      "timeoutMs": 900000,
+      "task": {
+        "workingDirectory": ".",
+        "entry": {
+          "kind": "SPRING_BOOT",
+          "containerPort": 8080,
+          "healthPath": "/items"
+        },
+        "tests": {
+          "paths": [],
+          "names": [
+            "demo.ApiContractTest"
+          ]
+        }
+      }
+    }
+  ]
+}

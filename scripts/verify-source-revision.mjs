@@ -46,9 +46,9 @@ const runtimeAssets = [
 ];
 // Only the shipped authored pack; never arbitrary uploaded/private material.
 const learningRequired = [
-  'scripts/verify-learning-pack.mjs', 'characters/banc-mentor/AGENTS.md',
+  'scripts/verify-learning-pack.mjs', 'characters/banc-mentor/AGENTS.md', 'characters/banc-mentor/skills/lesson-feedback/SKILL.md',
   ...['curriculum.json', 'knowledge-index.json', 'material.md'].map(n => `learning-packs/rest-spring/${n}`),
-  ...['get-item', 'create-item', 'update-item'].flatMap(id => [
+  ...['get-item', 'create-item', 'update-item', 'map-dto', 'validate-input', 'missing-item', 'name-conflict', 'cors-preflight', 'filter-items', 'page-items', 'idempotent-create', 'conditional-delete'].flatMap(id => [
     ...['challenge.md', 'pom.xml', 'settings.v2.json', 'src/main/java/demo/ApiApplication.java', 'src/test/java/demo/ApiContractTest.java']
       .map(n => `learning-packs/rest-spring/tasks/${id}/${n}`),
     `learning-packs/rest-spring/references/${id}/ApiApplication.java`,

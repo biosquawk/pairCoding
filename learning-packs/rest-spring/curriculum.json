@@ -89,6 +89,97 @@
       ],
       "kind": "IMPLEMENTATION",
       "ready": false
+    },
+    {
+      "id": "missing-item",
+      "topicId": "errors",
+      "title": "Oddaj 404 i stabilny błąd JSON",
+      "difficulty": 1,
+      "estimatedMinutes": 8,
+      "exercisePath": "tasks/missing-item",
+      "sourceIds": [
+        "error-contract"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "name-conflict",
+      "topicId": "errors",
+      "title": "Odrzuć konflikt bez zmiany danych",
+      "difficulty": 3,
+      "estimatedMinutes": 12,
+      "exercisePath": "tasks/name-conflict",
+      "sourceIds": [
+        "error-contract"
+      ],
+      "kind": "BUGFIX",
+      "ready": false
+    },
+    {
+      "id": "cors-preflight",
+      "topicId": "browser",
+      "title": "Skonfiguruj CORS dla jednego origin",
+      "difficulty": 2,
+      "estimatedMinutes": 10,
+      "exercisePath": "tasks/cors-preflight",
+      "sourceIds": [
+        "browser-collections"
+      ],
+      "kind": "BUGFIX",
+      "ready": false
+    },
+    {
+      "id": "filter-items",
+      "topicId": "browser",
+      "title": "Filtruj kolekcję bez mutowania danych",
+      "difficulty": 1,
+      "estimatedMinutes": 8,
+      "exercisePath": "tasks/filter-items",
+      "sourceIds": [
+        "browser-collections"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "page-items",
+      "topicId": "browser",
+      "title": "Napraw granice i offset strony",
+      "difficulty": 3,
+      "estimatedMinutes": 12,
+      "exercisePath": "tasks/page-items",
+      "sourceIds": [
+        "browser-collections"
+      ],
+      "kind": "BUGFIX",
+      "ready": false
+    },
+    {
+      "id": "idempotent-create",
+      "topicId": "concurrency",
+      "title": "Powtórz POST bez podwójnego skutku",
+      "difficulty": 3,
+      "estimatedMinutes": 15,
+      "exercisePath": "tasks/idempotent-create",
+      "sourceIds": [
+        "idempotent-create"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "conditional-delete",
+      "topicId": "concurrency",
+      "title": "Usuń zasób tylko z aktualnym ETag",
+      "difficulty": 5,
+      "estimatedMinutes": 15,
+      "exercisePath": "tasks/conditional-delete",
+      "sourceIds": [
+        "conditional-delete"
+      ],
+      "kind": "BUGFIX",
+      "ready": false
     }
   ]
 }

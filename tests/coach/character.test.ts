@@ -35,3 +35,21 @@ test('character config refuses traversal, missing profiles, symlinks and oversiz
   fs.unlinkSync(path.join(profile,'AGENTS.md'));fs.writeFileSync(path.join(base,'foreign.md'),'not a copied profile');fs.symlinkSync(path.join(base,'foreign.md'),path.join(profile,'AGENTS.md'));
   assert.throws(()=>loadCharacter(config,root),/COACH_CHARACTER_UNSAFE/);
 });
+
+
+test('Banc Mentor installs its own lesson-feedback through the unchanged native character loader',async t=>{
+  const base=fs.mkdtempSync(path.join(os.tmpdir(),'paircoach-banc-character-'));t.after(()=>fs.rmSync(base,{recursive:true,force:true}));
+  const config=path.join(base,'config.json');fs.writeFileSync(config,JSON.stringify({character:'banc-mentor'}));
+  const selected=loadCharacter(config);assert.equal(selected.name,'banc-mentor');
+  const skill=path.join('.agents','skills','lesson-feedback','SKILL.md');
+  assert.deepEqual(selected.files.map(f=>f.path).sort(),['AGENTS.md',skill].sort());
+  const expected=fs.readFileSync(path.join(CHARACTERS_PATH,'banc-mentor/skills/lesson-feedback/SKILL.md'));
+  assert.deepEqual(selected.files.find(f=>f.path===skill)!.content,expected);
+  assert.notDeepEqual(expected,fs.readFileSync(path.join(CHARACTERS_PATH,'default/skills/lesson-feedback/SKILL.md')),'Banc has its own skill, not fallback to default');
+  const destination=path.join(base,'private');await copyCharacter(selected,destination);
+  assert.deepEqual(fs.readFileSync(path.join(destination,skill)),expected);
+  assert.equal(fs.lstatSync(path.join(destination,skill)).isSymbolicLink(),false);
+  fs.writeFileSync(path.join(destination,skill),'changed private copy');
+  assert.deepEqual(fs.readFileSync(path.join(CHARACTERS_PATH,'banc-mentor/skills/lesson-feedback/SKILL.md')),expected);
+  await assert.rejects(copyCharacter(selected,destination),{code:'EEXIST'});
+});
