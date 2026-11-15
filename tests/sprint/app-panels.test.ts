@@ -75,7 +75,9 @@ test('App keeps one current sprint and Next action across repeated task/environm
         : 'export const EditorPanel=()=>null;',loader:'js'}));
     }}]});
   await fs.writeFile(path.join(tmp,'index.html'),'<!doctype html><html><body><div id="root"></div><script src="App.js"></script></body></html>');
-  const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
+  // Chromium's Unix singleton socket must fit even when the checkout/TMPDIR is long.
+  const browser=await chromium.launch({headless:true,env:{...process.env,TMPDIR:'target'},
+    executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
   t.after(()=>browser.close());
   const context=await browser.newContext();
   const external:string[]=[],errors:string[]=[];
