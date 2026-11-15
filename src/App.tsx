@@ -460,9 +460,9 @@ export default function App() {
           <div role="tabpanel" id={'sidebar-panel-'+(sidebarTab==='chat'?'chat':'task')} aria-labelledby={'sidebar-tab-'+(sidebarTab==='chat'?'chat':'task')}
             hidden={sidebarTab!=='task'&&sidebarTab!=='chat'} className="flex-1 min-h-0">
             {sidebarTab==='task' && isLive && state.durableProject && <SprintPanel
-              key={state.durableProject.id} client={client} state={state} />}
+              key={'sprint:'+state.durableProject.id} client={client} state={state} />}
             {sidebarTab==='task' && state.taskReadError && <div role="alert" className="p-2 text-xs text-amber-300">{t('Błąd pliku zadania')}: {problemText(state.taskReadError.message)}</div>}
-            <SessionPanel key={state.durableProject?.id??'empty'} sidebar activeTab={sidebarTab==='chat'?'chat':'task'} taskContent={taskMarkdownContent}
+            <SessionPanel key={'session:'+(state.durableProject?.id??'empty')} sidebar activeTab={sidebarTab==='chat'?'chat':'task'} taskContent={taskMarkdownContent}
               chatEntries={state.chatEntries} activeProposal={state.activeProposal} activeRun={null} report={null}
               height={0} isMaximized={false} isCollapsed={false} onSelectTab={tab=>{if(tab==='task'||tab==='chat')setSidebarTab(tab);}}
               onSendMessage={msg=>client.sendChatMessage(msg)} onProposalResponse={(id,accept)=>client.respondToProposal(id,accept)}

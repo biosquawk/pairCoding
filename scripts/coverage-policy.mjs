@@ -6,6 +6,7 @@ import { selectTests } from './runtime-test.mjs';
 export const sourceRoots = ['src', 'scripts', 'vite.config.ts', 'java-puzzlers/prepare-tasks.mjs'];
 export const boundedFiles = [
   'tests/platform-coverage/coverage.test.mjs',
+  'tests/sprint/app-panels.test.ts',
   'tests/core/core.test.ts',
   'tests/qa/g1-writegate.test.ts',
   'tests/client/safe-markdown-p2.test.ts',
