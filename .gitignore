@@ -28,3 +28,7 @@ docs/qa/teacher-unslop/**/.lock
 *.iml
 *.ipr
 *.iws
+
+# Local full-source exports for code review.
+/ingest/
+/.ingest/

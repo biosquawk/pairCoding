@@ -150,6 +150,16 @@ W Windows plik konfiguracji znajduje się w rozpakowanym katalogu aplikacji, obo
 
 ## Kod i sprawdzenia
 
+Pełny lokalny eksport do code review: uruchom **`python3 review.py`** z katalogu
+aplikacji (lub wskaż pełną ścieżkę skryptu z innego katalogu). Powstaną dokładnie
+`ingest/src.md` oraz `ingest/scripts.md`, z rekurencyjną zawartością odpowiednich
+katalogów, ścieżkami, rozmiarami i SHA-256 każdego pliku. Skrypt nie skraca treści
+ani nie filtruje rozszerzeń; pliki nietekstowe zapisuje w całości jako Base64.
+Dowiązania i pliki specjalne zgłasza jako błąd. Kolejne uruchomienie zastępuje
+te dwa eksporty; nie zmienia źródeł. Python 3.10+ wystarcza, bez dodatkowych pakietów.
+Katalogi `ingest/` i `.ingest/` są wykluczone z Gita; wygenerowane eksporty
+nie są publikowane przy commit/push.
+
 - [Backend](src/server/): HTTP/WebSocket, pliki, kontrola zapisu, sesje, uruchamianie testów, raporty oraz dostawcy AI.
 - [Interfejs](src/components/) i [klient transportu](src/services/LiveBackend.ts).
 - [Kontrakt REST](src/shared/openapi.json) i [schemat WebSocket](src/shared/ws.schema.json).
