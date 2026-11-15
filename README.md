@@ -125,8 +125,12 @@ To instrukcja obsługi kandydata, nie deklaracja zakończenia odbioru LIVE.
 3. **Utwórz projekt** w nowym, własnym folderze → **Zadanie** → **Sprint nauki**.
    Wybierz poziom startowy, minuty i co najmniej jeden temat, następnie
    **Rozpocznij sprint**. Sprint sam instaluje wybrane ćwiczenie w tym projekcie.
-   Edytuj, poczekaj na ACK zapisu i uruchom Test. Zamierzony FAIL startera jest
-   początkiem zadania, nie oceną umiejętności.
+   Edytuj i poczekaj na ACK zapisu. W **Środowisko** poczekaj na rzeczywiste
+   **Gotowy (READY)** profilu, następnie wybierz **Uruchom testy / Run Tests**.
+   Zamierzony FAIL startera jest początkiem zadania, nie oceną umiejętności.
+   HTTP Main / **Uruchom program** wymaga osobno jawnego przygotowania
+   instalacyjnego mostu HTTP NAT i zgodnego potwierdzenia silnika; demo18130
+   tego nie przygotowuje. Gotowość testów nie oznacza gotowości HTTP Main.
 4. **Dalej / Next** i **Łatwiejsze / Easier** wybierasz ręcznie: wynik testu
    nie przełącza zadania automatycznie. Powrót do wcześniejszego zadania
    zachowuje własny kod i historię; deklaracja „umiem” nie zastępuje PASSED.
