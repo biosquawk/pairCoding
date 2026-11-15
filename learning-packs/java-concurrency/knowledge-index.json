@@ -6,6 +6,34 @@
       "sourceTitle": "Java — współbieżność w 30 minut, materiał autorski PairCoach",
       "section": "1. Callable i Future (Java 5)",
       "text": "Callable zwraca wartość lub zgłasza wyjątek. ExecutorService.submit zleca pracę puli i zwraca Future. get() czeka na jej wynik i propaguje niepowodzenie przez ExecutionException. Przykład innego obliczenia: Future<Integer> f = pool.submit(() -> 3 + 4); int suma = f.get(); Zamknij pulę, gdy skończysz."
+    },
+    {
+      "id": "countdown-latch",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "Java — współbieżność w 30 minut, materiał autorski PairCoach",
+      "section": "2/5 · Poczekaj na zespół",
+      "text": "Latch odlicza ukończone prace. Każde countDown() zmniejsza licznik o jeden; await() czeka do zera. Przykład innego zastosowania: CountDownLatch ready = new CountDownLatch(1); zapisanoPlik(); ready.countDown(); Po await widać zapisy wykonane przed countDown. Latch jest jednorazowy; nie używaj sleep do synchronizacji."
+    },
+    {
+      "id": "completable-combine",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "Java — współbieżność w 30 minut, materiał autorski PairCoach",
+      "section": "3/5 · Połącz dwa wyniki",
+      "text": "CompletableFuture reprezentuje wynik, który może pojawić się później. supplyAsync uruchamia obliczenie w przekazanym executorze. thenCombine łączy dwa niezależne wyniki bez ręcznego odpytywania. Inny przykład: opis.thenCombine(cena, (nazwa, kwota) -> nazwa + \": \" + kwota). get odbiera końcowy wynik; nie myl łączenia wyników z uruchomieniem dodatkowego wątku dla każdej lambdy."
+    },
+    {
+      "id": "virtual-thread",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "Java — współbieżność w 30 minut, materiał autorski PairCoach",
+      "section": "4/5 · Uruchom wątek wirtualny",
+      "text": "Wątki wirtualne są stabilne od Java 21 (Loom). Thread.ofVirtual() tworzy builder wirtualnego wątku; start(runnable) uruchamia pracę. Przykład innego efektu: Thread.ofVirtual().start(() -> System.out.println(\"Gotowe\")); isVirtual() rozpoznaje rzeczywisty rodzaj wątku, niezależnie od nazwy. join czeka na zakończenie. To ułatwienie współbieżności, nie obietnica przyspieszenia obliczeń CPU."
+    },
+    {
+      "id": "virtual-executor",
+      "sourceKind": "AUTHOR_TRAINING",
+      "sourceTitle": "Java — współbieżność w 30 minut, materiał autorski PairCoach",
+      "section": "5/5 · Wirtualny wątek na zadanie",
+      "text": "Executors.newVirtualThreadPerTaskExecutor() tworzy executor uruchamiający osobny wirtualny wątek dla każdego zadania. Nadal przyjmuje Callable i zwraca Future. Przykład niezależnej pracy: try (var e = Executors.newVirtualThreadPerTaskExecutor()) { var f = e.submit(() -> \"gotowe\"); System.out.println(f.get()); } Zamknięcie czeka na koniec prac. Nie stosuj tego jako limitu równoległych połączeń do zewnętrznej usługi."
     }
   ]
 }

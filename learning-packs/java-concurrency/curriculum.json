@@ -21,6 +21,58 @@
       ],
       "kind": "IMPLEMENTATION",
       "ready": true
+    },
+    {
+      "id": "02-countdown-latch",
+      "topicId": "concurrency",
+      "title": "2/5 · Poczekaj na zespół",
+      "difficulty": 2,
+      "estimatedMinutes": 6,
+      "exercisePath": "tasks/02-countdown-latch",
+      "sourceIds": [
+        "countdown-latch"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "03-completable-combine",
+      "topicId": "concurrency",
+      "title": "3/5 · Połącz dwa wyniki",
+      "difficulty": 2,
+      "estimatedMinutes": 6,
+      "exercisePath": "tasks/03-completable-combine",
+      "sourceIds": [
+        "completable-combine"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "04-virtual-thread",
+      "topicId": "concurrency",
+      "title": "4/5 · Uruchom wątek wirtualny",
+      "difficulty": 2,
+      "estimatedMinutes": 6,
+      "exercisePath": "tasks/04-virtual-thread",
+      "sourceIds": [
+        "virtual-thread"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
+    },
+    {
+      "id": "05-virtual-executor",
+      "topicId": "concurrency",
+      "title": "5/5 · Wirtualny wątek na zadanie",
+      "difficulty": 3,
+      "estimatedMinutes": 6,
+      "exercisePath": "tasks/05-virtual-executor",
+      "sourceIds": [
+        "virtual-executor"
+      ],
+      "kind": "IMPLEMENTATION",
+      "ready": false
     }
   ]
 }

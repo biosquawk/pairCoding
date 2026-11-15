@@ -40,7 +40,7 @@ export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientS
         <input type="checkbox" checked={topics.includes(topic.id)} onChange={e=>setTopics(e.target.checked?[...topics,topic.id]:topics.filter(t=>t!==topic.id))}/>{topic.title}</label>)}</fieldset>
       <button disabled={busy||!topics.length} onClick={()=>void action(s?'new':'start',{level,budgetMinutes:minutes,topics})}>{text('Rozpocznij sprint','Start sprint')}</button>
       {s&&<button onClick={()=>setStartNew(false)}>{text('Anuluj','Cancel')}</button>}
-      <p>{text('Dostępne zadania:','Available tasks:')} {view?.pack.tasks.filter(t=>t.ready).length}/{view?.pack.tasks.length}.</p>
+      <p>{text('Sprawdzone zadania:','Verified tasks:')} {view?.pack.tasks.filter(t=>t.ready).length}/{view?.pack.tasks.length}.</p>
     </>:<>
       <strong>{task?.title}</strong>
       <p>{view.pack.topics.find(t=>t.id===task?.topicId)?.title} · {text('trudność','difficulty')} {task?.difficulty}/5 · {Math.max(0,Math.ceil(s.budgetMinutes-elapsed/60000))} min</p>

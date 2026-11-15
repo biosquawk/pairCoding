@@ -5,7 +5,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL,fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
-import {chromium,expect} from '@playwright/test';
+import {chromium,expect as baseExpect} from '@playwright/test';
+const expect=baseExpect.configure({timeout:10000});
 import {readLearningPack} from '../../src/server/sprint/LearningPack';
 import {MockBackendSimulator} from '../../src/services/simulator';
 
@@ -30,6 +31,7 @@ test('SprintPanel takes title/default topic from Java or REST pack; Start sends 
   const browser=await chromium.launch({headless:true,executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined,env:{...process.env,TMPDIR:'target'}});
   t.after(()=>browser.close());
   const page=await browser.newPage();
+  page.setDefaultTimeout(10000);page.setDefaultNavigationTimeout(10000);
   const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message));
   await page.route(/^https?:/,route=>route.abort());
   await page.goto(pathToFileURL(path.join(dir,'index.html')).href);

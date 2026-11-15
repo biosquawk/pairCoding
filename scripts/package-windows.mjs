@@ -98,9 +98,18 @@ const learningRequired = [
     `learning-packs/rest-spring/references/${id}/ApiApplication.java`,
   ]),
 ];
-const learningSource = name => /^learning-packs\/rest-spring\/(?:curriculum\.json|knowledge-index\.json|material\.md|tasks\/[a-z0-9-]+\/(?:challenge\.md|pom\.xml|settings\.v2\.json|src\/main\/java\/demo\/ApiApplication\.java|src\/test\/java\/demo\/ApiContractTest\.java)|references\/[a-z0-9-]+\/ApiApplication\.java)$/.test(name);
+// Finite authored beginner pack; keep the twelve REST exercises mandatory above.
+const javaLearningRequired = [
+  ...['curriculum.json','knowledge-index.json','material.md'].map(n=>'learning-packs/java-concurrency/'+n),
+  ...['01-executor-future','02-countdown-latch','03-completable-combine','04-virtual-thread','05-virtual-executor'].flatMap(id=>[
+    ...['challenge.md','pom.xml','settings.v2.json','src/main/java/demo/ConcurrencyExercise.java','src/test/java/demo/ConcurrencyExerciseTest.java']
+      .map(n=>`learning-packs/java-concurrency/tasks/${id}/${n}`),
+    `learning-packs/java-concurrency/references/${id}/ConcurrencyExercise.java`,
+  ]),
+];
+const learningSource = name => /^learning-packs\/rest-spring\/(?:curriculum\.json|knowledge-index\.json|material\.md|tasks\/[a-z0-9-]+\/(?:challenge\.md|pom\.xml|settings\.v2\.json|src\/main\/java\/demo\/ApiApplication\.java|src\/test\/java\/demo\/ApiContractTest\.java)|references\/[a-z0-9-]+\/ApiApplication\.java)$/.test(name) || javaLearningRequired.includes(name);
 const runtimeRequired = ['paircoach.runtime.json', 'docs/windows-polyglot.md', ...runtimeScripts, ...runtimeAssets];
-const sourceRequired = [...new Set([...top, ...runtimeRequired, ...learningRequired, 'scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'java-puzzlers/README.md', 'java-puzzlers/SOURCE.json', 'java-puzzlers/prepare-tasks.mjs', 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
+const sourceRequired = [...new Set([...top, ...runtimeRequired, ...learningRequired, ...javaLearningRequired, 'scripts/coverage.mjs', 'scripts/coverage-policy.mjs', 'java-puzzlers/README.md', 'java-puzzlers/SOURCE.json', 'java-puzzlers/prepare-tasks.mjs', 'characters/default/AGENTS.md', 'characters/default/skills/lesson-feedback/SKILL.md', 'characters/halloween-theme/AGENTS.md', 'characters/halloween-theme/skills/lesson-feedback/SKILL.md', 'src/server/index.ts', 'src/server/runtimeIdentity.ts', 'docs/WINDOWS.md', 'docs/windows-start.md', 'docs/windows-package.md', 'docs/windows-coach-report-solarized.md', 'scripts/windows-verify.ps1', 'scripts/verify-source-revision.mjs', 'scripts/package-windows.mjs', 'scripts/clean.mjs', 'tests/snapshots/snapshot-crash.test.ts', 'tests/snapshots/snapshot-child.ts', 'tests/snapshots/helpers.ts', 'tests/journal-lease-native/lease.test.ts', 'tests/journal-lease-native/lease-child.ts'])];
 const runtimeScriptSet = new Set(runtimeScripts);
 // Finite source formats within the three product source roots, not arbitrary binary/runtime data.
 const runtimeSource = name => /^runtimes\/(?:[A-Za-z0-9._/-]+\.(?:json|md|lock))$/.test(name) ||
