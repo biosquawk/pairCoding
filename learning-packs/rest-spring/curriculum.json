@@ -153,7 +153,7 @@
         "browser-collections"
       ],
       "kind": "BUGFIX",
-      "ready": false
+      "ready": true
     },
     {
       "id": "idempotent-create",
@@ -166,7 +166,7 @@
         "idempotent-create"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "conditional-delete",
@@ -179,7 +179,7 @@
         "conditional-delete"
       ],
       "kind": "BUGFIX",
-      "ready": false
+      "ready": true
     }
   ]
 }
