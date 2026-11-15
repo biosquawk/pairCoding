@@ -208,3 +208,41 @@ Porównania modelu IDE i logi diagnostyczne zachowano poza repozytorium:
 `\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\paircoach-live-20261114\intellij-coexistence`.
 Końcowe działanie Play potwierdził właściciel; nie wykonywano ponownie pełnego
 suite produktu ani automatyzacji GUI IntelliJ dla tego zapisu.
+
+## 11. Ostatnio otwierane projekty
+
+Dodano listę 10 ostatnich projektów w panelu plików: nazwa, pełna ścieżka,
+otwarcie jednym kliknięciem i usunięcie samego skrótu. Zapamiętywanie korzysta
+z localStorage tej przeglądarki dla adresu aplikacji. Nie dodano magazynu backendu,
+skanowania dysku ani automatycznego otwierania projektu przy starcie.
+Lista zapisuje wyłącznie potwierdzone projekty, usuwa duplikaty i ogranicza rozmiar.
+Otwieranie przechodzi przez dotychczasowe projectAction/openDurableProject,
+autosave/ACK, kontrolę bieżącego wykonania i trenera. Brak magazynu przeglądarki
+ma jawny komunikat i nie odbiera zwykłego wyboru projektu.
+
+Testy celowane: 17/17 PASS, typecheck i build exit 0. Nowy test jest wybierany
+przez istniejący runtime-test.mjs. WSL Chromium z produkcyjnym buildem i prawdziwym
+HTTP/WS/Monaco: otwarcie A/B, MRU, anulowanie, restart backendu i strony,
+otwarcie z listy, zapis oczekującej edycji A przed przejściem do B, nieudane
+otwarcie brakującego pliku bez porzucania B, usunięcie skrótu bez usuwania danych,
+ponowne dodanie bieżącego projektu po jego otwarciu i odmowa localStorage — PASS.
+To odbiór tej funkcji, bez ponownej kampanii Docker/AI i pełnego npm test.
+Dowód lokalny:
+`\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\paircoach-live-20261114\recent-projects-smoke\proof.json`.
+
+Po zgłoszeniu właściciela odtworzono konflikt starej pustej karty: inne okno
+otworzyło już projekt, a stara karta nadal wysyłała `projectId: null`.
+Klient uzgadnia teraz wyłącznie jawne odrzucenie HTTP 409 `PROJECT_STATE_CHANGED`,
+jeżeli autoryzowany GET potwierdzi dokładnie żądany plik projektu i karta nie ma
+lokalnego projektu, sesji ani oczekujących zapisów. Nie ponawia POST i nie omija
+normalnego HELLO/dzierżawy. Inny projekt, nieznany wynik transportu i niedostępny
+odczyt nie są uznawane za sukces. Ponowne połączenie usuwa również stary lokalny
+komunikat formularza; nowe błędy backendu pozostają widoczne.
+
+Pole Bieżący folder w FolderPicker jest edytowalne, obsługuje wklejenie ścieżki,
+Enter oraz Przejdź. Nieodczytana/błędna ścieżka blokuje wybór poprzednio wyświetlonego
+folderu. Testy celowane po poprawce: 23/23 PASS; typecheck i build exit 0.
+GUI na prawdziwym HTTP/WS: dwie odrębne karty i pojedynczy odrzucony POST z poprawnym
+odczytem oraz HELLO; wklejanie ścieżki Linux ze spacjami/diakrytyką, Enter/Przejdź,
+nieistniejący katalog, anulowanie i przejście A→B bez zmiany źródła A — PASS.
+Dowód: `recent-projects-smoke/path-and-conflict-proof.json` obok powyższego dowodu.

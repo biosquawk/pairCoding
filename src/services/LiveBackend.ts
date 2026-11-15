@@ -1121,7 +1121,26 @@ export class LiveBackend {
       this.acceptDurableState(value);this.installEmptyShell();this.state.connectionError=null;
       if(value.durableProject?.exercisePath) {this.retries=0;void this.connect();}
       this.publish();return true;
-    } catch(error) {this.state.projectError=error instanceof Error?error.message:String(error);this.publish();return false;}
+    } catch(error) {
+      // Another tab can open the selected project while this tab still shows the
+      // empty shell. Reconcile only an explicit rejection and the exact requested
+      // project, with no local session/drafts to discard. Never replay the POST.
+      if(action==='open' && priorId===undefined && priorSession===undefined &&
+        error instanceof HttpRejectedError && error.status===409 && error.code==='PROJECT_STATE_CHANGED' &&
+        !this.project && !this.session && this.saves.size===0 && !this.stopped) {
+        try {
+          const latest=await this.http<DurableProjectState>('/api/durable-project');
+          const selected=latest.durableProject;
+          if(current() && !this.project && !this.session && this.saves.size===0 && !this.stopped &&
+            isLocale(latest.locale) && selected && selected.projectFile===(extra as {projectFile?:string}).projectFile) {
+            this.acceptDurableState(latest);this.installEmptyShell();this.state.connectionError=null;
+            if(selected.exercisePath){this.retries=0;void this.connect();}
+            this.publish();return true;
+          }
+        } catch { /* Keep the original rejection when authoritative readback fails. */ }
+      }
+      this.state.projectError=error instanceof Error?error.message:String(error);this.publish();return false;
+    }
     finally {this.projectCommandPending=false;}
   }
   createDurableProject(directory:string,name:string) {return this.projectCommand('create',{directory,name,locale:this.state.locale});}

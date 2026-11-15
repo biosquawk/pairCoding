@@ -29,6 +29,8 @@ import { SessionPanel } from './components/BottomPanel';
 import { FinishModal } from './components/FinishModal';
 import { ProjectSettingsModal } from './components/ProjectSettingsModal';
 import { FolderPicker } from './components/FolderPicker';
+import { RecentProjects } from './components/RecentProjects';
+import {RECENT_PROJECTS_KEY, parseRecentProjects, rememberProject} from './services/recentProjects';
 import { MOCK_SCENARIOS } from './data/mockScenarios';
 
 export default function App() {
@@ -76,6 +78,21 @@ export default function App() {
   const [folderPickerMode,setFolderPickerMode]=useState<null|'exercise'|'create'|'project'>(null);
   const [projectBusy,setProjectBusy]=useState(false);
   const [projectActionError,setProjectActionError]=useState('');
+  const [recentProjects,setRecentProjects]=useState(()=>{
+    try {return parseRecentProjects(window.localStorage.getItem(RECENT_PROJECTS_KEY));}
+    catch {return [];}
+  });
+  const [recentStorageUnavailable,setRecentStorageUnavailable]=useState(false);
+  useEffect(()=>{
+    try {window.localStorage.setItem(RECENT_PROJECTS_KEY,JSON.stringify(recentProjects));setRecentStorageUnavailable(false);}
+    catch {setRecentStorageUnavailable(true);}
+  },[recentProjects]);
+  // Only server-confirmed projects enter the list; canceled/failed attempts never do.
+  useEffect(()=>{
+    if(state.transportMode!=='LIVE_BACKEND'||!state.durableProject)return;
+    const {name,projectFile}=state.durableProject;
+    setRecentProjects(entries=>rememberProject(entries,{name,projectFile}));
+  },[state.transportMode,state.durableProject?.id,state.durableProject?.name,state.durableProject?.projectFile]);
   const projectActionLock=useRef(false);
   const workspaceIdentity=useRef('');
   const editorViews=useRef<NonNullable<ProjectWorkspace['editorViews']>>(Object.create(null));
@@ -135,7 +152,7 @@ export default function App() {
     setSidebarTab(project?.workspace.sidebarTab??'files');
     setActiveBottomTab(project?.workspace.bottomTab??'console');
     setLastReadChat(0);
-    if(previousProject.current!==project?.id){setIsSettingsModalOpen(false);setIsFinishModalOpen(false);setIsRuntimeSettingsOpen(false);}
+    if(previousProject.current!==project?.id){setProjectActionError('');setIsSettingsModalOpen(false);setIsFinishModalOpen(false);setIsRuntimeSettingsOpen(false);}
     previousProject.current=project?.id??null;
   },[isLive,state.durableProject?.id,state.durableProject?.exercisePath]);
   // Only the current backend-acknowledged workspace owns this view-state write.
@@ -163,7 +180,11 @@ export default function App() {
       if(current?.exercisePath&&!await saveWorkspace(workspaceSnapshot())) {
         setProjectActionError(client.getState().projectError??t('Zapis projektu niepotwierdzony'));return false;
       }
-      if(await action())return true;
+      if(await action()) {
+        const opened=client.getState().durableProject;
+        if(opened)setRecentProjects(entries=>rememberProject(entries,opened));
+        return true;
+      }
       setProjectActionError(client.getState().projectError??t('Nie zmieniono bieżącego projektu. Sprawdź komunikat błędu.'));return false;
     }catch(error){setProjectActionError(error instanceof Error?error.message:String(error));return false;}
     finally {projectActionLock.current=false;setProjectBusy(false);}
@@ -300,7 +321,7 @@ export default function App() {
         {state.transportMode === 'LIVE_BACKEND' && <>
           <span>{state.isOffline ? t("Synchronizacja / Offline — niepotwierdzone zmiany pozostają lokalne.") : state.pendingPaths.length ? t("Zapis oczekuje na ACK.") : t("Połączono z backendem.")}</span>
           <button className="underline" disabled={state.isOffline||!hasProject||projectBusy} onClick={() => setFolderPickerMode('exercise')}>{t("Otwórz folder…")}</button>
-          <button className="underline" onClick={() => client.reconnect()}>{t("Połącz ponownie")}</button>
+          <button className="underline" onClick={() => {setProjectActionError('');client.reconnect();}}>{t("Połącz ponownie")}</button>
         </>}
         {state.connectionError && <span role="alert" className="text-amber-300 break-words">{problemText(state.connectionError)}</span>}
         {state.runtime?.reconciliationRequired && <button type="button" disabled={state.isOffline || isReconcilingRuntime} onClick={async()=>{const scope=client.getReportHistoryScope();setIsReconcilingRuntime(true);setRuntimeReconcileResult(null);try {const ok=await client.reconcileRuntimeMutation();if(scope===client.getReportHistoryScope())setRuntimeReconcileResult({scope,message:ok?t("Potwierdzono rozstrzygnięcie operacji. Sprawdź bieżący stan w sekcji środowiska."):client.getState().runtime?.error ?? t("Nie potwierdzono wyniku. Blokada zachowana.")});} finally {setIsReconcilingRuntime(false);}}} className="underline px-2 py-1">{isReconcilingRuntime ? t("Sprawdzanie wyniku…") : t("Sprawdź wynik operacji")}</button>}
@@ -326,6 +347,10 @@ export default function App() {
     <button type="button" disabled={projectBusy||state.isOffline} onClick={()=>{setProjectActionError('');setFolderPickerMode('project');}} className="underline">{t('Otwórz projekt')}</button>
     {state.durableProject && <button type="button" disabled={projectBusy||state.isOffline} className="underline"
       onClick={()=>void projectAction(()=>client.closeDurableProject())}>{t('Zamknij projekt')}</button>}
+    <RecentProjects projects={recentProjects} disabled={projectBusy||state.isOffline}
+      storageUnavailable={recentStorageUnavailable}
+      onOpen={path=>void projectAction(()=>client.openDurableProject(path))}
+      onRemove={path=>setRecentProjects(entries=>entries.filter(entry=>entry.projectFile!==path))}/>
   </div>;
   const projectFooter = <div className="space-y-2">
     {isLive && projectControls}

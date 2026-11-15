@@ -24,6 +24,51 @@ Otwórz **http://127.0.0.1:8080/**. `npm start` uruchamia backend REST/WebSocket
 
 Backend nasłuchuje lokalnie. Standardowy start developerski korzysta z lokalnego bootstrapu tokenu; nie ustawiaj `NODE_ENV=production` bez skonfigurowania sposobu przekazania tokenu klientowi.
 
+### Start bez argumentów w Ubuntu/WSL — bieżące stanowisko
+
+Skrypt [start.sh](start.sh) uruchamia backend i zbudowany interfejs z obecnym
+przygotowanym środowiskiem **Java 21**, trenerem Codex i portem **18120**:
+
+```bash
+cd /home/darulec/dev/codex_prjects/pairCoding-publication-20261112
+./start.sh
+```
+
+Otwórz **http://127.0.0.1:18120/**. Pozostaw terminal otwarty; **Ctrl+C** zatrzymuje
+serwer. Skrypt można też wywołać pełną ścieżką z innego katalogu.
+W Windows plik znajduje się pod
+`\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\pairCoding-publication-20261112\start.sh`;
+uruchamiaj go w terminalu Ubuntu/WSL.
+
+Po restarcie kliknij **oddityHome** na liście **Ostatnio otwierane projekty**.
+Jeżeli lista jest jeszcze pusta, kliknij **Otwórz projekt** i wybierz istniejący plik
+`\\wsl.localhost\Ubuntu\home\darulec\dev\codex_prjects\pairCoding-publication-20261112\java-puzzlers\01-oddity\oddityHome.paircoding.json`.
+Przywróci to zapisany projekt i ćwiczenie. Kolejne zagadki wybierasz przez
+**Otwórz folder…** w katalogu `java-puzzlers`. Skrypt nie resetuje rozwiązań,
+nie tworzy nowego projektu i nie uruchamia programu ani testów ucznia.
+
+Wymagane są istniejące zależności aplikacji i build (`npm ci`, `npm run build`),
+Node >=22.22.0 oraz dostępny i zalogowany Codex CLI. Jeżeli Node w PATH jest zbyt
+stary, skrypt próbuje wybrać już zainstalowany Node 22 przez NVM. Narzędzi nie
+instaluje. Model i charakter nadal wybierasz w `paircoach.config.json`.
+Docker musi działać do Run/Test; jego niedostępność nie odbiera możliwości edycji.
+
+Domyślne ścieżki odnoszą się do **tego przygotowanego stanowiska**, nie do świeżego
+klonu repozytorium:
+
+- konfiguracja: `../paircoach-live-20261113/zadania-java.runtime.json`;
+- przygotowany runtime: `../paircoach-stabilization-evidence-20261113/java21-prepared/jobs/java-maven-21`.
+
+Są rozwiązywane względem katalogu skryptu. Po przeniesieniu aplikacji można je
+nadpisać zmiennymi `PAIRCOACH_RUNTIME_CONFIG` i `PAIRCOACH_PREPARED_RUNTIME`
+(dla drugiej podaj katalog zawierający `receipt.json`). Port zmienia
+`PAIRCOACH_HTTP_PORT`, a program Codexa — `PAIRCOACH_CODEX_EXE`.
+Skrypt korzysta z istniejącego przygotowania i walidacji serwera; nie pobiera
+obrazów, nie tworzy potwierdzeń przygotowania i nie przełącza wykonania na hosta.
+Na nowym stanowisku najpierw przygotuj runtime publicznym `npm run runtime:prepare`
+według [instrukcji](docs/windows-polyglot.md), a następnie wskaż jego konfigurację
+i katalog wyniku. Zajęty port powoduje błąd; skrypt nie zabija innej instancji.
+
 ## Projekt treningowy, wygląd i język
 
 Po starcie aplikacja jest **pusta**, także przy skonfigurowanym workspace.
@@ -37,6 +82,20 @@ historia czatu i kontekst trenera. Zapis kodu nadal wymaga ACK.
 Przed **Zamknij projekt** poczekaj na potwierdzenie zapisu; aplikacja wraca do pustego widoku.
 Po zamknięciu strony lub restarcie serwera wybierz ponownie **Otwórz projekt**
 i ten sam plik, aby wrócić do zapisanej pracy (timer jest przywracany jako wstrzymany).
+W panelu **Pliki projektu** lista **Ostatnio otwierane projekty** pozwala wrócić
+jednym kliknięciem do jednego z 10 ostatnich projektów. Pokazuje nazwę i pełną
+ścieżkę pliku; zapisuje się lokalnie w tej przeglądarce dla danego adresu aplikacji
+i pozostaje po restarcie. Projekt trafia na listę dopiero po poprawnym otwarciu
+lub utworzeniu — wcześniejsze projekty trzeba otworzyć jeden raz. **×** usuwa
+wyłącznie skrót z listy, bez usuwania projektu ani rozwiązań. Nieudane otwarcie
+zachowuje bieżący projekt i pokazuje błąd; przeniesiony plik można wskazać ponownie
+przez **Otwórz projekt**. Czyszczenie danych przeglądarki usuwa tę listę.
+W oknie wyboru projektu lub ćwiczenia pole **Bieżący folder** można kliknąć,
+edytować i wkleić do niego pełną ścieżkę katalogu dostępną dla backendu
+(w Ubuntu/WSL — ścieżkę Linux). **Enter** lub **Przejdź** odczytuje folder.
+Następnie kliknij plik `.paircoding.json` albo **Otwórz ten folder** dla ćwiczenia.
+Samo wpisanie ścieżki nie przełącza projektu; błędna ścieżka i anulowanie
+pozostawiają bieżący projekt. Nie skanuje się całego dysku.
 Zachowaj cały folder projektu, w tym `.pairCoding/codex/`; po rzeczywistym wywołaniu
 Codexa plik `.pairCoding/codex/resume.json` zawiera ID i argumenty wznowienia
 z terminala, wymagające tego samego konta/CODEX_HOME. Nie kopiuj danych logowania.
