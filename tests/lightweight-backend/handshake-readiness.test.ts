@@ -202,3 +202,43 @@ test('same socket renewed HELLO while measurement is held cannot lose the new ge
   f.holds[0].release();await f.until(()=>f.holds.length===2);assert.equal(p.frames.some(m=>m.type==='SESSION_SNAPSHOT'&&m.payload.project.capabilities.execution.modes.RUN_MAIN.canRun),false);
   f.holds[1].release();const ready=await p.wait(m=>m.type==='SESSION_SNAPSHOT'&&m.payload.project.capabilities.execution.modes.RUN_MAIN.canRun);assert.equal(ready.payload.languageBootstrap.connectionGeneration,renewed.payload.languageBootstrap.connectionGeneration);assert.equal(f.transportCalls,0);
 });
+
+test('production sprint start and transition automatically measure the new session; held old readiness cannot grant its authority',async t=>{
+  const {LiveBackend}=await import('../../src/services/LiveBackend');
+  const f=await fixture(t),stored=new Map<string,string>();
+  const client=new LiveBackend({baseUrl:`http://127.0.0.1:${(f.app.server.address() as import('node:net').AddressInfo).port}`,token:'local-readiness-token',clientId:'tab',
+    storage:{getItem:k=>stored.get(k)??null,setItem:(k,v)=>{stored.set(k,v);},removeItem:k=>{stored.delete(k);}}});
+  t.after(()=>client.close());
+  await client.connect();await f.until(()=>!client.getState().isOffline&&f.holds.length===1);
+  const projectDirectory=path.join(f.root,'training');fs.mkdirSync(projectDirectory);
+  assert.equal(await client.createDurableProject(projectDirectory,'Training'),true);
+  await client.sprintAction('start',{topics:['http'],level:1,budgetMinutes:60});
+  await f.until(()=>!client.getState().isOffline&&f.holds.length===2);
+  const firstSession=f.app.session.state.sessionId;
+  assert.equal(client.getState().runtime?.execution?.runtime.problem?.code,'RUNTIME_READINESS_PENDING');
+  assert.equal(client.getState().capabilities.canRunTests,false);
+  f.holds[0].release();await sleep(50);
+  assert.equal(client.getState().capabilities.canRunTests,false,'Old project measurement must not authorize the sprint');
+  // No manual readiness GET, reconnect, settings SAVE or Run is needed.
+  f.holds[1].release();await f.until(()=>client.getState().capabilities.canRunTests);
+  assert.equal(client.getState().runtime?.project?.sessionId,firstSession);
+  assert.equal(client.getState().runtime?.project?.workspaceVersion,f.app.workspace.workspaceVersion);
+  const firstRoot=f.app.workspace.rootPath;
+  await client.sprintAction('new',{topics:['http'],level:1,budgetMinutes:60});
+  await f.until(()=>!client.getState().isOffline&&f.holds.length===3);
+  assert.equal(f.app.workspace.rootPath,firstRoot,'New attempt reuses this exact GET workspace');
+  const renewedSession=f.app.session.state.sessionId;
+  assert.notEqual(renewedSession,firstSession);
+  assert.equal(client.getState().capabilities.canRunTests,false);
+  f.holds[2].release();await f.until(()=>client.getState().capabilities.canRunTests);
+  assert.equal(client.getState().runtime?.project?.sessionId,renewedSession);
+  await client.sprintAction('harder');
+  await f.until(()=>!client.getState().isOffline&&f.holds.length===4);
+  const nextSession=f.app.session.state.sessionId;
+  assert.notEqual(nextSession,renewedSession);
+  assert.equal(client.getState().capabilities.canRunTests,false);
+  f.holds[3].release();await f.until(()=>client.getState().capabilities.canRunTests);
+  assert.equal(client.getState().runtime?.project?.sessionId,nextSession);
+  assert.equal(client.getState().runtime?.project?.workspaceVersion,f.app.workspace.workspaceVersion);
+  assert.equal(f.transportCalls,0,'Readiness display must never create a process/Run');
+});
