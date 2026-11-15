@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
-import {chromium} from '@playwright/test';
+import {chromium,expect} from '@playwright/test';
 import {MockBackendSimulator} from '../../src/services/simulator';
 import {readLearningPack} from '../../src/server/sprint/LearningPack';
 
@@ -15,8 +15,10 @@ test('App keeps one current sprint and Next action across repeated task/environm
   const tmp=await fs.mkdtemp(path.resolve('target/app-panels-'));
   t.after(()=>fs.rm(tmp,{recursive:true,force:true}));
   const pack=readLearningPack(), ids=['get-item','create-item','update-item'];
-  const initial={...new MockBackendSimulator().getFullState(),transportMode:'LIVE_BACKEND',locale:'pl',
-    pendingPaths:[],taskReadError:null,connectionError:null,storageError:null};
+  const simulated=new MockBackendSimulator().getFullState();
+  const initial={...simulated,transportMode:'LIVE_BACKEND',locale:'pl',
+    pendingPaths:[],taskReadError:null,connectionError:null,storageError:null,chatEntries:[],workspaceVersion:1,
+    projectSettings:{...simulated.projectSettings,aiConsent:false}};
   await build({stdin:{contents:`
     import React,{act} from 'react';
     import {createRoot} from 'react-dom/client';
@@ -32,13 +34,17 @@ test('App keeps one current sprint and Next action across repeated task/environm
     let state={...${JSON.stringify(initial)},durableProject:{id:'project',name:'Fixture',
       projectFile:'/fixture/project.paircoding.json',exercisePath:'/fixture/'+ids[0],
       workspace:{openTabs:[],activePath:null,sidebarTab:'task',bottomTab:'console'},sprint:view().sprint}};
-    const listeners=new Set(),actions=[];
+    const listeners=new Set(),actions=[],messages=[];
+    const notify=()=>{for(const listener of listeners)listener(state);};
     const publish=()=>{state={...state,durableProject:{...state.durableProject,
       exercisePath:'/fixture/'+ids[taskIndex],sprint:view().sprint}};for(const listener of listeners)listener(state);};
     globalThis.__appPanelsClient={transportMode:'LIVE_BACKEND',getState:()=>state,
       onStateChanged:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},
       readSprint:async()=>view(),sprintAction:async kind=>{actions.push(kind+':'+ids[taskIndex]);
         taskIndex=(taskIndex+1)%ids.length;publish();return view();},
+      updateProjectSettings:async settings=>{state={...state,projectSettings:settings,workspaceVersion:state.workspaceVersion+1};notify();return true;},
+      selectFile:path=>{state={...state,activePath:path};notify();},
+      sendChatMessage:async message=>{messages.push(message);return true;},
       saveProjectWorkspace:async()=>true,sendWindowState:()=>{},getEditorLanguageBinding:()=>null,getReportHistoryScope:()=>null};
     const root=createRoot(document.getElementById('root'));
     globalThis.__appPanels={
@@ -58,12 +64,17 @@ test('App keeps one current sprint and Next action across repeated task/environm
         state={...state,durableProject:{...state.durableProject,id:'other-project'}};
         for(const listener of listeners)listener(state);
       }),
+      returnA:()=>act(async()=>{taskIndex=0;publish();}),
+      browserEvents:()=>{globalThis.IS_REACT_ACT_ENVIRONMENT=false;},
+      unread:()=>{state={...state,chatEntries:[{id:'automatic',sender:'COACH',message:'Fixture automatic hint',timestamp:0}]};notify();},
+      state:()=>({activePath:state.activePath,files:state.files.map(f=>f.path),aiConsent:state.projectSettings.aiConsent,
+        workspaceVersion:state.workspaceVersion,messages:[...messages]}),
       snapshot:()=>({taskId:ids[taskIndex],actions:[...actions],
         panels:[...document.querySelectorAll('section[aria-label="Sprint nauki"]')].map(p=>({
           title:p.querySelector('strong')?.textContent,text:p.textContent,
           visible:p.getClientRects().length>0&&!p.closest('[hidden]')})),
         next:[...document.querySelectorAll('#sidebar-panel-task button')].filter(b=>b.textContent==='Dalej').length}),
-      close:()=>act(async()=>root.unmount())
+      close:()=>{globalThis.IS_REACT_ACT_ENVIRONMENT=true;return act(async()=>root.unmount());}
     };
   `,resolveDir:process.cwd(),loader:'js'},outfile:path.join(tmp,'App.js'),
     bundle:true,platform:'browser',format:'iife',jsx:'automatic',sourcemap:'inline',
@@ -114,6 +125,50 @@ test('App keeps one current sprint and Next action across repeated task/environm
   }
   await page.evaluate(()=>(window as any).__appPanels.otherProject());
   await assertCurrent('other project');
+  // Real App + settings + FileTree + chat. Only transport/Monaco remain substituted.
+  await page.evaluate(()=>(window as any).__appPanels.returnA());
+  await assertCurrent('returned A for consent');
+  // Reproduce the LIVE ordering: return-A -> files -> consent -> automatic unread -> files -> chat.
+  await page.evaluate(()=>(window as any).__appPanels.browserEvents());
+  await page.locator('#sidebar-tab-files').click();
+  const before=await page.evaluate(()=>(window as any).__appPanels.state());
+  const leaf=page.getByRole('button',{name:'Otwórz plik '+before.activePath,exact:true});
+  await expect(leaf).toHaveCount(1);
+  await leaf.click();
+  await page.getByTitle('Ustawienia projektu (AI Consent, Task Mode, Profile)',{exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Ustawienia Projektu i Trenera AI',exact:true});
+  await dialog.getByLabel('Zgoda na asystę Trenera AI (aiConsent)',{exact:true}).check();
+  await dialog.getByRole('button',{name:'Zapisz Ustawienia',exact:true}).click();
+  await expect(dialog).toHaveCount(0);
+  const saved=await page.evaluate(()=>(window as any).__appPanels.state());
+  assert.equal(saved.aiConsent,true);
+  assert.equal(saved.workspaceVersion,before.workspaceVersion+1);
+  assert.equal(saved.activePath,before.activePath,'settings preserve the active file');
+  assert.deepEqual(saved.files,before.files,'settings preserve file inventory');
+  await expect(page.locator('#sidebar-tab-files')).toHaveAttribute('aria-selected','true');
+  await expect(page.getByRole('tab',{name:'Czat',exact:true})).toHaveCount(1);
+  await page.evaluate(()=>(window as any).__appPanels.unread());
+  // Negative selector control: unread badge is part of the accessible name, not a lost tab/control.
+  await expect(page.getByRole('tab',{name:'Czat',exact:true})).toHaveCount(0);
+  console.log('Unread chat accessibility: '+await page.locator('#sidebar-tab-chat').ariaSnapshot());
+  await expect(page.locator('#sidebar-tab-chat')).toHaveAccessibleName('CzatNieprzeczytane wiadomości');
+  await page.locator('#sidebar-tab-files').click();
+  await expect(leaf).toHaveCount(1);
+  await leaf.click();
+  const chatTab=page.getByRole('tablist',{name:'Panel projektu',exact:true}).locator('#sidebar-tab-chat');
+  await expect(chatTab).toHaveCount(1);
+  await expect(chatTab).toHaveAttribute('aria-controls','sidebar-panel-chat');
+  await chatTab.click();
+  await expect(chatTab).toHaveAttribute('aria-selected','true');
+  await expect(page.getByRole('tab',{name:'Czat',exact:true})).toHaveCount(1);
+  const chat=page.locator('#sidebar-panel-chat');
+  await chat.getByPlaceholder(/^Napisz do Trenera AI/).fill('Fixture explicit current-task HINT');
+  await chat.getByTitle('Wyślij wiadomość',{exact:true}).click();
+  await expect.poll(()=>page.evaluate(()=>(window as any).__appPanels.state().messages))
+    .toEqual(['Fixture explicit current-task HINT']);
+  assert.equal((await page.evaluate(()=>(window as any).__appPanels.state())).activePath,before.activePath);
+  console.log(JSON.stringify({stage:'consent-unread-chat',settingsSaved:true,filesPreserved:true,
+    exactChatNameWithUnread:0,stableChatTab:1,explicitMessages:1}));
   await page.evaluate(()=>(window as any).__appPanels.close());
   assert.deepEqual(errors,[],'no duplicate-key, reconciliation, or React warnings');
   assert.deepEqual(external,[],'file-only fixture never contacts a server');

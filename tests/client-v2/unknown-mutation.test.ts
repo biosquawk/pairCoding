@@ -113,3 +113,23 @@ test('failed local Save validation and ordinary successful mutations do not leav
   f.failure = null; f.response = {...project(),workspaceVersion:2}; assert.equal((await f.client.saveSettings(settings(),1)).ok,true);
   assert.equal(f.client.snapshot().reconciliationRequired,false);
 });
+
+
+test('in-flight consent Save carries a transient fence; exact original success clears it without reconciliation or retry', async () => {
+  const f = fixture(), gate = deferred(), draft = {...settings(), aiConsent:true};
+  f.gate = gate;
+  const saving = f.client.saveSettings(draft,1);
+  const pending = f.client.snapshot();
+  assert.equal(pending.pending,'SAVE');
+  assert.equal(pending.reconciliationRequired,true,'dispatched in-flight mutation is still retained');
+  assert.equal(pending.error,null,'retention during original HTTP promise is not a stale-response error');
+  assert.deepEqual(f.calls,['SAVE']);
+  gate.resolve({...project(),workspaceVersion:2,settings:draft});
+  assert.equal((await saving).ok,true);
+  const settled = f.client.snapshot();
+  assert.equal(settled.pending,null);
+  assert.equal(settled.reconciliationRequired,false);
+  assert.equal(settled.error,null);
+  assert.equal(settled.project!.settings.aiConsent,true);
+  assert.deepEqual(f.calls,['SAVE'],'one original Save; no replay/reconcile/new request');
+});
