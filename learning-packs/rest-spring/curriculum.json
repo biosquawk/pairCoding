@@ -101,7 +101,7 @@
         "error-contract"
       ],
       "kind": "IMPLEMENTATION",
-      "ready": false
+      "ready": true
     },
     {
       "id": "name-conflict",
@@ -114,7 +114,7 @@
         "error-contract"
       ],
       "kind": "BUGFIX",
-      "ready": false
+      "ready": true
     },
     {
       "id": "cors-preflight",
