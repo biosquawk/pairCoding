@@ -63,6 +63,9 @@ test('LSP producer/controller/recipes are retired, Run-only remainder and public
     assert.equal(fs.existsSync(path.join(root, file)), false, file);
     assert.equal(requiredFiles.includes(file), false, file);
   }
+  // The active durable-data packaging countertest reads this policy from the ZIP.
+  assert.equal(allowedSource('.gitignore'), true);
+  assert.ok(requiredFiles.includes('.gitignore'));
   assert.equal(allowedSource('scripts/runtime-language-prepare.mjs'), false);
   assert.equal(allowedSource('scripts/runtime-operator-image-recovery.mjs'), false);
   const remainder = fs.readFileSync(path.join(root, 'scripts/runtime-operator-remainder.mjs'), 'utf8');

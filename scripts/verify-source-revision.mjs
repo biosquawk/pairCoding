@@ -9,7 +9,7 @@ import { TextDecoder } from 'node:util';
 const digest = b => createHash('sha256').update(b).digest('hex');
 const fullSHA = /^[a-f0-9]{40}$/;
 const hashSHA = /^[a-f0-9]{64}$/;
-const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts', '.c8rc.json', '.quality-policy.json', '.quality-runner.json']);
+const top = new Set(['.gitignore', 'README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts', '.c8rc.json', '.quality-policy.json', '.quality-runner.json']);
 // Finite source contract. These are source inputs, never prepared images, caches or receipts.
 const runtimeScripts = [
   'runtime-prepare-cli.mjs', 'runtime-prepare-control.mjs', 'runtime-prepare.mjs',

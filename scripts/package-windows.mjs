@@ -53,7 +53,7 @@ function git(cwd, args) {
   return r.stdout;
 }
 const text = b => b.toString('utf8').trim();
-const top = new Set(['README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts', '.c8rc.json', '.quality-policy.json', '.quality-runner.json']);
+const top = new Set(['.gitignore', 'README.md', 'paircoach.config.json', 'paircoach.runtime.json', 'package.json', 'package-lock.json', 'tsconfig.json', 'vite.config.ts', 'index.html', 'metadata.json', 'playwright.config.ts', '.c8rc.json', '.quality-policy.json', '.quality-runner.json']);
 // Finite source contract. These are source inputs, never prepared images, caches or receipts.
 const runtimeScripts = [
   'runtime-prepare-cli.mjs', 'runtime-prepare-control.mjs', 'runtime-prepare.mjs',
