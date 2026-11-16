@@ -30,7 +30,7 @@ export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientS
     NO_AVAILABLE_TASK:text('Brak kolejnego dostępnego zadania.','No next available task.'),EASIER:text('Prostszy wariant','Easier variant'),
     HARDER:text('Trudniejszy wariant','Harder variant'),PASSED_NEXT:text('Świeże PASSED — następne zadanie','Fresh PASSED — next task'),
     AVAILABLE_IN_SELECTED_TOPICS:text('Dobór z wybranych tematów','Selected topics'),START:text('Poziom startowy','Starting level')};
-  return <section aria-label={text('Sprint nauki','Learning sprint')} className="pc-sprint p-2 text-xs border-b border-zinc-700 space-y-2 shrink-0" aria-busy={busy}>
+  return <section aria-label={text('Sprint nauki','Learning sprint')} className="pc-sprint p-2 text-xs border-b border-zinc-700 space-y-2 min-h-0 overflow-y-auto" aria-busy={busy}>
     {!view?<p>{text('Wczytywanie sprintu…','Loading sprint…')}</p>:!s||startNew?<>
       <strong>{view.pack.title}</strong>
       <label className="block">{text('Poziom','Level')} <select aria-label={text('Poziom startowy','Starting level')} value={level} onChange={e=>setLevel(Number(e.target.value))} className="bg-zinc-800">

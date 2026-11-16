@@ -471,7 +471,7 @@ export default function App() {
               key={'sprint:'+state.durableProject.id} client={client} state={state} />}
             {sidebarTab==='task' && state.taskReadError && <div role="alert" className="p-2 text-xs text-amber-300">{t('Błąd pliku zadania')}: {problemText(state.taskReadError.message)}</div>}
             {/* Keep actions outside the chat/markdown scroll viewport. */}
-            <div className="flex-1 min-h-0 overflow-hidden">
+            <div className="flex-1 min-h-[96px] overflow-hidden">
             <SessionPanel key={'session:'+(state.durableProject?.id??'empty')} sidebar activeTab={sidebarTab==='chat'?'chat':'task'} taskContent={taskMarkdownContent}
               chatEntries={state.chatEntries} activeProposal={state.activeProposal} activeRun={null} report={null}
               height={0} isMaximized={false} isCollapsed={false} onSelectTab={tab=>{if(tab==='task'||tab==='chat')setSidebarTab(tab);}}

@@ -21,6 +21,7 @@ test('App keeps one current sprint and Next action across repeated task/environm
   const candidates=new Scanner({sources:[{base:path.resolve('src'),pattern:'**/*.{ts,tsx}',negated:false}]}).scan();
   await fs.writeFile(path.join(tmp,'App.css'),css.build(candidates));
   const pack=readLearningPack(), ids=['get-item','create-item','update-item'];
+  const javaPack=readLearningPack(path.resolve('learning-packs/java-concurrency'));
   const simulated=new MockBackendSimulator().getFullState();
   const initial={...simulated,transportMode:'LIVE_BACKEND',locale:'pl',
     pendingPaths:[],taskReadError:null,connectionError:null,storageError:null,chatEntries:[],workspaceVersion:1,
@@ -33,8 +34,8 @@ test('App keeps one current sprint and Next action across repeated task/environm
     import App from './src/App';
     globalThis.IS_REACT_ACT_ENVIRONMENT=true;
     const pack=${JSON.stringify(pack)},ids=${JSON.stringify(ids)};
-    let taskIndex=0;
-    const view=()=>({pack,sprint:{sprintId:'sprint',packId:pack.id,packVersion:pack.version,topics:['http'],
+    let taskIndex=0,smallView=null,exampleCalls=0;
+    const view=()=>smallView??({pack,sprint:{sprintId:'sprint',packId:pack.id,packVersion:pack.version,topics:['http'],
       startLevel:1,budgetMinutes:45,elapsedMs:0,status:'ACTIVE',activeAttemptId:'attempt-'+taskIndex,
       attempts:[{attemptId:'attempt-'+taskIndex,taskId:ids[taskIndex],sessionId:'session-'+taskIndex,
         startedAt:'2026-11-15T00:00:00Z',outcome:'IN_PROGRESS',runs:[],help:false,selfAssessment:null}],
@@ -48,7 +49,9 @@ test('App keeps one current sprint and Next action across repeated task/environm
       exercisePath:'/fixture/'+ids[taskIndex],sprint:view().sprint,workspace:{...state.durableProject.workspace,sidebarTab:'files'}}};for(const listener of listeners)listener(state);};
     globalThis.__appPanelsClient={transportMode:'LIVE_BACKEND',getState:()=>state,
       onStateChanged:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},
-      readSprint:async()=>view(),sprintAction:async kind=>{actions.push(kind+':'+ids[taskIndex]);
+      readSprint:async()=>view(),sprintAction:async kind=>{
+        if(smallView){if(kind!=='example')throw Error('Only one controlled example is allowed');exampleCalls++;return view();}
+        actions.push(kind+':'+ids[taskIndex]);
         taskIndex=(taskIndex+1)%ids.length;publish();return view();},
       updateProjectSettings:async settings=>{state={...state,projectSettings:settings,workspaceVersion:state.workspaceVersion+1};notify();return true;},
       selectFile:path=>{state={...state,activePath:path};notify();},
@@ -73,6 +76,19 @@ test('App keeps one current sprint and Next action across repeated task/environm
         for(const listener of listeners)listener(state);
       }),
       returnA:()=>act(async()=>{taskIndex=0;publish();}),
+      smallViewport:()=>{globalThis.IS_REACT_ACT_ENVIRONMENT=true;return act(async()=>{
+        const pack=${JSON.stringify(javaPack)},task=pack.tasks.find(t=>t.id==='03-completable-combine'),old=view().sprint;
+        smallView={pack,sprint:{...old,topics:pack.topics.map(t=>t.id),activeAttemptId:'small',
+          attempts:[{...old.attempts[0],attemptId:'small',taskId:task.id}]}};
+        state={...state,aiStatus:'OFF',sessionStatus:'RUNNING',projectSettings:{...state.projectSettings,aiConsent:false},
+          durableProject:{...state.durableProject,exercisePath:'/fixture/'+task.id,sprint:smallView.sprint}};notify();
+      });},
+      example:()=>act(async()=>{
+        const nodes=[...document.querySelectorAll('.pc-sprint button')].filter(b=>b.textContent==='Przykład');
+        if(nodes.length!==1)throw Error('Expected unique Example, got '+nodes.length);
+        nodes[0].click();
+      }),
+      exampleCalls:()=>exampleCalls,
       clearChat:()=>act(async()=>{state={...state,chatEntries:[]};notify();}),
       longChat:()=>act(async()=>{state={...state,chatEntries:Array.from({length:40},(_,i)=>({
         id:'scroll-'+i,sender:'COACH',message:'Long chat message '+i+'\\n'+('Current task context. '.repeat(20)),timestamp:0}))};notify();}),
@@ -233,6 +249,51 @@ test('App keeps one current sprint and Next action across repeated task/environm
   assert.equal((await page.evaluate(()=>(window as any).__appPanels.state())).activePath,before.activePath);
   console.log(JSON.stringify({stage:'consent-unread-chat',settingsSaved:true,filesPreserved:true,
     exactChatNameWithUnread:0,stableChatTab:1,explicitMessages:1}));
+  // Same empirical pack/task03 as the host finding, with controlled transport only.
+  await page.evaluate(()=>(window as any).__appPanels.smallViewport());
+  await page.evaluate(()=>(window as any).__appPanels.click('#sidebar-tab-task'));
+  const smallGeometry=()=>page.evaluate(()=>{
+    const panel=document.querySelector<HTMLElement>('#sidebar-panel-task')!;
+    const sprint=panel.querySelector<HTMLElement>('.pc-sprint')!,body=panel.lastElementChild as HTMLElement;
+    const text=body.querySelector<HTMLElement>('.overflow-y-auto')!;
+    const rect=(e:Element)=>{const r=e.getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};};
+    const next=[...sprint.querySelectorAll('button')].find(b=>b.textContent==='Dalej')!;
+    return {body:rect(body),text:{...rect(text),clientHeight:text.clientHeight,scrollTop:text.scrollTop},
+      sprint:{...rect(sprint),scrollTop:sprint.scrollTop,scrollHeight:sprint.scrollHeight,clientHeight:sprint.clientHeight},
+      next:rect(next),panel:{...rect(panel),scrollTop:panel.scrollTop}};
+  });
+  const desktop=await smallGeometry();
+  await page.setViewportSize({width:1280,height:600});
+  const smallDefault=await smallGeometry();
+  await page.evaluate(()=>(window as any).__appPanels.example());
+  const expanded=await smallGeometry();
+  console.log(JSON.stringify({stage:'small-example-reading-viewport',desktop,smallDefault,expanded}));
+  assert.equal(await page.evaluate(()=>(window as any).__appPanels.exampleCalls()),1,'one controlled example, no live call');
+  assert.ok(expanded.body.height>=96,'expanded example reserves at least the owner-specified 96px reading viewport');
+  assert.ok(expanded.text.clientHeight>=95,'markdown viewport is not merely a nonzero wrapper');
+  assert.ok(expanded.next.top>=expanded.panel.top&&expanded.next.bottom<=expanded.sprint.bottom,'Next stays visible on expansion');
+  const source=javaPack.sources.find(s=>s.id==='completable-combine')!;
+  const example=page.locator('.pc-sprint > p').filter({hasText:source.text});
+  await expect(example).toHaveCount(1,{timeout:10000});
+  await example.evaluate(e=>e.scrollIntoView({block:'end'}));
+  const reached=await smallGeometry(),exampleRect=await example.boundingBox();
+  assert.ok(exampleRect&&exampleRect.y>=reached.sprint.top&&exampleRect.y+exampleRect.height<=reached.sprint.bottom,'expanded source is reachable inside scoped Sprint scroll');
+  await page.locator('#sidebar-panel-task').getByText('Task paragraph 99 with instructions.',{exact:true}).evaluate(e=>e.scrollIntoView());
+  const readEnd=await smallGeometry();
+  assert.ok(readEnd.text.scrollTop>100,'task end remains reachable independently of expanded source');
+  assert.deepEqual(readEnd.body,reached.body,'reading scroll does not displace its reserved viewport');
+  await page.evaluate(()=>(window as any).__appPanels.longChat());
+  await page.evaluate(()=>(window as any).__appPanels.click('#sidebar-tab-chat'));
+  await expect.poll(async()=>{const g=await geometry();return g.scrollers.some(s=>s.scrollTop>100&&Math.abs(s.scrollTop+s.clientHeight-s.scrollHeight)<2);},
+    {timeout:10000}).toBe(true);
+  await page.evaluate(()=>(window as any).__appPanels.click('#sidebar-tab-task'));
+  const returnedSmall=await smallGeometry(),returnedControls=await geometry();
+  assert.ok(returnedSmall.body.height>=96&&returnedSmall.next.top>=returnedSmall.panel.top&&returnedSmall.next.bottom<=returnedSmall.panel.bottom);
+  assert.ok(returnedControls.training.top>=returnedSmall.panel.top&&returnedControls.training.bottom<=returnedSmall.panel.bottom);
+  assert.ok(returnedControls.ancestors.every(a=>a.scrollTop===0),'small-screen chat still cannot scroll the actions ancestor');
+  await expect(page.locator('#sidebar-tab-task')).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('#sidebar-panel-files')).toBeHidden();
+  console.log(JSON.stringify({stage:'small-source-text-reachable-chat-return',reached,readEnd,returnedSmall}));
   await page.evaluate(()=>(window as any).__appPanels.close());
   assert.deepEqual(errors,[],'no duplicate-key, reconciliation, or React warnings');
   assert.deepEqual(external,[],'file-only fixture never contacts a server');
