@@ -134,9 +134,16 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
         {/* Left Section: Brand & Write Owner Status */}
         <div className="flex shrink-0 items-center gap-2">
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-red-600 via-rose-600 to-blue-600 flex items-center justify-center font-bold text-white shadow-md text-sm tracking-wider">
-              PC
-            </div>
+            <svg
+              role="img"
+              aria-label="PC"
+              width="26" height="26" viewBox="0 0 26 26"
+              className="shrink-0 rounded-md bg-zinc-800 border border-zinc-700 text-zinc-300"
+              fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="M5 19V7h4a3 3 0 0 1 0 6H5" />
+              <path d="M21 8a5 5 0 0 0-3-1c-6 0-6 12 0 12a5 5 0 0 0 3-1" />
+            </svg>
 
           </div>
 
@@ -154,7 +161,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold bg-red-950/80 text-red-300 border border-red-700 shadow-sm"
               >
                 <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                <span>{t("Piszesz Ty")}</span>
+                <span>{t("Ty")}</span>
               </div>
             ) : writeOwner === 'COACH' ? (
               <div
@@ -186,13 +193,14 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
               className="text-[11px] px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-400 inline-flex items-center gap-1"
             >
               <Sparkles className={`w-3 h-3 ${aiStatus === 'THINKING' ? 'text-amber-400 animate-spin' : 'text-zinc-500'}`} />
-              <span className="font-mono text-[10px]">AI: {stateText(aiStatus)}</span>
+              <span className="font-mono text-[10px]">AI: {aiStatus}</span>
             </span>
           </div>
 
           {/* Emergency Veto Button */}
           <button
             onClick={onEmergencyVeto}
+            aria-label={t("Przerwij trenerowi")}
             className={`flex items-center gap-1.5 px-3 py-1 rounded text-xs font-bold transition-all shadow-sm ${
               isCoachWriting
                 ? 'bg-red-600 hover:bg-red-700 text-white ring-2 ring-red-400 ring-offset-1 ring-offset-zinc-950 animate-bounce'
@@ -201,7 +209,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             title={t("Przerwij pisanie trenerowi natychmiast (działa identycznie jak 2× Escape)")}
           >
             <ShieldAlert className="w-3.5 h-3.5 text-red-400" />
-            <span>{t("Przerwij trenerowi")}</span>
+            <span>?</span>
           </button>
         </div>
 
@@ -213,7 +221,7 @@ export const HeaderBar: React.FC<HeaderBarProps> = ({
             className="flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-300"
           >
             {taskMode === 'IMPLEMENTATION' ? <Code2 className="w-3 h-3 text-cyan-400" /> : <FileCheck className="w-3 h-3 text-amber-400" />}
-            <span className="font-medium">{stateText(taskMode)}</span>
+            <span className="font-medium">{t(taskMode === 'IMPLEMENTATION' ? "Implementacja" : "Przegląd kodu")}</span>
           </div>
 
           {/* Run Main Button */}
