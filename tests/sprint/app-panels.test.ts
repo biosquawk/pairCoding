@@ -6,6 +6,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {build} from 'esbuild';
+import {compile} from '@tailwindcss/node';
+import {Scanner} from '@tailwindcss/oxide';
 import {chromium,expect} from '@playwright/test';
 import {MockBackendSimulator} from '../../src/services/simulator';
 import {readLearningPack} from '../../src/server/sprint/LearningPack';
@@ -14,10 +16,16 @@ test('App keeps one current sprint and Next action across repeated task/environm
   await fs.mkdir(path.resolve('target'),{recursive:true});
   const tmp=await fs.mkdtemp(path.resolve('target/app-panels-'));
   t.after(()=>fs.rm(tmp,{recursive:true,force:true}));
+  // Compile the real product stylesheet without touching the served dist.
+  const css=await compile(await fs.readFile('src/index.css','utf8'),{base:process.cwd(),onDependency:()=>{}});
+  const candidates=new Scanner({sources:[{base:path.resolve('src'),pattern:'**/*.{ts,tsx}',negated:false}]}).scan();
+  await fs.writeFile(path.join(tmp,'App.css'),css.build(candidates));
   const pack=readLearningPack(), ids=['get-item','create-item','update-item'];
   const simulated=new MockBackendSimulator().getFullState();
   const initial={...simulated,transportMode:'LIVE_BACKEND',locale:'pl',
     pendingPaths:[],taskReadError:null,connectionError:null,storageError:null,chatEntries:[],workspaceVersion:1,
+    files:simulated.files.map(file=>file.path===simulated.scenario.taskFilePath
+      ? {...file,content:'# Long task\n\n'+Array.from({length:100},(_,i)=>'Task paragraph '+i+' with instructions.').join('\n\n')} : file),
     projectSettings:{...simulated.projectSettings,aiConsent:false}};
   await build({stdin:{contents:`
     import React,{act} from 'react';
@@ -65,6 +73,9 @@ test('App keeps one current sprint and Next action across repeated task/environm
         for(const listener of listeners)listener(state);
       }),
       returnA:()=>act(async()=>{taskIndex=0;publish();}),
+      clearChat:()=>act(async()=>{state={...state,chatEntries:[]};notify();}),
+      longChat:()=>act(async()=>{state={...state,chatEntries:Array.from({length:40},(_,i)=>({
+        id:'scroll-'+i,sender:'COACH',message:'Long chat message '+i+'\\n'+('Current task context. '.repeat(20)),timestamp:0}))};notify();}),
       browserEvents:()=>{globalThis.IS_REACT_ACT_ENVIRONMENT=false;},
       unread:()=>{state={...state,chatEntries:[{id:'automatic',sender:'COACH',message:'Fixture automatic hint',timestamp:0}]};notify();},
       state:()=>({activePath:state.activePath,files:state.files.map(f=>f.path),aiConsent:state.projectSettings.aiConsent,
@@ -85,7 +96,7 @@ test('App keeps one current sprint and Next action across repeated task/environm
         ? 'export const client=new Proxy({}, {get:(_,name)=>globalThis.__appPanelsClient[name]});'
         : 'export const EditorPanel=()=>null;',loader:'js'}));
     }}]});
-  await fs.writeFile(path.join(tmp,'index.html'),'<!doctype html><html><body><div id="root"></div><script src="App.js"></script></body></html>');
+  await fs.writeFile(path.join(tmp,'index.html'),'<!doctype html><html><head><link rel="stylesheet" href="App.css"></head><body><div id="root"></div><script src="App.js"></script></body></html>');
   // Chromium's Unix singleton socket must fit even when the checkout/TMPDIR is long.
   const browser=await chromium.launch({headless:true,env:{...process.env,TMPDIR:'target'},
     executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH||undefined});
@@ -96,6 +107,17 @@ test('App keeps one current sprint and Next action across repeated task/environm
   const page=await context.newPage();
   page.on('pageerror',error=>errors.push(error.message));
   page.on('console',message=>{if(['error','warning'].includes(message.type()))errors.push(message.text());});
+  // tsx/esbuild names nested evaluation callbacks with this identity helper.
+  await page.addInitScript('globalThis.__name = (fn) => fn;');
+  await page.addInitScript(()=>{
+    (window as any).__scrollCalls=[];
+    const original=Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView=function(options){
+      (window as any).__scrollCalls.push({tag:this.tagName,options});
+      return original.call(this,options);
+    };
+  });
+  await page.setViewportSize({width:1440,height:900});
   await page.goto(pathToFileURL(path.join(tmp,'index.html')).href);
   await page.evaluate(()=>(window as any).__appPanels.render());
   const snapshot=()=>page.evaluate(()=>(window as any).__appPanels.snapshot());
@@ -112,6 +134,48 @@ test('App keeps one current sprint and Next action across repeated task/environm
     return s;
   };
   await assertCurrent('initial');
+  // Real CSS + actual SessionPanel auto-scroll, not a scrollToTop workaround.
+  const geometry=()=>page.evaluate(()=>{
+    const panel=document.querySelector<HTMLElement>('[role="tabpanel"]:not([hidden])')!;
+    const rect=(e:Element)=>{const r=e.getBoundingClientRect();return {top:r.top,bottom:r.bottom,height:r.height};};
+    const training=panel.querySelector('section[aria-label="Trening i trener"]')!;
+    const sprint=panel.querySelector('section[aria-label="Sprint nauki"]');
+    const ancestors=[];
+    for(let node:HTMLElement|null=panel;node;node=node.parentElement)
+      ancestors.push({tag:node.tagName,id:node.id,scrollTop:node.scrollTop,...rect(node)});
+    return {panel:rect(panel),training:rect(training),sprint:sprint?rect(sprint):null,ancestors,
+      scrollers:[...panel.querySelectorAll<HTMLElement>('*')].filter(e=>getComputedStyle(e).overflowY==='auto')
+        .map(e=>({scrollTop:e.scrollTop,clientHeight:e.clientHeight,scrollHeight:e.scrollHeight,...rect(e)})),
+      scrollCalls:(window as any).__scrollCalls};
+  });
+  const beforeChat=await geometry();
+  await page.evaluate(()=>(window as any).__appPanels.longChat());
+  await page.evaluate(()=>(window as any).__appPanels.click('#sidebar-tab-chat'));
+  await expect.poll(async()=>{const g=await geometry();return g.scrollers.some(s=>s.scrollTop>100&&Math.abs(s.scrollTop+s.clientHeight-s.scrollHeight)<2);},
+    {timeout:10000}).toBe(true);
+  const afterScroll=await geometry();
+  assert.ok(afterScroll.scrollCalls.some((call:any)=>call.options?.behavior==='smooth'),'actual chatBottom.scrollIntoView effect ran');
+  await page.evaluate(()=>(window as any).__appPanels.click('#sidebar-tab-task'));
+  const returnedTask=await geometry();
+  console.log(JSON.stringify({stage:'chat-autoscroll-return-task',beforeChat,afterScroll,returnedTask}));
+  for(const [name,r] of Object.entries({training:returnedTask.training,sprint:returnedTask.sprint})) {
+    assert.ok(r&&r.height>0&&r.top>=returnedTask.panel.top-1&&r.bottom<=returnedTask.panel.bottom+1,
+      name+' stays fully inside task viewport after chat autoscroll');
+    for(const ancestor of returnedTask.ancestors)
+      assert.ok(r.top>=ancestor.top-1&&r.bottom<=ancestor.bottom+1,name+' is not clipped by '+ancestor.tag+'#'+ancestor.id);
+  }
+  assert.ok(returnedTask.ancestors.every(a=>a.scrollTop===0),'chat must not scroll task panel or its ancestors');
+  await expect(page.locator('#sidebar-tab-task')).toHaveAttribute('aria-selected','true');
+  await expect(page.locator('#sidebar-panel-files')).toBeHidden();
+  // Negative/control: long markdown still scrolls, without moving fixed actions.
+  await page.locator('#sidebar-panel-task').getByText('Task paragraph 99 with instructions.',{exact:true}).evaluate(e=>e.scrollIntoView());
+  const afterTaskScroll=await geometry();
+  console.log(JSON.stringify({stage:'task-scroll-controls-fixed',afterTaskScroll}));
+  assert.ok(afterTaskScroll.scrollers.some(s=>s.scrollTop>100),'long task body remains scrollable');
+  assert.deepEqual(afterTaskScroll.training,returnedTask.training,'task scrolling does not move training controls');
+  assert.deepEqual(afterTaskScroll.sprint,returnedTask.sprint,'task scrolling does not move sprint actions');
+  // End the long-chat geometry fixture before the existing unread-badge scenario.
+  await page.evaluate(()=>(window as any).__appPanels.clearChat());
   for(let cycle=0;cycle<6;cycle++) {
     await page.evaluate(tab=>(window as any).__appPanels.click('#sidebar-tab-'+tab),cycle%2?'chat':'environment');
     const inactivePanels=(await snapshot()).panels.length;
