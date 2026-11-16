@@ -1247,8 +1247,14 @@ export function createPairCoachServer(options: ServerOptions = {}) {
         if(transitioning && !['PING','PROPOSAL_RESPONSE','WINDOW_STATE','TIMER_ACTION'].includes(command.type)) fail(409,'SESSION_TRANSITION','Trwa utrwalanie sesji; zachowaj lokalny draft.');
         switch(command.type) {
           case 'VIEW_CHANGED': {
-            const viewVersion=session.setEditorView(command.clientId,command.sessionId,{path:p.path,documentVersion:p.documentVersion,cursor:p.cursor,selection:p.selection});
-            emit('SESSION_STATE',session.getSession());return viewVersion;
+            // A view is a guarded document read, not Run admission. Join the SAME
+            // FIFO as immutable capture instead of rejecting a concurrent view
+            // with WORKSPACE_BUSY after the original Run was already reserved.
+            return admitted.core!.workspace._withQueuedRead(()=>{
+              assertPeerCurrent();
+              const viewVersion=admitted.core!.session.setEditorView(command.clientId,command.sessionId,{path:p.path,documentVersion:p.documentVersion,cursor:p.cursor,selection:p.selection});
+              emit('SESSION_STATE',admitted.core!.session.getSession());return viewVersion;
+            });
           }
           case 'CONTROL_READY': coach?.controlReady(p);return null;
           case 'STEP_RENDERED': coach?.stepRendered(p);return null;
@@ -1261,7 +1267,19 @@ export function createPairCoachServer(options: ServerOptions = {}) {
             if(workspace.settings.aiConsent && session.state.lifecycle==='READY')
               session.start(session.state.timer.limitMs,session.state.timer.pauseOnHidden);
             const entry:ChatEntry={messageId:command.messageId,author:'STUDENT',text:redactSecrets(p.text,[token,process.env.GEMINI_API_KEY||'']),createdAt:new Date().toISOString(),locale};
-            const nextChat=[...chat,entry];durable?.capture(nextChat,session.getSession());chat=durable?nextChat:nextChat.slice(-100);session.noteNewFact('CHAT');coach?.trigger('CHAT',entry);return null;
+            const nextChat=[...chat,entry];durable?.capture(nextChat,session.getSession());chat=durable?nextChat:nextChat.slice(-100);
+            session.noteNewFact('CHAT'); // Preserve the existing explicit-question veto policy.
+            const state=session.getSession();
+            // A policy refusal is not a model answer. Do not retain a hidden question
+            // to run later on resume/focus/consent, or silently clear a manual pause.
+            const refusal=!workspace.settings.aiConsent ? (locale==='en'?'AI consent is missing in this folder. Open AI consent settings; your question was not sent to the model.':'Brak zgody AI w tym folderze. Otwórz ustawienia zgody AI; nie wysłano pytania do modelu.') :
+              state.timer.manualPaused ? (locale==='en'?'Training paused. Use Resume training beside the task, then send the question again. No model was called.':'Trening wstrzymany. Wybierz Wznów trening przy zadaniu i ponownie wyślij pytanie. Nie wywołano modelu.') :
+              state.coachMode==='MUTED_MANUAL' ? (locale==='en'?'Coach manually muted. Resuming the timer does not override mute; no model was called.':'Trener wyciszony ręcznie. Wznowienie zegara nie znosi wyciszenia; nie wywołano modelu.') :
+              state.presence!=='FOCUSED' ? (locale==='en'?'Return to the focused training window and send your question again. No model was called.':'Wróć do aktywnego okna treningu i ponownie wyślij pytanie. Nie wywołano modelu.') :
+              !coach ? (locale==='en'?'AI coach unavailable. Check provider configuration; no model was called.':'Trener AI niedostępny. Sprawdź konfigurację dostawcy; nie wywołano modelu.') : null;
+            if(refusal)emit('CHAT_REPLY',{replyTo:command.messageId,text:refusal});
+            else coach?.trigger('CHAT',entry);
+            return null;
           }
           case 'PROPOSAL_REQUEST': {
             const stored=workspace.listSnapshots().find(s=>s.snapshotId===p.snapshotId);

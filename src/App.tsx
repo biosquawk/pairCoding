@@ -6,6 +6,7 @@ import { t, problemText, useLocale, setUiLocale } from './i18n';
 
 import type {ProjectWorkspace} from './shared/durable-project';
 import {SprintPanel} from './components/SprintPanel';
+import {TrainingControls} from './components/TrainingControls';
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { client } from './services/PairCoachClient';
 import { observeWindowPresence } from './services/windowPresence';
@@ -127,6 +128,7 @@ export default function App() {
   }
   useEffect(()=>()=>{if(viewTimer.current!==null)clearTimeout(viewTimer.current);},[]);
   const previousProject=useRef<string|null>(null);
+  const previousAttempt=useRef<string|null>(null);
   const localeChange=useRef(0);
   const isLive=state.transportMode==='LIVE_BACKEND';
   const hasProject=!isLive||!!state.durableProject;
@@ -150,11 +152,16 @@ export default function App() {
     editorViews.current=Object.assign(Object.create(null),structuredClone(project?.workspace.editorViews??{}));
     if(viewTimer.current!==null){clearTimeout(viewTimer.current);viewTimer.current=null;}
     setOpenTabs(project?.workspace.openTabs??[]);
-    setSidebarTab(project?.workspace.sidebarTab??'files');
+    // A sprint transition is still task work; a new exercise's default 'files'
+    // must not hide Next/resume. Ordinary project/folder opens restore saved UI.
+    const sprintTransition=previousProject.current===project?.id && !!previousAttempt.current &&
+      !!project?.sprint?.activeAttemptId && previousAttempt.current!==project.sprint.activeAttemptId;
+    setSidebarTab(sprintTransition?'task':project?.workspace.sidebarTab??'files');
     setActiveBottomTab(project?.workspace.bottomTab??'console');
     setLastReadChat(0);
     if(previousProject.current!==project?.id){setProjectActionError('');setIsSettingsModalOpen(false);setIsFinishModalOpen(false);setIsRuntimeSettingsOpen(false);}
     previousProject.current=project?.id??null;
+    previousAttempt.current=project?.sprint?.activeAttemptId??null;
   },[isLive,state.durableProject?.id,state.durableProject?.exercisePath]);
   // Only the current backend-acknowledged workspace owns this view-state write.
   // Source drafts continue to use the existing WriteGate/ACK path, never this metadata save.
@@ -458,7 +465,8 @@ export default function App() {
           </div>
           <div role="tabpanel" id="sidebar-panel-environment" aria-labelledby="sidebar-tab-environment" hidden={sidebarTab!=='environment'} className="flex-1 min-h-0 overflow-y-auto p-2">{environmentDetails}</div>
           <div role="tabpanel" id={'sidebar-panel-'+(sidebarTab==='chat'?'chat':'task')} aria-labelledby={'sidebar-tab-'+(sidebarTab==='chat'?'chat':'task')}
-            hidden={sidebarTab!=='task'&&sidebarTab!=='chat'} className="flex-1 min-h-0">
+            hidden={sidebarTab!=='task'&&sidebarTab!=='chat'} className="flex-1 min-h-0 overflow-y-auto">
+            {isLive && hasExercise && <TrainingControls key={'training:'+state.durableProject?.exercisePath} client={client} state={state} onSettings={()=>setIsSettingsModalOpen(true)} />}
             {sidebarTab==='task' && isLive && state.durableProject && <SprintPanel
               key={'sprint:'+state.durableProject.id} client={client} state={state} />}
             {sidebarTab==='task' && state.taskReadError && <div role="alert" className="p-2 text-xs text-amber-300">{t('Błąd pliku zadania')}: {problemText(state.taskReadError.message)}</div>}

@@ -30,7 +30,7 @@ export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientS
     NO_AVAILABLE_TASK:text('Brak kolejnego dostępnego zadania.','No next available task.'),EASIER:text('Prostszy wariant','Easier variant'),
     HARDER:text('Trudniejszy wariant','Harder variant'),PASSED_NEXT:text('Świeże PASSED — następne zadanie','Fresh PASSED — next task'),
     AVAILABLE_IN_SELECTED_TOPICS:text('Dobór z wybranych tematów','Selected topics'),START:text('Poziom startowy','Starting level')};
-  return <section aria-label={text('Sprint nauki','Learning sprint')} className="p-2 text-xs border-b border-zinc-700 space-y-2">
+  return <section aria-label={text('Sprint nauki','Learning sprint')} className="pc-sprint p-2 text-xs border-b border-zinc-700 space-y-2 shrink-0" aria-busy={busy}>
     {!view?<p>{text('Wczytywanie sprintu…','Loading sprint…')}</p>:!s||startNew?<>
       <strong>{view.pack.title}</strong>
       <label className="block">{text('Poziom','Level')} <select aria-label={text('Poziom startowy','Starting level')} value={level} onChange={e=>setLevel(Number(e.target.value))} className="bg-zinc-800">
@@ -48,10 +48,10 @@ export function SprintPanel({client,state}:{client:PairCoachClient;state:ClientS
       <p>{text('Rozwiązane','Test-confirmed')}: {s.attempts.filter(x=>x.outcome==='TESTED').length} · {text('z pomocą','with help')}: {s.attempts.filter(x=>x.outcome==='ASSISTED').length} · {text('pominięte','skipped')}: {s.attempts.filter(x=>x.outcome==='DECLARED_SKIP').length} · {text('do powtórki','review')}: {s.attempts.filter(x=>x.outcome==='REVIEW').length}</p>
       {s.budgetMinutes*60000<=elapsed&&s.status==='ACTIVE'&&<p>{text('Podsumowanie: użyj Zakończ, lub','Summary: use Finish, or')} <button disabled={busy||s.budgetMinutes>=1440} onClick={()=>void action('extend',{budgetMinutes:Math.min(1440,s.budgetMinutes+15)})}>{text('Kontynuuj +15 min','Continue +15 min')}</button></p>}
       {s.status==='SUSPENDED'?<button disabled={busy} onClick={()=>void action('resume')}>{text('Wznów sprint','Resume sprint')}</button>:s.status==='FINISHED'?<button onClick={()=>setStartNew(true)}>{text('Nowy sprint','New sprint')}</button>:<>
-        <div className="flex flex-wrap gap-2">
-          <button disabled={busy} onClick={()=>void action('easier')}>{text('Łatwiejsze','Easier')}</button>
-          <button disabled={busy} onClick={()=>void action('example')}>{text('Przykład','Example')}</button>
-          <button disabled={busy} onClick={()=>void action('next')}>{text('Dalej','Next')}</button>
+        <div className="flex flex-wrap gap-2" aria-label={text('Akcje zadania','Task actions')}>
+          <button disabled={busy||state.isOffline} onClick={()=>void action('easier')}>{text('Łatwiejsze','Easier')}</button>
+          <button disabled={busy||state.isOffline} onClick={()=>void action('example')}>{text('Przykład','Example')}</button>
+          <button className="pc-training-primary" disabled={busy||state.isOffline} onClick={()=>void action('next')}>{text('Dalej','Next')}</button>
           <button disabled={busy} aria-expanded={more} onClick={()=>setMore(!more)}>{text('Więcej','More')}</button>
         </div>
         {more&&<div className="flex flex-wrap gap-2">{([['harder','Trudniejsze / Umiem to','Harder / I know this'],['deeper','Głębiej','Deeper'],['bugfix','Odpytaj','Find the bug']] as const).map(([kind,pl,eng])=>

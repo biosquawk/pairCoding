@@ -140,3 +140,16 @@
 .safe-markdown .text-xl { font-size: calc(20px * var(--pc-reading-scale, 1)); }
 .safe-markdown [class~="text-[11px]"] { font-size: calc(11px * var(--pc-reading-scale, 1)); }
 .safe-markdown [class~="text-[10px]"] { font-size: calc(10px * var(--pc-reading-scale, 1)); }
+
+/* Existing sprint actions: theme-backed surfaces, explicit focus/disabled states. */
+.pc-training-action, .pc-sprint button {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 36px; padding: 6px 12px; border: 1px solid var(--color-zinc-500);
+  border-radius: 6px; background: var(--color-zinc-800); color: var(--color-zinc-100);
+  font-weight: 600; cursor: pointer;
+}
+.pc-training-action:hover:not(:disabled), .pc-sprint button:hover:not(:disabled) { background: var(--color-zinc-700); }
+.pc-training-action:focus-visible, .pc-sprint button:focus-visible { outline: 2px solid var(--color-blue-400); outline-offset: 2px; }
+.pc-training-action:disabled, .pc-sprint button:disabled { opacity: .5; cursor: not-allowed; border-style: dashed; }
+.pc-training-primary, .pc-sprint button.pc-training-primary { background: var(--color-blue-600); color: #fffdf5; border-color: var(--color-blue-400); }
+.pc-training-primary:hover:not(:disabled), .pc-sprint button.pc-training-primary:hover:not(:disabled) { background: var(--color-blue-700); }

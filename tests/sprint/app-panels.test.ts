@@ -37,7 +37,7 @@ test('App keeps one current sprint and Next action across repeated task/environm
     const listeners=new Set(),actions=[],messages=[];
     const notify=()=>{for(const listener of listeners)listener(state);};
     const publish=()=>{state={...state,durableProject:{...state.durableProject,
-      exercisePath:'/fixture/'+ids[taskIndex],sprint:view().sprint}};for(const listener of listeners)listener(state);};
+      exercisePath:'/fixture/'+ids[taskIndex],sprint:view().sprint,workspace:{...state.durableProject.workspace,sidebarTab:'files'}}};for(const listener of listeners)listener(state);};
     globalThis.__appPanelsClient={transportMode:'LIVE_BACKEND',getState:()=>state,
       onStateChanged:listener=>{listeners.add(listener);return()=>listeners.delete(listener);},
       readSprint:async()=>view(),sprintAction:async kind=>{actions.push(kind+':'+ids[taskIndex]);
@@ -61,7 +61,7 @@ test('App keeps one current sprint and Next action across repeated task/environm
       }),
       otherProject:()=>act(async()=>{
         taskIndex=1; // Change view but retain exercisePath/sprint references: project key must remount cache.
-        state={...state,durableProject:{...state.durableProject,id:'other-project'}};
+        state={...state,durableProject:{...state.durableProject,id:'other-project',workspace:{...state.durableProject.workspace,sidebarTab:'task'}}};
         for(const listener of listeners)listener(state);
       }),
       returnA:()=>act(async()=>{taskIndex=0;publish();}),
