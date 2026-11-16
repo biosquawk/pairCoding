@@ -35,6 +35,8 @@ import { RecentProjects } from './components/RecentProjects';
 import {RECENT_PROJECTS_KEY, parseRecentProjects, rememberProject} from './services/recentProjects';
 import { MOCK_SCENARIOS } from './data/mockScenarios';
 
+const SIDEBAR_MAX_VIEWPORT_PERCENT = 70;
+
 export default function App() {
   const [state, setState] = useState(client.getState());
   const locale=useLocale();
@@ -260,7 +262,7 @@ export default function App() {
   useEffect(() => {
     const handleMouseMove = (e: MouseEvent) => {
       if (isDraggingHorizontalRef.current) {
-        const newWidth = Math.max(160, Math.min(480, e.clientX));
+        const newWidth = Math.min(window.innerWidth * SIDEBAR_MAX_VIEWPORT_PERCENT / 100, Math.max(160, e.clientX));
         setFileTreeWidth(newWidth);
       }
       if (isDraggingVerticalRef.current) {
@@ -276,9 +278,12 @@ export default function App() {
       document.body.style.userSelect = 'auto';
     };
 
+    const handleResize = () => setFileTreeWidth(width => Math.min(width, window.innerWidth * SIDEBAR_MAX_VIEWPORT_PERCENT / 100));
+    window.addEventListener('resize', handleResize);
     window.addEventListener('mousemove', handleMouseMove);
     window.addEventListener('mouseup', handleMouseUp);
     return () => {
+      window.removeEventListener('resize', handleResize);
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
@@ -435,7 +440,7 @@ export default function App() {
       {/* Main Workspace Area */}
       <div className="flex-1 min-h-0 flex overflow-hidden relative">
         {/* Left Panel: File Tree */}
-        <aside style={{ width: `min(${fileTreeWidth}px, 42vw)` }} className="shrink-0 h-full min-w-0 overflow-hidden flex flex-col border-r border-zinc-800">
+        <aside style={{ width: `min(${fileTreeWidth}px, ${SIDEBAR_MAX_VIEWPORT_PERCENT}vw)` }} className="shrink-0 h-full min-w-0 overflow-hidden flex flex-col border-r border-zinc-800">
           <div role="tablist" aria-label={t('Panel projektu')} className="flex flex-wrap gap-1 p-1 border-b border-zinc-800 text-[11px]">
             {(['files','task','chat','environment'] as const).map(tab=><button key={tab} id={'sidebar-tab-'+tab} type="button" role="tab"
               aria-selected={sidebarTab===tab} aria-controls={'sidebar-panel-'+tab}
@@ -466,7 +471,7 @@ export default function App() {
           <div role="tabpanel" id="sidebar-panel-environment" aria-labelledby="sidebar-tab-environment" hidden={sidebarTab!=='environment'} className="flex-1 min-h-0 overflow-y-auto p-2">{environmentDetails}</div>
           <div role="tabpanel" id={'sidebar-panel-'+(sidebarTab==='chat'?'chat':'task')} aria-labelledby={'sidebar-tab-'+(sidebarTab==='chat'?'chat':'task')}
             hidden={sidebarTab!=='task'&&sidebarTab!=='chat'} className="flex-1 min-h-0 flex flex-col overflow-hidden">
-            {isLive && hasExercise && <TrainingControls key={'training:'+state.durableProject?.exercisePath} client={client} state={state} onSettings={()=>setIsSettingsModalOpen(true)} />}
+            {isLive && hasExercise && <TrainingControls key={'training:'+state.durableProject?.exercisePath} showDetails={sidebarTab==='chat'} client={client} state={state} onSettings={()=>setIsSettingsModalOpen(true)} />}
             {sidebarTab==='task' && isLive && state.durableProject && <SprintPanel
               key={'sprint:'+state.durableProject.id} client={client} state={state} />}
             {sidebarTab==='task' && state.taskReadError && <div role="alert" className="p-2 text-xs text-amber-300">{t('Błąd pliku zadania')}: {problemText(state.taskReadError.message)}</div>}

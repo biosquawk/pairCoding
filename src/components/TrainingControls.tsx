@@ -3,7 +3,7 @@ import type {PairCoachClient} from '../services/PairCoachClient';
 import type {ClientState} from '../services/liveTypes';
 
 /** Presentation of existing timer and coach policy; never grants consent or unmutes. */
-export function TrainingControls({client,state,onSettings}:{client:PairCoachClient;state:ClientState;onSettings:()=>void}) {
+export function TrainingControls({client,state,onSettings,showDetails=true}:{client:PairCoachClient;state:ClientState;onSettings:()=>void;showDetails?:boolean}) {
   const text=(pl:string,en:string)=>state.locale==='en'?en:pl;
   const [pending,setPending]=useState(false),[notice,setNotice]=useState('');
   useEffect(()=>{setPending(false);setNotice('');},[state.sessionStatus,state.durableProject?.exercisePath,state.isOffline,state.connectionError]);
@@ -27,8 +27,11 @@ export function TrainingControls({client,state,onSettings}:{client:PairCoachClie
   const provider=state.aiStatus==='READY'?text('Dostawca AI: gotowy (READY), nie oznacza trwającej analizy.','AI provider: ready (READY), not an ongoing analysis.'):
     state.aiStatus==='THINKING'?text('Dostawca AI: THINKING','AI provider: THINKING'):
     state.aiStatus==='FAILED'?text('Dostawca AI: FAILED','AI provider: FAILED'):text('Dostawca AI: OFF','AI provider: OFF');
+  // Keep actionable states/errors in Task; policy/provider detail belongs to Chat.
+  const showStatus=showDetails||state.isOffline||!state.projectSettings.aiConsent||paused||state.aiStatus==='FAILED'||state.aiStatus==='OFF';
+  if(!showStatus&&!paused&&!stopped&&state.projectSettings.aiConsent&&state.runtime?.pending!=='RUN'&&!notice)return null;
   return <section aria-label={text('Trening i trener','Training and coach')} className="p-2 border-b border-zinc-700 text-xs space-y-2 shrink-0">
-    <p role="status">{status}</p><p className="text-zinc-400">{provider}</p>
+    {showStatus&&<p role="status">{status}</p>}{showDetails&&<p className="text-zinc-400">{provider}</p>}
     {(paused||stopped)&&<button type="button" className="pc-training-action pc-training-primary" disabled={pending||state.isOffline||state.writeOwner!=='STUDENT'} aria-busy={pending}
       onClick={()=>{if(pending)return;setPending(true);setNotice('');if(paused)client.resumeTimer();else client.startTimer();}}>
       {pending?text('Oczekiwanie na potwierdzenie…','Waiting for confirmation…'):paused?text('Wznów trening','Resume training'):text('Rozpocznij trening','Start training')}</button>}
